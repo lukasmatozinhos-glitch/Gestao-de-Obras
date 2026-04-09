@@ -5,9 +5,15 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Outfit", sans-serif;
   
-  --color-axia-primary: #C5A059; /* Gold */
-  --color-axia-secondary: #1A1A1A; /* Black/Dark */
-  --color-axia-accent: #E5C76B; /* Light Gold */
+  --color-axia-primary: var(--axia-primary);
+  --color-axia-secondary: var(--axia-secondary);
+  --color-axia-accent: var(--axia-accent);
+}
+
+:root {
+  --axia-primary: #C5A059;
+  --axia-secondary: #1A1A1A;
+  --axia-accent: #E5C76B;
 }
 
 @layer base {

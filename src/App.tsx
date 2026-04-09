@@ -41,8 +41,11 @@ import {
   LogOut,
   History,
   MessageSquare,
+  FileDown,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { db, auth } from './firebase';
 import { 
   collection, 
@@ -185,9 +188,27 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState('');
   const [showAddProject, setShowAddProject] = useState(false);
   const [viewingProject, setViewingProject] = useState<Project | null>(null);
+  const [currentPalette, setCurrentPalette] = useState('forest');
+
+  const palettes = [
+    { id: 'forest', name: 'Floresta (Verde)', primary: '#10B981', secondary: '#1E293B', accent: '#34D399' },
+    { id: 'original', name: 'Original (Ouro)', primary: '#C5A059', secondary: '#1A1A1A', accent: '#E5C76B' },
+    { id: 'ocean', name: 'Oceano (Azul)', primary: '#0EA5E9', secondary: '#0F172A', accent: '#38BDF8' },
+    { id: 'royal', name: 'Real (Roxo)', primary: '#8B5CF6', secondary: '#111827', accent: '#A78BFA' },
+    { id: 'sunset', name: 'Pôr do Sol (Laranja)', primary: '#F59E0B', secondary: '#451A03', accent: '#FBBF24' },
+  ];
+
+  useEffect(() => {
+    const palette = palettes.find(p => p.id === currentPalette) || palettes[0];
+    const root = document.documentElement;
+    root.style.setProperty('--axia-primary', palette.primary);
+    root.style.setProperty('--axia-secondary', palette.secondary);
+    root.style.setProperty('--axia-accent', palette.accent);
+  }, [currentPalette]);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [editingMeasurement, setEditingMeasurement] = useState<Measurement | null>(null);
   const [projectDetailTab, setProjectDetailTab] = useState<'details' | 'attachments' | 'history'>('details');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'appearance' | 'security'>('general');
   const [notification, setNotification] = useState<string | null>(null);
   const [imageEditingProjectId, setImageEditingProjectId] = useState<string | null>(null);
   const [showProfile, setShowProfile] = useState(false);
@@ -277,6 +298,42 @@ export default function App() {
   }, [notification]);
 
   const showNotification = (msg: string) => setNotification(msg);
+
+  const compressImage = (file: File, maxWidth: number, maxHeight: number, quality: number): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > maxWidth) {
+              height *= maxWidth / width;
+              width = maxWidth;
+            }
+          } else {
+            if (height > maxHeight) {
+              width *= maxHeight / height;
+              height = maxHeight;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        };
+        img.onerror = (err) => reject(err);
+      };
+      reader.onerror = (err) => reject(err);
+    });
+  };
 
   // Dashboard Data Calculations
   const projectsByClient = projects.reduce((acc: any, project) => {
@@ -558,25 +615,233 @@ export default function App() {
     }
   };
 
+  const generateProjectReport = (project: Project) => {
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    
+    // Header
+    doc.setFillColor(196, 160, 82); // axia-primary color
+    doc.rect(0, 0, pageWidth, 40, 'F');
+    
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(22);
+    doc.setFont('helvetica', 'bold');
+    doc.text('A.L GESTÃO DE OBRAS', 20, 20);
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text('RELATÓRIO TÉCNICO DE OBRA', 20, 30);
+    doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, pageWidth - 70, 30);
+    
+    // Project Info
+    doc.setTextColor(30, 41, 59); // slate-800
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text(project.name.toUpperCase(), 20, 55);
+    
+    doc.setDrawColor(226, 232, 240); // slate-200
+    doc.line(20, 60, pageWidth - 20, 60);
+    
+    // Details Table
+    const detailsData = [
+      ['Cliente', project.client],
+      ['Contrato', project.contractNumber],
+      ['Empresa Executora', project.executingCompany],
+      ['Data de Início', project.startDate],
+      ['Previsão de Término', project.endDate],
+      ['Status', 
+        project.status === 'in-progress' ? 'Em Andamento' : 
+        project.status === 'finished' ? 'Concluído' : 
+        project.status === 'paused' ? 'Paralisado' : 'Não Iniciado'
+      ],
+      ['Orçamento Total', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget)],
+      ['Total Medido', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.spent)],
+      ['Saldo Disponível', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget - project.spent)],
+      ['Percentual Executado', `${Math.round((project.spent / project.budget) * 100)}%`]
+    ];
+    
+    autoTable(doc, {
+      startY: 70,
+      head: [['Campo', 'Informação']],
+      body: detailsData,
+      theme: 'striped',
+      headStyles: { fillColor: [196, 160, 82], textColor: [255, 255, 255] },
+      styles: { fontSize: 10, cellPadding: 5 }
+    });
+    
+    // Description
+    const finalY = (doc as any).lastAutoTable.finalY || 70;
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Descrição do Projeto', 20, finalY + 15);
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    const splitDescription = doc.splitTextToSize(project.description, pageWidth - 40);
+    doc.text(splitDescription, 20, finalY + 25);
+
+    let currentY = finalY + 25 + (splitDescription.length * 5) + 10;
+
+    // Measurements Table
+    const projectMeasurements = measurements.filter(m => m.projectId === project.id);
+    if (projectMeasurements.length > 0) {
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Histórico de Medições', 20, currentY);
+      
+      const measurementData = projectMeasurements.map(m => [
+        new Date(m.date).toLocaleDateString('pt-BR'),
+        m.description,
+        new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(m.value),
+        m.status === 'paid' ? 'Pago' : m.status === 'approved' ? 'Aprovado' : 'Pendente'
+      ]);
+
+      autoTable(doc, {
+        startY: currentY + 5,
+        head: [['Data', 'Descrição', 'Valor', 'Status']],
+        body: measurementData,
+        theme: 'grid',
+        headStyles: { fillColor: [196, 160, 82], textColor: [255, 255, 255] },
+        styles: { fontSize: 9 }
+      });
+      
+      currentY = (doc as any).lastAutoTable.finalY + 15;
+    }
+
+    // Status Updates Table
+    const projectUpdates = statusUpdates.filter(s => s.projectId === project.id);
+    if (projectUpdates.length > 0) {
+      if (currentY > doc.internal.pageSize.getHeight() - 40) {
+        doc.addPage();
+        currentY = 20;
+      }
+
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Histórico de Atualizações', 20, currentY);
+
+      const updateData = projectUpdates.map(s => [
+        new Date(s.date).toLocaleDateString('pt-BR'),
+        s.message,
+        s.author
+      ]);
+
+      autoTable(doc, {
+        startY: currentY + 5,
+        head: [['Data', 'Atualização', 'Autor']],
+        body: updateData,
+        theme: 'grid',
+        headStyles: { fillColor: [196, 160, 82], textColor: [255, 255, 255] },
+        styles: { fontSize: 9 },
+        columnStyles: {
+          1: { cellWidth: 100 }
+        }
+      });
+    }
+    
+    // Footer
+    const pageCount = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184); // slate-400
+      doc.text(`Página ${i} de ${pageCount}`, pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
+      doc.text('© 2026 A.L Gestão de Obras - Todos os direitos reservados', pageWidth / 2, doc.internal.pageSize.getHeight() - 5, { align: 'center' });
+    }
+    
+    doc.save(`Relatorio_${project.name.replace(/\s+/g, '_')}.pdf`);
+    showNotification('Relatório PDF gerado com sucesso!');
+  };
+
+  const generateGeneralReport = () => {
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    
+    // Header
+    doc.setFillColor(196, 160, 82); // axia-primary color
+    doc.rect(0, 0, pageWidth, 40, 'F');
+    
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(22);
+    doc.setFont('helvetica', 'bold');
+    doc.text('A.L GESTÃO DE OBRAS', 20, 20);
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text('RELATÓRIO GERAL DE OBRAS', 20, 30);
+    doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, pageWidth - 70, 30);
+    
+    // Summary Table
+    const tableData = projects.map(p => [
+      p.name,
+      p.client,
+      p.status === 'in-progress' ? 'Em Andamento' : 
+      p.status === 'finished' ? 'Concluído' : 
+      p.status === 'paused' ? 'Paralisado' : 'Não Iniciado',
+      new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.budget),
+      `${p.progress}%`
+    ]);
+    
+    autoTable(doc, {
+      startY: 50,
+      head: [['Obra', 'Cliente', 'Status', 'Orçamento', 'Progresso']],
+      body: tableData,
+      theme: 'striped',
+      headStyles: { fillColor: [196, 160, 82], textColor: [255, 255, 255] },
+      styles: { fontSize: 9, cellPadding: 3 }
+    });
+    
+    // Totals
+    const totalBudget = projects.reduce((acc, p) => acc + p.budget, 0);
+    const totalSpent = projects.reduce((acc, p) => acc + p.spent, 0);
+    const finalY = (doc as any).lastAutoTable.finalY || 50;
+    
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Resumo Financeiro Consolidado', 20, finalY + 15);
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Total de Obras: ${projects.length}`, 20, finalY + 25);
+    doc.text(`Investimento Total: ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalBudget)}`, 20, finalY + 32);
+    doc.text(`Total Executado: ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalSpent)}`, 20, finalY + 39);
+    doc.text(`Saldo Global: ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalBudget - totalSpent)}`, 20, finalY + 46);
+    
+    // Footer
+    const pageCount = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184); // slate-400
+      doc.text(`Página ${i} de ${pageCount}`, pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
+      doc.text('© 2026 A.L Gestão de Obras - Todos os direitos reservados', pageWidth / 2, doc.internal.pageSize.getHeight() - 5, { align: 'center' });
+    }
+    
+    doc.save(`Relatorio_Geral_Obras_${new Date().toISOString().split('T')[0]}.pdf`);
+    showNotification('Relatório Geral PDF gerado!');
+  };
+
   const handleUpdateAvatar = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // In a real app, we would upload to Firebase Storage.
-    // Here we'll use a FileReader to get a base64 string for the demo.
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const base64String = reader.result as string;
-      try {
-        const updatedUser = { ...currentUser, avatar: base64String };
-        await setDoc(doc(db, 'users', currentUser.id), updatedUser);
-        setCurrentUser(updatedUser);
-        showNotification('Foto de perfil atualizada!');
-      } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.id}`);
-      }
-    };
-    reader.readAsDataURL(file);
+    if (file.size > 5 * 1024 * 1024) {
+      showNotification('A imagem é muito grande. Limite de 5MB para processamento.');
+      return;
+    }
+
+    try {
+      showNotification('Processando foto de perfil...');
+      const compressedBase64 = await compressImage(file, 400, 400, 0.7);
+      
+      const updatedUser = { ...currentUser, avatar: compressedBase64 };
+      await setDoc(doc(db, 'users', currentUser.id), updatedUser);
+      setCurrentUser(updatedUser);
+      showNotification('Foto de perfil atualizada!');
+    } catch (error) {
+      console.error('Error updating avatar:', error);
+      handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.id}`);
+    }
   };
 
   const handleAddStatusUpdate = async (e: React.FormEvent) => {
@@ -647,43 +912,30 @@ export default function App() {
     fileInputRef.current?.click();
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file && imageEditingProjectId) {
-      // Check file size (limit to 2MB for base64 storage)
-      if (file.size > 2 * 1024 * 1024) {
-        showNotification('A imagem é muito grande. Limite de 2MB.');
+      if (file.size > 5 * 1024 * 1024) {
+        showNotification('A imagem é muito grande. Limite de 5MB para processamento.');
         return;
       }
 
-      const reader = new FileReader();
-      reader.onloadstart = () => {
-        showNotification('Processando imagem...');
-      };
-      reader.onloadend = () => {
-        const base64String = reader.result as string;
+      try {
+        showNotification('Processando imagem da obra...');
+        const compressedBase64 = await compressImage(file, 1200, 600, 0.6);
         
-        setProjects(prevProjects => prevProjects.map(p => 
-          p.id === imageEditingProjectId ? { ...p, image: base64String } : p
-        ));
-        
-        // Update viewingProject if it's the same project
-        setViewingProject(prev => {
-          if (prev && prev.id === imageEditingProjectId) {
-            return { ...prev, image: base64String };
-          }
-          return prev;
-        });
+        // Update Firestore
+        const projectRef = doc(db, 'projects', imageEditingProjectId);
+        await updateDoc(projectRef, { image: compressedBase64 });
 
         showNotification('Imagem da obra atualizada com sucesso!');
         setImageEditingProjectId(null);
         if (fileInputRef.current) fileInputRef.current.value = '';
-      };
-      reader.onerror = () => {
-        showNotification('Erro ao carregar a imagem.');
+      } catch (error) {
+        console.error('Error updating project image:', error);
+        showNotification('Erro ao processar a imagem.');
         setImageEditingProjectId(null);
-      };
-      reader.readAsDataURL(file);
+      }
     }
   };
 
@@ -1196,6 +1448,13 @@ export default function App() {
                           </div>
                           <div className="flex gap-3">
                             <button 
+                              onClick={() => generateProjectReport(viewingProject)}
+                              className="bg-axia-accent hover:bg-axia-accent/80 backdrop-blur-md text-white p-3 rounded-2xl transition-all border border-white/20 flex items-center gap-2 font-bold"
+                            >
+                              <FileDown size={20} />
+                              Emitir Relatório
+                            </button>
+                            <button 
                               onClick={() => startEditing(viewingProject)}
                               className="bg-white/20 hover:bg-white/30 backdrop-blur-md text-white p-3 rounded-2xl transition-all border border-white/20 flex items-center gap-2 font-bold"
                             >
@@ -1477,30 +1736,39 @@ export default function App() {
                         <h2 className="text-3xl font-display font-bold text-slate-900">Gestão de Obras</h2>
                         <p className="text-slate-500">Visualize e gerencie todos os contratos e execuções da Axia Energia.</p>
                       </div>
-                      <button 
-                        onClick={() => {
-                          if (showAddProject) {
-                            setEditingProject(null);
-                            setNewProject({
-                              name: '',
-                              client: '',
-                              contractNumber: '',
-                              description: '',
-                              budget: '',
-                              location: '',
-                              startDate: '',
-                              endDate: '',
-                              executingCompany: '',
-                              status: 'not-started'
-                            });
-                          }
-                          setShowAddProject(!showAddProject);
-                        }}
-                        className="bg-axia-primary text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2 hover:bg-axia-primary/90 transition-colors shadow-lg shadow-axia-primary/20"
-                      >
-                        {showAddProject ? <X size={20} /> : <Plus size={20} />}
-                        {showAddProject ? 'Cancelar' : 'Nova Obra'}
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button 
+                          onClick={generateGeneralReport}
+                          className="bg-axia-secondary text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2 hover:bg-axia-secondary/90 transition-colors shadow-lg shadow-axia-secondary/20"
+                        >
+                          <FileDown size={20} />
+                          Emitir Relatório
+                        </button>
+                        <button 
+                          onClick={() => {
+                            if (showAddProject) {
+                              setEditingProject(null);
+                              setNewProject({
+                                name: '',
+                                client: '',
+                                contractNumber: '',
+                                description: '',
+                                budget: '',
+                                location: '',
+                                startDate: '',
+                                endDate: '',
+                                executingCompany: '',
+                                status: 'not-started'
+                              });
+                            }
+                            setShowAddProject(!showAddProject);
+                          }}
+                          className="bg-axia-primary text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2 hover:bg-axia-primary/90 transition-colors shadow-lg shadow-axia-primary/20"
+                        >
+                          {showAddProject ? <X size={20} /> : <Plus size={20} />}
+                          {showAddProject ? 'Cancelar' : 'Nova Obra'}
+                        </button>
+                      </div>
                     </div>
 
                     {showAddProject && (
@@ -2195,42 +2463,184 @@ export default function App() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                   <div className="md:col-span-1">
                     <nav className="space-y-1">
-                      <button className="w-full text-left px-4 py-2 rounded-lg bg-axia-primary/10 text-axia-primary font-bold">Geral</button>
-                      <button className="w-full text-left px-4 py-2 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors">Segurança</button>
-                      <button className="w-full text-left px-4 py-2 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors">Notificações</button>
-                      <button className="w-full text-left px-4 py-2 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors">Integrações</button>
+                      <button 
+                        onClick={() => setSettingsTab('general')}
+                        className={`w-full text-left px-4 py-2 rounded-lg font-bold transition-all ${settingsTab === 'general' ? 'bg-axia-primary/10 text-axia-primary' : 'text-slate-500 hover:bg-slate-100'}`}
+                      >
+                        Geral
+                      </button>
+                      <button 
+                        onClick={() => setSettingsTab('appearance')}
+                        className={`w-full text-left px-4 py-2 rounded-lg font-bold transition-all ${settingsTab === 'appearance' ? 'bg-axia-primary/10 text-axia-primary' : 'text-slate-500 hover:bg-slate-100'}`}
+                      >
+                        Aparência
+                      </button>
+                      <button 
+                        onClick={() => setSettingsTab('security')}
+                        className={`w-full text-left px-4 py-2 rounded-lg font-bold transition-all ${settingsTab === 'security' ? 'bg-axia-primary/10 text-axia-primary' : 'text-slate-500 hover:bg-slate-100'}`}
+                      >
+                        Segurança
+                      </button>
                     </nav>
                   </div>
 
                   <div className="md:col-span-2 space-y-6">
                     <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-8">
-                      <section className="space-y-4">
-                        <h3 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-2">Preferências de Exibição</h3>
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-bold text-slate-700">Modo Escuro</p>
-                            <p className="text-xs text-slate-500">Alternar entre tema claro e escuro.</p>
+                      {settingsTab === 'general' && (
+                        <section className="space-y-4">
+                          <h3 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-2">Preferências Gerais</h3>
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="font-bold text-slate-700">Compactar Sidebar</p>
+                              <p className="text-xs text-slate-500">Reduzir o tamanho da barra lateral automaticamente.</p>
+                            </div>
+                            <button 
+                              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                              className={`w-12 h-6 rounded-full relative transition-colors ${isSidebarOpen ? 'bg-axia-primary' : 'bg-slate-200'}`}
+                            >
+                              <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${isSidebarOpen ? 'right-1' : 'left-1'}`} />
+                            </button>
                           </div>
-                          <button 
-                            onClick={() => showNotification('Modo escuro será implementado em breve.')}
-                            className="w-12 h-6 bg-slate-200 rounded-full relative transition-colors"
-                          >
-                            <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full shadow-sm" />
-                          </button>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-bold text-slate-700">Compactar Sidebar</p>
-                            <p className="text-xs text-slate-500">Reduzir o tamanho da barra lateral automaticamente.</p>
+                        </section>
+                      )}
+
+                      {settingsTab === 'appearance' && (
+                        <section className="space-y-6">
+                          <h3 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-2">Personalização Visual</h3>
+                          
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="font-bold text-slate-700">Modo Escuro</p>
+                              <p className="text-xs text-slate-500">Alternar entre tema claro e escuro.</p>
+                            </div>
+                            <button 
+                              onClick={() => showNotification('Modo escuro será implementado em breve.')}
+                              className="w-12 h-6 bg-slate-200 rounded-full relative transition-colors"
+                            >
+                              <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full shadow-sm" />
+                            </button>
                           </div>
-                          <button 
-                            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                            className={`w-12 h-6 rounded-full relative transition-colors ${isSidebarOpen ? 'bg-axia-primary' : 'bg-slate-200'}`}
-                          >
-                            <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${isSidebarOpen ? 'right-1' : 'left-1'}`} />
-                          </button>
-                        </div>
-                      </section>
+
+                          <div className="space-y-4">
+                            <p className="font-bold text-slate-700">Paleta de Cores do Sistema</p>
+                            <p className="text-xs text-slate-500 mb-4">Escolha uma combinação de cores que melhor se adapta ao seu estilo de trabalho.</p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              {palettes.map((palette) => (
+                                <button
+                                  key={palette.id}
+                                  onClick={() => setCurrentPalette(palette.id)}
+                                  className={`p-4 rounded-2xl border-2 transition-all flex items-center gap-4 text-left ${
+                                    currentPalette === palette.id 
+                                      ? 'border-axia-primary bg-axia-primary/5 shadow-md' 
+                                      : 'border-slate-100 hover:border-slate-200 bg-slate-50'
+                                  }`}
+                                >
+                                  <div className="flex -space-x-3">
+                                    <div className="w-10 h-10 rounded-xl border-2 border-white shadow-sm" style={{ backgroundColor: palette.primary }} />
+                                    <div className="w-10 h-10 rounded-xl border-2 border-white shadow-sm" style={{ backgroundColor: palette.secondary }} />
+                                  </div>
+                                  <div>
+                                    <p className={`font-bold text-sm ${currentPalette === palette.id ? 'text-axia-primary' : 'text-slate-700'}`}>
+                                      {palette.name}
+                                    </p>
+                                    <div className="flex gap-1 mt-1">
+                                      <div className="w-3 h-1 rounded-full" style={{ backgroundColor: palette.primary }} />
+                                      <div className="w-3 h-1 rounded-full" style={{ backgroundColor: palette.accent }} />
+                                    </div>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </section>
+                      )}
+
+                      {settingsTab === 'security' && (
+                        <section className="space-y-4">
+                          <h3 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-2">Segurança da Conta</h3>
+                          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                            <p className="text-sm text-slate-600">As opções de segurança e alteração de senha estão disponíveis através do provedor de autenticação.</p>
+                          </div>
+                        </section>
+                      )}
+
+                      {settingsTab === 'general' && (
+                        <section className="space-y-4">
+                          <h3 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-2">Preferências Gerais</h3>
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="font-bold text-slate-700">Compactar Sidebar</p>
+                              <p className="text-xs text-slate-500">Reduzir o tamanho da barra lateral automaticamente.</p>
+                            </div>
+                            <button 
+                              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                              className={`w-12 h-6 rounded-full relative transition-colors ${isSidebarOpen ? 'bg-axia-primary' : 'bg-slate-200'}`}
+                            >
+                              <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${isSidebarOpen ? 'right-1' : 'left-1'}`} />
+                            </button>
+                          </div>
+                        </section>
+                      )}
+
+                      {settingsTab === 'appearance' && (
+                        <section className="space-y-6">
+                          <h3 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-2">Personalização Visual</h3>
+                          
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="font-bold text-slate-700">Modo Escuro</p>
+                              <p className="text-xs text-slate-500">Alternar entre tema claro e escuro.</p>
+                            </div>
+                            <button 
+                              onClick={() => showNotification('Modo escuro será implementado em breve.')}
+                              className="w-12 h-6 bg-slate-200 rounded-full relative transition-colors"
+                            >
+                              <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full shadow-sm" />
+                            </button>
+                          </div>
+
+                          <div className="space-y-4">
+                            <p className="font-bold text-slate-700">Paleta de Cores do Sistema</p>
+                            <p className="text-xs text-slate-500 mb-4">Escolha uma combinação de cores que melhor se adapta ao seu estilo de trabalho.</p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              {palettes.map((palette) => (
+                                <button
+                                  key={palette.id}
+                                  onClick={() => setCurrentPalette(palette.id)}
+                                  className={`p-4 rounded-2xl border-2 transition-all flex items-center gap-4 text-left ${
+                                    currentPalette === palette.id 
+                                      ? 'border-axia-primary bg-axia-primary/5 shadow-md' 
+                                      : 'border-slate-100 hover:border-slate-200 bg-slate-50'
+                                  }`}
+                                >
+                                  <div className="flex -space-x-3">
+                                    <div className="w-10 h-10 rounded-xl border-2 border-white shadow-sm" style={{ backgroundColor: palette.primary }} />
+                                    <div className="w-10 h-10 rounded-xl border-2 border-white shadow-sm" style={{ backgroundColor: palette.secondary }} />
+                                  </div>
+                                  <div>
+                                    <p className={`font-bold text-sm ${currentPalette === palette.id ? 'text-axia-primary' : 'text-slate-700'}`}>
+                                      {palette.name}
+                                    </p>
+                                    <div className="flex gap-1 mt-1">
+                                      <div className="w-3 h-1 rounded-full" style={{ backgroundColor: palette.primary }} />
+                                      <div className="w-3 h-1 rounded-full" style={{ backgroundColor: palette.accent }} />
+                                    </div>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </section>
+                      )}
+
+                      {settingsTab === 'security' && (
+                        <section className="space-y-4">
+                          <h3 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-2">Segurança da Conta</h3>
+                          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                            <p className="text-sm text-slate-600">As opções de segurança e alteração de senha estão disponíveis através do provedor de autenticação.</p>
+                          </div>
+                        </section>
+                      )}
 
                       <section className="space-y-4">
                         <h3 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-2">Notificações</h3>
@@ -2428,8 +2838,9 @@ function LoginPage({ onLogin, onRegister }: {
     setError(null);
 
     try {
+      const trimmedEmail = email.trim();
       if (mode === 'login') {
-        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        const userCredential = await signInWithEmailAndPassword(auth, trimmedEmail, password);
         const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
         if (userDoc.exists()) {
           onLogin(userDoc.data() as UserProfile);
@@ -2438,11 +2849,11 @@ function LoginPage({ onLogin, onRegister }: {
           await signOut(auth);
         }
       } else {
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const userCredential = await createUserWithEmailAndPassword(auth, trimmedEmail, password);
         const newUser: UserProfile = {
           id: userCredential.user.uid,
           name: name,
-          email: email,
+          email: trimmedEmail,
           role: role || 'Colaborador',
           avatar: `https://picsum.photos/seed/${name}/200/200`,
           phone: phone,
@@ -2454,14 +2865,16 @@ function LoginPage({ onLogin, onRegister }: {
       }
     } catch (err: any) {
       console.error('Auth error:', err);
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
         setError('E-mail ou senha incorretos.');
       } else if (err.code === 'auth/email-already-in-use') {
         setError('Este e-mail já está em uso.');
       } else if (err.code === 'auth/weak-password') {
         setError('A senha deve ter pelo menos 6 caracteres.');
+      } else if (err.code === 'auth/invalid-email') {
+        setError('E-mail inválido.');
       } else {
-        setError('Ocorreu um erro ao processar sua solicitação.');
+        setError('Ocorreu um erro ao processar sua solicitação: ' + (err.message || 'Erro desconhecido'));
       }
     } finally {
       setIsLoading(false);
