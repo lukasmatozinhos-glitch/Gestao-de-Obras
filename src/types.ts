@@ -13,6 +13,7 @@ export interface Project {
   location: string;
   executingCompany: string;
   image?: string;
+  createdBy?: string;
 }
 
 export interface Resource {
@@ -64,4 +65,12 @@ export interface Attachment {
   url: string;
   uploadedAt: string;
   size?: string;
+}
+
+export interface StatusUpdate {
+  id: string;
+  projectId: string;
+  date: string;
+  message: string;
+  author: string;
 }

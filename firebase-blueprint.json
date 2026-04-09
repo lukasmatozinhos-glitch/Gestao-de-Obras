@@ -1,0 +1,122 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string" },
+        "avatar": { "type": "string" },
+        "phone": { "type": "string" },
+        "accessLevel": { "type": "string" }
+      },
+      "required": ["id", "name", "email"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "Construction project details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "client": { "type": "string" },
+        "contractNumber": { "type": "string" },
+        "description": { "type": "string" },
+        "budget": { "type": "string" },
+        "location": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "completed", "on-hold", "planning"] },
+        "progress": { "type": "number" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "image": { "type": "string" },
+        "executingCompany": { "type": "string" }
+      },
+      "required": ["id", "name", "client", "status"]
+    },
+    "WeeklyReport": {
+      "title": "WeeklyReport",
+      "description": "Weekly progress report",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectName": { "type": "string" },
+        "weekEnding": { "type": "string" },
+        "status": { "type": "string", "enum": ["submitted", "approved", "draft"] },
+        "fileName": { "type": "string" },
+        "fileSize": { "type": "string" }
+      },
+      "required": ["id", "projectName", "weekEnding", "status"]
+    },
+    "Measurement": {
+      "title": "Measurement",
+      "description": "Project measurement data",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "date": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "approved", "paid"] },
+        "description": { "type": "string" }
+      },
+      "required": ["id", "projectId", "date", "amount", "status"]
+    },
+    "Attachment": {
+      "title": "Attachment",
+      "description": "File attachment for a project",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "size": { "type": "string" },
+        "date": { "type": "string" },
+        "url": { "type": "string" }
+      },
+      "required": ["id", "projectId", "name", "type", "size", "date"]
+    },
+    "StatusUpdate": {
+      "title": "StatusUpdate",
+      "description": "Status update log for a project",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "date": { "type": "string" },
+        "message": { "type": "string" },
+        "author": { "type": "string" }
+      },
+      "required": ["id", "projectId", "date", "message", "author"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile documents"
+    },
+    "/projects/{projectId}": {
+      "schema": "Project",
+      "description": "Project documents"
+    },
+    "/reports/{reportId}": {
+      "schema": "WeeklyReport",
+      "description": "Weekly report documents"
+    },
+    "/measurements/{measurementId}": {
+      "schema": "Measurement",
+      "description": "Measurement documents"
+    },
+    "/attachments/{attachmentId}": {
+      "schema": "Attachment",
+      "description": "Attachment documents"
+    },
+    "/statusUpdates/{updateId}": {
+      "schema": "StatusUpdate",
+      "description": "Status update documents"
+    }
+  }
+}

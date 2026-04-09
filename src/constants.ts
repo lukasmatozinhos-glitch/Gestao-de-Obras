@@ -1,4 +1,4 @@
-import { Project, Resource, WeeklyReport, Measurement, Attachment } from './types';
+import { Project, Resource, WeeklyReport, Measurement, Attachment, StatusUpdate } from './types';
 
 export const MOCK_PROJECTS: Project[] = [
   {
@@ -155,5 +155,29 @@ export const MOCK_ATTACHMENTS: Attachment[] = [
     url: '#',
     uploadedAt: '2024-02-28 11:45',
     size: '2.2 MB'
+  }
+];
+
+export const MOCK_STATUS_UPDATES: StatusUpdate[] = [
+  {
+    id: 'su1',
+    projectId: '1',
+    date: '2024-03-15 10:00',
+    message: 'Início da montagem dos painéis solares no setor norte.',
+    author: 'Eng. Ricardo Silva'
+  },
+  {
+    id: 'su2',
+    projectId: '1',
+    date: '2024-03-20 14:30',
+    message: 'Conclusão da fundação da subestação elevadora.',
+    author: 'Eng. Ricardo Silva'
+  },
+  {
+    id: 'su3',
+    projectId: '2',
+    date: '2024-03-10 09:15',
+    message: 'Mobilização de equipe e equipamentos concluída.',
+    author: 'Eng. Ana Paula'
   }
 ];

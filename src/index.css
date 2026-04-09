@@ -5,9 +5,9 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Outfit", sans-serif;
   
-  --color-axia-primary: #0047AB; /* Deep Blue */
-  --color-axia-secondary: #FF8C00; /* Energy Orange */
-  --color-axia-accent: #00A86B; /* Sustainable Green */
+  --color-axia-primary: #C5A059; /* Gold */
+  --color-axia-secondary: #1A1A1A; /* Black/Dark */
+  --color-axia-accent: #E5C76B; /* Light Gold */
 }
 
 @layer base {

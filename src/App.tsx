@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Component } from 'react';
 import { 
   LayoutDashboard, 
   HardHat, 
@@ -39,10 +39,73 @@ import {
   Phone,
   ShieldCheck,
   LogOut,
+  History,
+  MessageSquare,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { MOCK_PROJECTS, MOCK_RESOURCES, MOCK_REPORTS, MOCK_MEASUREMENTS, MOCK_ATTACHMENTS } from './constants';
-import { Project, WeeklyReport, Measurement, UserProfile, Attachment } from './types';
+import { db, auth } from './firebase';
+import { 
+  collection, 
+  onSnapshot, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  doc, 
+  setDoc, 
+  getDoc,
+  query,
+  where,
+  orderBy,
+  getDocFromServer
+} from 'firebase/firestore';
+import { 
+  onAuthStateChanged, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut,
+  User as FirebaseUser
+} from 'firebase/auth';
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer, 
+  Cell,
+  PieChart,
+  Pie,
+  Legend
+} from 'recharts';
+import { MOCK_PROJECTS, MOCK_RESOURCES, MOCK_REPORTS, MOCK_MEASUREMENTS, MOCK_ATTACHMENTS, MOCK_STATUS_UPDATES } from './constants';
+import { Project, WeeklyReport, Measurement, UserProfile, Attachment, StatusUpdate } from './types';
+
+const Logo = ({ size = 40, className = "" }: { size?: number, className?: string }) => (
+  <svg 
+    width={size} 
+    height={size} 
+    viewBox="0 0 100 100" 
+    fill="none" 
+    xmlns="http://www.w3.org/2000/svg"
+    className={className}
+  >
+    {/* Buildings */}
+    <path d="M20 60V40H30V30H40V60H20Z" fill="currentColor" />
+    <path d="M32 60V45H38V60H32Z" fill="currentColor" opacity="0.8" />
+    
+    {/* House */}
+    <path d="M40 60L60 40L80 60H40Z" stroke="currentColor" strokeWidth="4" strokeLinejoin="round" />
+    <path d="M55 50H65V60H55V50Z" fill="currentColor" />
+    
+    {/* Gear (simplified) */}
+    <circle cx="75" cy="40" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="4 2" />
+    <circle cx="75" cy="40" r="4" fill="currentColor" />
+    
+    {/* Wave */}
+    <path d="M10 70C30 60 70 80 90 70" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+  </svg>
+);
 
 const DEFAULT_USER: UserProfile = {
   id: '1',
@@ -54,15 +117,69 @@ const DEFAULT_USER: UserProfile = {
   accessLevel: 'Administrador de Sistema'
 };
 
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isAuthReady, setIsAuthReady] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserProfile>(DEFAULT_USER);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [reports, setReports] = useState<WeeklyReport[]>(MOCK_REPORTS);
-  const [projects, setProjects] = useState<Project[]>(MOCK_PROJECTS);
-  const [measurements, setMeasurements] = useState<Measurement[]>(MOCK_MEASUREMENTS);
-  const [attachments, setAttachments] = useState<Attachment[]>(MOCK_ATTACHMENTS);
+  const [reports, setReports] = useState<WeeklyReport[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [measurements, setMeasurements] = useState<Measurement[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [statusUpdates, setStatusUpdates] = useState<StatusUpdate[]>([]);
+  const [registeredUsers, setRegisteredUsers] = useState<UserProfile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [selectedProject, setSelectedProject] = useState('');
   const [selectedDate, setSelectedDate] = useState('');
@@ -70,12 +187,87 @@ export default function App() {
   const [viewingProject, setViewingProject] = useState<Project | null>(null);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [editingMeasurement, setEditingMeasurement] = useState<Measurement | null>(null);
-  const [projectDetailTab, setProjectDetailTab] = useState<'details' | 'attachments'>('details');
+  const [projectDetailTab, setProjectDetailTab] = useState<'details' | 'attachments' | 'history'>('details');
   const [notification, setNotification] = useState<string | null>(null);
   const [imageEditingProjectId, setImageEditingProjectId] = useState<string | null>(null);
   const [showProfile, setShowProfile] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (userDoc.exists()) {
+            setCurrentUser(userDoc.data() as UserProfile);
+            setIsLoggedIn(true);
+          } else {
+            // This case might happen if auth user exists but firestore doc doesn't
+            // We'll handle it by signing out or redirecting to profile completion
+            console.warn('User authenticated but profile not found in Firestore');
+            setIsLoggedIn(false);
+          }
+        } catch (error) {
+          handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+        }
+      } else {
+        setIsLoggedIn(false);
+      }
+      setIsAuthReady(true);
+    });
+
+    // Test connection
+    const testConnection = async () => {
+      try {
+        await getDocFromServer(doc(db, 'test', 'connection'));
+      } catch (error) {
+        if(error instanceof Error && error.message.includes('the client is offline')) {
+          console.error("Please check your Firebase configuration. ");
+        }
+      }
+    };
+    testConnection();
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!isLoggedIn || !isAuthReady) return;
+
+    const isManager = currentUser.accessLevel === 'Administrador de Sistema' || currentUser.accessLevel === 'Gestor';
+    const projectsQuery = isManager 
+      ? collection(db, 'projects') 
+      : query(collection(db, 'projects'), where('createdBy', '==', currentUser.id));
+
+    const unsubProjects = onSnapshot(projectsQuery, (snapshot) => {
+      setProjects(snapshot.docs.map(doc => doc.data() as Project));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'projects'));
+
+    const unsubReports = onSnapshot(collection(db, 'reports'), (snapshot) => {
+      setReports(snapshot.docs.map(doc => doc.data() as WeeklyReport));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'reports'));
+
+    const unsubMeasurements = onSnapshot(collection(db, 'measurements'), (snapshot) => {
+      setMeasurements(snapshot.docs.map(doc => doc.data() as Measurement));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'measurements'));
+
+    const unsubAttachments = onSnapshot(collection(db, 'attachments'), (snapshot) => {
+      setAttachments(snapshot.docs.map(doc => doc.data() as Attachment));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'attachments'));
+
+    const unsubStatusUpdates = onSnapshot(query(collection(db, 'statusUpdates'), orderBy('date', 'desc')), (snapshot) => {
+      setStatusUpdates(snapshot.docs.map(doc => doc.data() as StatusUpdate));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'statusUpdates'));
+
+    return () => {
+      unsubProjects();
+      unsubReports();
+      unsubMeasurements();
+      unsubAttachments();
+      unsubStatusUpdates();
+    };
+  }, [isLoggedIn, isAuthReady]);
 
   useEffect(() => {
     if (notification) {
@@ -85,6 +277,53 @@ export default function App() {
   }, [notification]);
 
   const showNotification = (msg: string) => setNotification(msg);
+
+  // Dashboard Data Calculations
+  const projectsByClient = projects.reduce((acc: any, project) => {
+    acc[project.client] = (acc[project.client] || 0) + 1;
+    return acc;
+  }, {});
+
+  const projectsByClientData = Object.keys(projectsByClient).map(client => ({
+    name: client,
+    value: projectsByClient[client]
+  }));
+
+  const budgetByClient = projects.reduce((acc: any, project) => {
+    acc[project.client] = (acc[project.client] || 0) + project.budget;
+    return acc;
+  }, {});
+
+  const budgetByClientData = Object.keys(budgetByClient).map(client => ({
+    name: client,
+    value: budgetByClient[client]
+  }));
+
+  const statusCounts = {
+    'not-started': projects.filter(p => p.status === 'not-started').length,
+    'in-progress': projects.filter(p => p.status === 'in-progress').length,
+    'paused': projects.filter(p => p.status === 'paused').length,
+    'finished': projects.filter(p => p.status === 'finished').length,
+  };
+
+  const timelineData = projects
+    .filter(p => p.startDate && p.endDate)
+    .map(p => {
+      const start = new Date(p.startDate);
+      const end = new Date(p.endDate);
+      const duration = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+      return {
+        name: p.name,
+        start: start.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+        end: end.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+        duration: duration > 0 ? duration : 1,
+        fullStart: start.getTime(),
+        status: p.status
+      };
+    })
+    .sort((a, b) => a.fullStart - b.fullStart);
+
+  const CHART_COLORS = ['#0F172A', '#F97316', '#10B981', '#64748B', '#8B5CF6', '#EC4899'];
 
   // New Project Form State
   const [newProject, setNewProject] = useState({
@@ -107,75 +346,78 @@ export default function App() {
     description: ''
   });
 
-  const handleAddProject = (e: React.FormEvent) => {
+  const [newStatusUpdate, setNewStatusUpdate] = useState({
+    projectId: '',
+    message: ''
+  });
+
+  const handleAddProject = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (editingProject) {
-      setProjects(prev => prev.map(p => 
-        p.id === editingProject.id ? { 
-          ...p, 
+    try {
+      if (editingProject) {
+        const projectRef = doc(db, 'projects', editingProject.id);
+        const updatedData = { 
           ...newProject, 
           budget: Number(newProject.budget) 
-        } : p
-      ));
-      showNotification('Projeto atualizado com sucesso!');
-
-      // Update viewingProject if it's the same project
-      setViewingProject(prev => {
-        if (prev && prev.id === editingProject.id) {
-          return { ...prev, ...newProject, budget: Number(newProject.budget) };
-        }
-        return prev;
+        };
+        await updateDoc(projectRef, updatedData);
+        showNotification('Projeto atualizado com sucesso!');
+        setEditingProject(null);
+      } else {
+        const projectId = `proj-${Date.now()}`;
+        const project: Project = {
+          id: projectId,
+          name: newProject.name,
+          client: newProject.client,
+          contractNumber: newProject.contractNumber,
+          description: newProject.description,
+          status: newProject.status,
+          progress: 0,
+          startDate: newProject.startDate,
+          endDate: newProject.endDate,
+          budget: Number(newProject.budget),
+          spent: 0,
+          location: newProject.location,
+          executingCompany: newProject.executingCompany,
+          image: `https://picsum.photos/seed/${newProject.name}/800/600`,
+          createdBy: currentUser.id
+        };
+        await setDoc(doc(db, 'projects', projectId), project);
+        showNotification('Novo projeto cadastrado com sucesso!');
+      }
+      
+      setShowAddProject(false);
+      setNewProject({
+        name: '',
+        client: '',
+        contractNumber: '',
+        description: '',
+        budget: '',
+        location: '',
+        startDate: '',
+        endDate: '',
+        executingCompany: '',
+        status: 'not-started'
       });
-
-      setEditingProject(null);
-    } else {
-      const project: Project = {
-        id: `proj-${Date.now()}`,
-        name: newProject.name,
-        client: newProject.client,
-        contractNumber: newProject.contractNumber,
-        description: newProject.description,
-        status: newProject.status,
-        progress: 0,
-        startDate: newProject.startDate,
-        endDate: newProject.endDate,
-        budget: Number(newProject.budget),
-        spent: 0,
-        location: newProject.location,
-        executingCompany: newProject.executingCompany,
-      };
-      setProjects(prev => [project, ...prev]);
-      showNotification('Novo projeto cadastrado com sucesso!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'projects');
     }
-
-    setShowAddProject(false);
-    setNewProject({
-      name: '',
-      client: '',
-      contractNumber: '',
-      description: '',
-      budget: '',
-      location: '',
-      startDate: '',
-      endDate: '',
-      executingCompany: '',
-      status: 'not-started'
-    });
   };
 
-  const handleDeleteProject = (id: string) => {
-    setProjects(prev => prev.filter(p => p.id !== id));
-    setMeasurements(prev => prev.filter(m => m.projectId !== id));
-    setAttachments(prev => prev.filter(a => a.projectId !== id));
-    setReports(prev => prev.filter(r => r.projectId !== id));
-    
-    if (viewingProject?.id === id) {
-      setViewingProject(null);
+  const handleDeleteProject = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'projects', id));
+      
+      if (viewingProject?.id === id) {
+        setViewingProject(null);
+      }
+      
+      setProjectToDelete(null);
+      showNotification('Obra excluída com sucesso!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `projects/${id}`);
     }
-    
-    setProjectToDelete(null);
-    showNotification('Obra excluída com sucesso!');
   };
 
   const handleAttachmentUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'pdf' | 'image') => {
@@ -183,25 +425,34 @@ export default function App() {
     if (!file || !viewingProject) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
-      const newAttachment: Attachment = {
-        id: Math.random().toString(36).substr(2, 9),
-        projectId: viewingProject.id,
-        name: file.name,
-        type: type,
-        url: event.target?.result as string,
-        uploadedAt: new Date().toLocaleString('pt-BR'),
-        size: (file.size / (1024 * 1024)).toFixed(2) + ' MB'
-      };
-      setAttachments([newAttachment, ...attachments]);
-      showNotification(`${type === 'pdf' ? 'PDF' : 'Foto'} anexado com sucesso!`);
+    reader.onload = async (event) => {
+      try {
+        const attachmentId = Math.random().toString(36).substr(2, 9);
+        const newAttachment: Attachment = {
+          id: attachmentId,
+          projectId: viewingProject.id,
+          name: file.name,
+          type: type,
+          url: event.target?.result as string,
+          uploadedAt: new Date().toLocaleString('pt-BR'),
+          size: (file.size / (1024 * 1024)).toFixed(2) + ' MB'
+        };
+        await setDoc(doc(db, 'attachments', attachmentId), newAttachment);
+        showNotification(`${type === 'pdf' ? 'PDF' : 'Foto'} anexado com sucesso!`);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, 'attachments');
+      }
     };
     reader.readAsDataURL(file);
   };
 
-  const handleDeleteAttachment = (id: string) => {
-    setAttachments(attachments.filter(a => a.id !== id));
-    showNotification('Anexo removido com sucesso.');
+  const handleDeleteAttachment = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'attachments', id));
+      showNotification('Anexo removido com sucesso.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `attachments/${id}`);
+    }
   };
 
   const startEditing = (project: Project) => {
@@ -222,79 +473,62 @@ export default function App() {
     setViewingProject(null);
   };
 
-  const handleAddMeasurement = (e: React.FormEvent) => {
+  const handleAddMeasurement = async (e: React.FormEvent) => {
     e.preventDefault();
     const project = projects.find(p => p.id === newMeasurement.projectId);
     if (!project) return;
 
-    if (editingMeasurement) {
-      const oldValue = editingMeasurement.value;
-      const newValue = Number(newMeasurement.value);
-      const diff = newValue - oldValue;
+    try {
+      if (editingMeasurement) {
+        const oldValue = editingMeasurement.value;
+        const newValue = Number(newMeasurement.value);
+        const diff = newValue - oldValue;
 
-      const updatedMeasurements = measurements.map(m => 
-        m.id === editingMeasurement.id ? {
-          ...m,
+        const measurementRef = doc(db, 'measurements', editingMeasurement.id);
+        await updateDoc(measurementRef, {
           projectId: newMeasurement.projectId,
           projectName: project.name,
           date: newMeasurement.date,
           value: newValue,
           description: newMeasurement.description
-        } : m
-      );
-      setMeasurements(updatedMeasurements);
+        });
 
-      // Update project spent value
-      const updatedProjects = projects.map(p => {
-        if (p.id === newMeasurement.projectId) {
-          return { ...p, spent: p.spent + diff };
-        }
-        return p;
-      });
-      setProjects(updatedProjects);
+        // Update project spent value
+        const projectRef = doc(db, 'projects', project.id);
+        await updateDoc(projectRef, { spent: project.spent + diff });
 
-      // Update viewingProject if it's the same project
-      if (viewingProject && viewingProject.id === newMeasurement.projectId) {
-        setViewingProject({ ...viewingProject, spent: viewingProject.spent + diff });
+        setEditingMeasurement(null);
+        showNotification('Medição atualizada com sucesso!');
+      } else {
+        const measurementId = `meas-${Date.now()}`;
+        const measurement: Measurement = {
+          id: measurementId,
+          projectId: newMeasurement.projectId,
+          projectName: project.name,
+          date: newMeasurement.date,
+          value: Number(newMeasurement.value),
+          description: newMeasurement.description,
+          status: 'pending'
+        };
+
+        await setDoc(doc(db, 'measurements', measurementId), measurement);
+        
+        // Update project spent value
+        const projectRef = doc(db, 'projects', project.id);
+        await updateDoc(projectRef, { spent: project.spent + Number(newMeasurement.value) });
+        
+        showNotification('Medição registrada com sucesso!');
       }
 
-      setEditingMeasurement(null);
-      showNotification('Medição atualizada com sucesso!');
-    } else {
-      const measurement: Measurement = {
-        id: `meas-${Date.now()}`,
-        projectId: newMeasurement.projectId,
-        projectName: project.name,
-        date: newMeasurement.date,
-        value: Number(newMeasurement.value),
-        description: newMeasurement.description,
-        status: 'pending'
-      };
-
-      setMeasurements([measurement, ...measurements]);
-      
-      // Update project spent value
-      const updatedProjects = projects.map(p => {
-        if (p.id === newMeasurement.projectId) {
-          return { ...p, spent: p.spent + Number(newMeasurement.value) };
-        }
-        return p;
+      setNewMeasurement({
+        projectId: '',
+        date: '',
+        value: '',
+        description: ''
       });
-      setProjects(updatedProjects);
-
-      // Update viewingProject if it's the same project
-      if (viewingProject && viewingProject.id === newMeasurement.projectId) {
-        setViewingProject({ ...viewingProject, spent: viewingProject.spent + Number(newMeasurement.value) });
-      }
-      showNotification('Medição registrada com sucesso!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'measurements');
     }
-
-    setNewMeasurement({
-      projectId: '',
-      date: '',
-      value: '',
-      description: ''
-    });
   };
 
   const startEditingMeasurement = (measurement: Measurement) => {
@@ -307,50 +541,105 @@ export default function App() {
     });
   };
 
-  const handleDeleteMeasurement = (measurement: Measurement) => {
-    const updatedMeasurements = measurements.filter(m => m.id !== measurement.id);
-    setMeasurements(updatedMeasurements);
-
-    // Update project spent value
-    setProjects(prev => prev.map(p => {
-      if (p.id === measurement.projectId) {
-        return { ...p, spent: p.spent - measurement.value };
+  const handleDeleteMeasurement = async (measurement: Measurement) => {
+    try {
+      await deleteDoc(doc(db, 'measurements', measurement.id));
+      
+      // Update project spent value
+      const project = projects.find(p => p.id === measurement.projectId);
+      if (project) {
+        const projectRef = doc(db, 'projects', project.id);
+        await updateDoc(projectRef, { spent: Math.max(0, project.spent - measurement.value) });
       }
-      return p;
-    }));
-
-    // Update viewingProject if it's the same project
-    setViewingProject(prev => {
-      if (prev && prev.id === measurement.projectId) {
-        return { ...prev, spent: prev.spent - measurement.value };
-      }
-      return prev;
-    });
-
-    showNotification('Medição excluída com sucesso!');
+      
+      showNotification('Medição excluída com sucesso!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `measurements/${measurement.id}`);
+    }
   };
 
-  const handleUpload = () => {
+  const handleUpdateAvatar = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // In a real app, we would upload to Firebase Storage.
+    // Here we'll use a FileReader to get a base64 string for the demo.
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64String = reader.result as string;
+      try {
+        const updatedUser = { ...currentUser, avatar: base64String };
+        await setDoc(doc(db, 'users', currentUser.id), updatedUser);
+        setCurrentUser(updatedUser);
+        showNotification('Foto de perfil atualizada!');
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.id}`);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleAddStatusUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newStatusUpdate.projectId || !newStatusUpdate.message) {
+      showNotification('Por favor, preencha todos os campos.');
+      return;
+    }
+
+    try {
+      const updateId = `su-${Date.now()}`;
+      const update: StatusUpdate = {
+        id: updateId,
+        projectId: newStatusUpdate.projectId,
+        date: new Date().toLocaleString('pt-BR'),
+        message: newStatusUpdate.message,
+        author: currentUser.name
+      };
+
+      await setDoc(doc(db, 'statusUpdates', updateId), update);
+      setNewStatusUpdate({ projectId: '', message: '' });
+      showNotification('Atualização de status registrada!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'statusUpdates');
+    }
+  };
+
+  const handleDeleteStatusUpdate = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'statusUpdates', id));
+      showNotification('Atualização excluída com sucesso.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `statusUpdates/${id}`);
+    }
+  };
+
+  const handleUpload = async () => {
     if (!selectedProject || !selectedDate) {
       showNotification('Por favor, selecione um projeto e uma data.');
       return;
     }
 
-    const newReport: WeeklyReport = {
-      id: `rep-${Date.now()}`,
-      projectId: '1', // Simplificado para o exemplo
-      projectName: selectedProject,
-      weekEnding: selectedDate,
-      status: 'submitted',
-      fileName: `Relatorio_${selectedProject.replace(/\s+/g, '_')}_${selectedDate}.pdf`,
-      fileSize: '1.2 MB',
-      uploadedAt: new Date().toLocaleString(),
-      uploadedBy: 'Eng. Ricardo Silva',
-    };
+    try {
+      const reportId = `rep-${Date.now()}`;
+      const newReport: WeeklyReport = {
+        id: reportId,
+        projectId: '1', // Simplificado para o exemplo
+        projectName: selectedProject,
+        weekEnding: selectedDate,
+        status: 'submitted',
+        fileName: `Relatorio_${selectedProject.replace(/\s+/g, '_')}_${selectedDate}.pdf`,
+        fileSize: '1.2 MB',
+        uploadedAt: new Date().toLocaleString(),
+        uploadedBy: currentUser.name,
+      };
 
-    setReports([newReport, ...reports]);
-    setSelectedProject('');
-    setSelectedDate('');
+      await setDoc(doc(db, 'reports', reportId), newReport);
+      showNotification('Relatório enviado com sucesso!');
+      setSelectedProject('');
+      setSelectedDate('');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'reports');
+    }
   };
 
   const handleImageClick = (projectId: string) => {
@@ -398,9 +687,13 @@ export default function App() {
     }
   };
 
-  const handleDelete = (id: string) => {
-    setReports(reports.filter(r => r.id !== id));
-    showNotification('Relatório excluído com sucesso.');
+  const handleDelete = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'reports', id));
+      showNotification('Relatório excluído com sucesso.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `reports/${id}`);
+    }
   };
 
   const handleDownload = (fileName: string) => {
@@ -438,10 +731,15 @@ export default function App() {
   };
 
   if (!isLoggedIn) {
-    return <LoginPage onLogin={(user) => {
-      setCurrentUser(user);
-      setIsLoggedIn(true);
-    }} />;
+    return <LoginPage 
+      onLogin={(user) => {
+        setCurrentUser(user);
+        setIsLoggedIn(true);
+      }} 
+      onRegister={() => {
+        showNotification('Conta criada com sucesso! Agora você pode fazer login.');
+      }}
+    />;
   }
 
   return (
@@ -511,13 +809,13 @@ export default function App() {
         className="bg-white border-r border-slate-200 flex flex-col z-30"
       >
         <div className="p-6 flex items-center gap-3">
-          <div className="w-10 h-10 bg-axia-primary rounded-lg flex items-center justify-center flex-shrink-0">
-            <HardHat className="text-white w-6 h-6" />
+          <div className="w-10 h-10 bg-axia-primary rounded-lg flex items-center justify-center flex-shrink-0 shadow-lg shadow-axia-primary/20">
+            <Logo size={28} className="text-white" />
           </div>
           {isSidebarOpen && (
             <div className="overflow-hidden whitespace-nowrap">
-              <h1 className="text-xl font-display font-bold text-axia-primary">AXIA</h1>
-              <p className="text-[10px] uppercase tracking-widest text-axia-secondary font-bold">Energia & Obras</p>
+              <h1 className="text-xl font-display font-bold text-axia-primary">A.L</h1>
+              <p className="text-[10px] uppercase tracking-widest text-axia-secondary font-bold">Gestão de Obras</p>
             </div>
           )}
         </div>
@@ -549,6 +847,13 @@ export default function App() {
             label="Relatórios" 
             active={activeTab === 'reports'} 
             onClick={() => setActiveTab('reports')}
+            collapsed={!isSidebarOpen}
+          />
+          <NavItem 
+            icon={<History size={20} />} 
+            label="Atualizações" 
+            active={activeTab === 'updates'} 
+            onClick={() => setActiveTab('updates')}
             collapsed={!isSidebarOpen}
           />
         </nav>
@@ -640,38 +945,143 @@ export default function App() {
                 {/* Stats Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                   <StatCard 
-                    title="Obras Ativas" 
-                    value="12" 
-                    change="+2 este mês" 
+                    title="Não Iniciadas" 
+                    value={statusCounts['not-started'].toString()} 
+                    change="Aguardando início" 
+                    icon={<Clock className="text-slate-400" />} 
+                    color="slate"
+                  />
+                  <StatCard 
+                    title="Em Andamento" 
+                    value={statusCounts['in-progress'].toString()} 
+                    change="Execução ativa" 
                     icon={<HardHat className="text-axia-primary" />} 
                     color="blue"
                   />
                   <StatCard 
-                    title="Tarefas Pendentes" 
-                    value="48" 
-                    change="-5 desde ontem" 
-                    icon={<ClipboardList className="text-axia-secondary" />} 
+                    title="Paralisadas" 
+                    value={statusCounts['paused'].toString()} 
+                    change="Necessita atenção" 
+                    icon={<AlertCircle className="text-axia-secondary" />} 
                     color="orange"
                   />
                   <StatCard 
-                    title="Orçamento Total" 
-                    value="R$ 8.4M" 
-                    change="65% utilizado" 
-                    icon={<TrendingUp className="text-axia-accent" />} 
+                    title="Finalizadas" 
+                    value={statusCounts['finished'].toString()} 
+                    change="Concluídas com sucesso" 
+                    icon={<CheckCircle2 className="text-axia-accent" />} 
                     color="green"
                   />
-                  <StatCard 
-                    title="Prazo Médio" 
-                    value="14 dias" 
-                    change="Dentro do esperado" 
-                    icon={<Clock className="text-slate-500" />} 
-                    color="slate"
-                  />
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  {/* Projects per Client Chart */}
+                  <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                    <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
+                      <User size={20} className="text-axia-primary" />
+                      Obras por Cliente
+                    </h3>
+                    <div className="h-[300px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={projectsByClientData}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={60}
+                            outerRadius={100}
+                            paddingAngle={5}
+                            dataKey="value"
+                          >
+                            {projectsByClientData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip 
+                            contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                          />
+                          <Legend verticalAlign="bottom" height={36}/>
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* Budget Spent per Client Chart */}
+                  <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                    <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
+                      <DollarSign size={20} className="text-axia-accent" />
+                      Orçamento Total por Cliente (R$)
+                    </h3>
+                    <div className="h-[300px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={budgetByClientData} layout="vertical" margin={{ left: 40, right: 40 }}>
+                          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                          <XAxis type="number" hide />
+                          <YAxis 
+                            dataKey="name" 
+                            type="category" 
+                            axisLine={false} 
+                            tickLine={false} 
+                            tick={{ fontSize: 12, fontWeight: 600, fill: '#64748b' }}
+                            width={100}
+                          />
+                          <Tooltip 
+                            cursor={{ fill: '#f8fafc' }}
+                            formatter={(value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)}
+                            contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                          />
+                          <Bar dataKey="value" radius={[0, 10, 10, 0]} barSize={30}>
+                            {budgetByClientData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Timeline / Schedule */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                  <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
+                    <Calendar size={20} className="text-axia-primary" />
+                    Cronograma de Obras
+                  </h3>
+                  <div className="space-y-4">
+                    {timelineData.length > 0 ? (
+                      timelineData.map((item, index) => (
+                        <div key={index} className="space-y-1">
+                          <div className="flex justify-between text-xs font-bold text-slate-500 px-1">
+                            <span>{item.name}</span>
+                            <div className="flex gap-4">
+                              <span>Início: {item.start}</span>
+                              <span>Fim: {item.end}</span>
+                            </div>
+                          </div>
+                          <div className="h-4 w-full bg-slate-50 rounded-full overflow-hidden flex">
+                            <div 
+                              className={`h-full rounded-full transition-all duration-1000 ${
+                                item.status === 'finished' ? 'bg-axia-accent' : 
+                                item.status === 'paused' ? 'bg-axia-secondary' : 
+                                item.status === 'in-progress' ? 'bg-axia-primary' : 'bg-slate-300'
+                              }`}
+                              style={{ width: `${Math.min(100, (item.duration / 365) * 100 * 5)}%` }} // Scaled for visibility
+                            />
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="py-12 text-center text-slate-400">
+                        <Calendar size={48} className="mx-auto mb-4 opacity-20" />
+                        <p>Nenhuma data de início/fim definida para as obras.</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                   {/* Projects Table */}
-                  <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="lg:col-span-3 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                     <div className="p-6 border-b border-slate-100 flex items-center justify-between">
                       <h3 className="text-lg font-bold">Projetos Recentes</h3>
                       <button 
@@ -820,6 +1230,13 @@ export default function App() {
                               Anexos
                               {projectDetailTab === 'attachments' && <motion.div layoutId="projectTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-axia-primary" />}
                             </button>
+                            <button 
+                              onClick={() => setProjectDetailTab('history')}
+                              className={`px-6 py-3 font-bold text-sm transition-all relative ${projectDetailTab === 'history' ? 'text-axia-primary' : 'text-slate-400 hover:text-slate-600'}`}
+                            >
+                              Histórico
+                              {projectDetailTab === 'history' && <motion.div layoutId="projectTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-axia-primary" />}
+                            </button>
                           </div>
 
                           {projectDetailTab === 'details' ? (
@@ -896,7 +1313,7 @@ export default function App() {
                                 </div>
                               </section>
                             </>
-                          ) : (
+                          ) : projectDetailTab === 'attachments' ? (
                             <div className="space-y-8">
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="p-6 bg-slate-50 rounded-3xl border border-slate-200 border-dashed flex flex-col items-center justify-center text-center group hover:bg-white hover:border-axia-primary transition-all cursor-pointer relative">
@@ -970,6 +1387,35 @@ export default function App() {
                                     ))
                                   )}
                                 </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-6">
+                              <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                                <History className="text-axia-primary" /> Histórico de Atualizações
+                              </h3>
+                              <div className="space-y-4">
+                                {statusUpdates.filter(su => su.projectId === viewingProject.id).length === 0 ? (
+                                  <div className="p-12 text-center text-slate-400 bg-slate-50 rounded-3xl border border-slate-100">
+                                    <MessageSquare size={48} className="mx-auto mb-4 opacity-10" />
+                                    <p>Nenhuma atualização registrada para esta obra.</p>
+                                  </div>
+                                ) : (
+                                  statusUpdates.filter(su => su.projectId === viewingProject.id).map(update => (
+                                    <div key={update.id} className="p-5 bg-white rounded-2xl border border-slate-100 shadow-sm">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-8 h-8 bg-axia-primary/10 rounded-full flex items-center justify-center text-axia-primary">
+                                            <User size={16} />
+                                          </div>
+                                          <span className="font-bold text-slate-900 text-sm">{update.author}</span>
+                                        </div>
+                                        <span className="text-[10px] font-mono font-bold text-slate-400 uppercase bg-slate-50 px-2 py-0.5 rounded-md border border-slate-100">{update.date}</span>
+                                      </div>
+                                      <p className="text-sm text-slate-600 leading-relaxed">{update.message}</p>
+                                    </div>
+                                  ))
+                                )}
                               </div>
                             </div>
                           )}
@@ -1624,6 +2070,115 @@ export default function App() {
               </motion.div>
             )}
 
+            {activeTab === 'updates' && (
+              <motion.div 
+                key="updates"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="space-y-8"
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-3xl font-display font-bold text-slate-900">Atualizações de Status</h2>
+                    <p className="text-slate-500">Registre o progresso diário e comunicados importantes das obras.</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                  {/* New Update Form */}
+                  <div className="lg:col-span-1">
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm sticky top-8">
+                      <h3 className="text-lg font-bold flex items-center gap-2 mb-6">
+                        <MessageSquare className="text-axia-primary" /> Nova Atualização
+                      </h3>
+                      <form onSubmit={handleAddStatusUpdate} className="space-y-4">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Projeto</label>
+                          <select 
+                            required
+                            value={newStatusUpdate.projectId}
+                            onChange={(e) => setNewStatusUpdate({...newStatusUpdate, projectId: e.target.value})}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20"
+                          >
+                            <option value="">Selecione a obra...</option>
+                            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Mensagem / Status</label>
+                          <textarea 
+                            required
+                            rows={5}
+                            value={newStatusUpdate.message}
+                            onChange={(e) => setNewStatusUpdate({...newStatusUpdate, message: e.target.value})}
+                            placeholder="Descreva o que aconteceu hoje ou o status atual..."
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20"
+                          ></textarea>
+                        </div>
+                        <button 
+                          type="submit"
+                          className="w-full bg-axia-primary text-white py-3 rounded-xl font-bold hover:bg-axia-primary/90 transition-all shadow-lg shadow-axia-primary/20 flex items-center justify-center gap-2"
+                        >
+                          <Plus size={18} />
+                          Registrar Atualização
+                        </button>
+                      </form>
+                    </div>
+                  </div>
+
+                  {/* Updates History */}
+                  <div className="lg:col-span-2 space-y-6">
+                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                      <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                        <h3 className="text-lg font-bold">Histórico Geral de Atualizações</h3>
+                      </div>
+                      <div className="divide-y divide-slate-100">
+                        {statusUpdates.length === 0 ? (
+                          <div className="p-12 text-center text-slate-400">
+                            <History size={48} className="mx-auto mb-4 opacity-10" />
+                            <p>Nenhuma atualização registrada ainda.</p>
+                          </div>
+                        ) : (
+                          statusUpdates.map((update) => {
+                            const project = projects.find(p => p.id === update.projectId);
+                            return (
+                              <div key={update.id} className="p-6 hover:bg-slate-50 transition-colors">
+                                <div className="flex items-start gap-4">
+                                  <div className="w-10 h-10 bg-axia-primary/10 text-axia-primary rounded-full flex items-center justify-center flex-shrink-0">
+                                    <User size={20} />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <h4 className="font-bold text-slate-900">{update.author}</h4>
+                                      <div className="flex items-center gap-3">
+                                        <span className="text-[10px] font-mono font-bold text-slate-400 uppercase bg-slate-100 px-2 py-0.5 rounded-md">{update.date}</span>
+                                        <button 
+                                          onClick={() => handleDeleteStatusUpdate(update.id)}
+                                          className="p-1 text-slate-300 hover:text-red-500 transition-colors"
+                                          title="Excluir atualização"
+                                        >
+                                          <Trash2 size={14} />
+                                        </button>
+                                      </div>
+                                    </div>
+                                    <p className="text-[10px] font-bold text-axia-secondary uppercase tracking-wider mb-2">
+                                      {project?.name || 'Projeto Excluído'}
+                                    </p>
+                                    <p className="text-sm text-slate-600 leading-relaxed">{update.message}</p>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
             {activeTab === 'settings' && (
               <motion.div 
                 key="settings"
@@ -1634,7 +2189,7 @@ export default function App() {
               >
                 <div>
                   <h2 className="text-3xl font-display font-bold text-slate-900">Configurações</h2>
-                  <p className="text-slate-500">Personalize sua experiência no sistema AXIA.</p>
+                  <p className="text-slate-500">Personalize sua experiência no sistema A.L Gestão de Obras.</p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -1750,7 +2305,16 @@ export default function App() {
                       className="w-32 h-32 rounded-3xl border-4 border-white shadow-xl object-cover"
                       referrerPolicy="no-referrer"
                     />
-                    <div className="absolute -bottom-2 -right-2 bg-green-500 w-6 h-6 rounded-full border-4 border-white shadow-sm" />
+                    <label className="absolute -bottom-2 -right-2 bg-axia-primary w-10 h-10 rounded-full border-4 border-white shadow-lg flex items-center justify-center cursor-pointer hover:scale-110 transition-transform text-white">
+                      <Camera size={18} />
+                      <input 
+                        type="file" 
+                        className="hidden" 
+                        accept="image/*"
+                        onChange={handleUpdateAvatar}
+                      />
+                    </label>
+                    <div className="absolute -top-2 -left-2 bg-green-500 w-6 h-6 rounded-full border-4 border-white shadow-sm" />
                   </div>
                 </div>
 
@@ -1791,9 +2355,14 @@ export default function App() {
 
                 <div className="mt-8">
                   <button 
-                    onClick={() => {
-                      setIsLoggedIn(false);
-                      setShowProfile(false);
+                    onClick={async () => {
+                      try {
+                        await signOut(auth);
+                        setIsLoggedIn(false);
+                        setShowProfile(false);
+                      } catch (error) {
+                        console.error('Error signing out:', error);
+                      }
                     }}
                     className="w-full flex items-center justify-center gap-2 py-4 px-4 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-2xl transition-all shadow-sm"
                   >
@@ -1839,31 +2408,64 @@ function NavItem({ icon, label, active, onClick, collapsed }: {
   );
 }
 
-function LoginPage({ onLogin }: { onLogin: (user: UserProfile) => void }) {
+function LoginPage({ onLogin, onRegister }: { 
+  onLogin: (user: UserProfile) => void;
+  onRegister: (user: UserProfile) => void;
+}) {
   const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [email, setEmail] = useState('ricardo.silva@axiaenergia.com.br');
-  const [password, setPassword] = useState('********');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState('');
   const [phone, setPhone] = useState('');
+  const [accessLevel, setAccessLevel] = useState('Usuário Padrão');
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    setTimeout(() => {
-      const newUser: UserProfile = {
-        id: Math.random().toString(36).substr(2, 9),
-        name: mode === 'login' ? 'Eng. Ricardo Silva' : name,
-        email: email,
-        role: mode === 'login' ? 'Gestor de Projetos Sênior' : role,
-        avatar: `https://picsum.photos/seed/${mode === 'login' ? 'ricardo' : name}/200/200`,
-        phone: mode === 'login' ? '+55 (31) 98765-4321' : phone,
-        accessLevel: mode === 'login' ? 'Administrador de Sistema' : 'Usuário Padrão'
-      };
-      onLogin(newUser);
+    setError(null);
+
+    try {
+      if (mode === 'login') {
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
+        if (userDoc.exists()) {
+          onLogin(userDoc.data() as UserProfile);
+        } else {
+          setError('Perfil do usuário não encontrado.');
+          await signOut(auth);
+        }
+      } else {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const newUser: UserProfile = {
+          id: userCredential.user.uid,
+          name: name,
+          email: email,
+          role: role || 'Colaborador',
+          avatar: `https://picsum.photos/seed/${name}/200/200`,
+          phone: phone,
+          accessLevel: accessLevel
+        };
+        await setDoc(doc(db, 'users', userCredential.user.uid), newUser);
+        onRegister(newUser);
+        setMode('login');
+      }
+    } catch (err: any) {
+      console.error('Auth error:', err);
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+        setError('E-mail ou senha incorretos.');
+      } else if (err.code === 'auth/email-already-in-use') {
+        setError('Este e-mail já está em uso.');
+      } else if (err.code === 'auth/weak-password') {
+        setError('A senha deve ter pelo menos 6 caracteres.');
+      } else {
+        setError('Ocorreu um erro ao processar sua solicitação.');
+      }
+    } finally {
       setIsLoading(false);
-    }, 1500);
+    }
   };
 
   return (
@@ -1876,11 +2478,11 @@ function LoginPage({ onLogin }: { onLogin: (user: UserProfile) => void }) {
         >
           <div className="p-10">
             <div className="flex flex-col items-center mb-8">
-              <div className="w-16 h-16 bg-axia-primary rounded-2xl flex items-center justify-center mb-4 shadow-lg shadow-axia-primary/30">
-                <HardHat className="text-white w-10 h-10" />
+              <div className="w-20 h-20 bg-axia-primary rounded-2xl flex items-center justify-center mb-4 shadow-lg shadow-axia-primary/30">
+                <Logo size={56} className="text-white" />
               </div>
-              <h1 className="text-3xl font-display font-bold text-axia-primary tracking-tight">AXIA</h1>
-              <p className="text-xs uppercase tracking-[0.2em] text-axia-secondary font-bold">Energia & Obras</p>
+              <h1 className="text-3xl font-display font-bold text-axia-primary tracking-tight">A.L</h1>
+              <p className="text-xs uppercase tracking-[0.2em] text-axia-secondary font-bold">Gestão de Obras</p>
             </div>
 
             <div className="flex p-1 bg-slate-100 rounded-2xl mb-8">
@@ -1908,6 +2510,13 @@ function LoginPage({ onLogin }: { onLogin: (user: UserProfile) => void }) {
                   : 'Preencha os dados abaixo para solicitar seu acesso.'}
               </p>
             </div>
+
+            {error && (
+              <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl flex items-center gap-3 text-red-600 text-sm font-medium">
+                <AlertCircle size={18} />
+                {error}
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} className="space-y-5">
               {mode === 'register' && (
@@ -1952,6 +2561,24 @@ function LoginPage({ onLogin }: { onLogin: (user: UserProfile) => void }) {
                         placeholder="Ex: +55 (11) 99999-9999"
                         required
                       />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">Nível de Acesso</label>
+                    <div className="relative">
+                      <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                      <select 
+                        value={accessLevel}
+                        onChange={(e) => setAccessLevel(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all font-medium appearance-none"
+                        required
+                      >
+                        <option value="Usuário Padrão">Usuário Padrão</option>
+                        <option value="Gestor">Gestor</option>
+                      </select>
+                      <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                        <ChevronRight size={18} className="rotate-90" />
+                      </div>
                     </div>
                   </div>
                 </>
@@ -2028,7 +2655,7 @@ function LoginPage({ onLogin }: { onLogin: (user: UserProfile) => void }) {
         </motion.div>
         
         <div className="mt-8 text-center">
-          <p className="text-xs text-slate-400 font-medium">© 2024 Axia Energia & Obras. Todos os direitos reservados.</p>
+          <p className="text-xs text-slate-400 font-medium">© 2026 A.L Gestão de Obras. Todos os direitos reservados.</p>
         </div>
       </div>
     </div>
@@ -2095,3 +2722,4 @@ function StatCard({ title, value, change, icon, color }: {
     </div>
   );
 }
+
