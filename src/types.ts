@@ -1,3 +1,11 @@
+export interface PhotoReportItem {
+  id: string;
+  projectId: string;
+  url: string;
+  caption: string;
+  date: string;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -14,6 +22,7 @@ export interface Project {
   executingCompany: string;
   image?: string;
   createdBy?: string;
+  photoReport?: PhotoReportItem[];
 }
 
 export interface Resource {

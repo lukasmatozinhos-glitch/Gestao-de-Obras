@@ -91,6 +91,19 @@
         "author": { "type": "string" }
       },
       "required": ["id", "projectId", "date", "message", "author"]
+    },
+    "PhotoReportItem": {
+      "title": "PhotoReportItem",
+      "description": "An item in a project's photo report",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "url": { "type": "string" },
+        "caption": { "type": "string" },
+        "date": { "type": "string" }
+      },
+      "required": ["id", "projectId", "url", "date"]
     }
   },
   "firestore": {
@@ -117,6 +130,10 @@
     "/statusUpdates/{updateId}": {
       "schema": "StatusUpdate",
       "description": "Status update documents"
+    },
+    "/photoReports/{photoId}": {
+      "schema": "PhotoReportItem",
+      "description": "Photo report documents"
     }
   }
 }

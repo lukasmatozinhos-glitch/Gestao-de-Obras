@@ -72,6 +72,12 @@ service cloud.firestore {
              (!('createdBy' in data) || data.createdBy is string);
     }
 
+    function isValidPhotoReport(data) {
+      return data.id is string && data.projectId is string &&
+             data.url is string && isValidUrl(data.url) &&
+             data.date is string && (!('caption' in data) || data.caption is string);
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -108,6 +114,12 @@ service cloud.firestore {
     match /statusUpdates/{updateId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated(); // Any authenticated user can post an update
+      allow update, delete: if isAdmin();
+    }
+
+    match /photoReports/{photoId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidPhotoReport(request.resource.data);
       allow update, delete: if isAdmin();
     }
   }

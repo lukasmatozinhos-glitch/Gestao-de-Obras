@@ -33,6 +33,7 @@ import {
   Receipt,
   ArrowUpRight,
   Camera,
+  Link,
   User,
   Briefcase,
   Mail,
@@ -42,11 +43,12 @@ import {
   History,
   MessageSquare,
   FileDown,
+  Eye,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { db, auth } from './firebase';
+import { db, auth, getStorageInstance } from './firebase';
 import { 
   collection, 
   onSnapshot, 
@@ -61,6 +63,11 @@ import {
   orderBy,
   getDocFromServer
 } from 'firebase/firestore';
+import { 
+  ref as storageRef, 
+  uploadBytes, 
+  getDownloadURL 
+} from 'firebase/storage';
 import { 
   onAuthStateChanged, 
   signInWithEmailAndPassword, 
@@ -82,7 +89,7 @@ import {
   Legend
 } from 'recharts';
 import { MOCK_PROJECTS, MOCK_RESOURCES, MOCK_REPORTS, MOCK_MEASUREMENTS, MOCK_ATTACHMENTS, MOCK_STATUS_UPDATES } from './constants';
-import { Project, WeeklyReport, Measurement, UserProfile, Attachment, StatusUpdate } from './types';
+import { Project, WeeklyReport, Measurement, UserProfile, Attachment, StatusUpdate, PhotoReportItem } from './types';
 
 const Logo = ({ size = 40, className = "" }: { size?: number, className?: string }) => (
   <svg 
@@ -182,6 +189,7 @@ export default function App() {
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [statusUpdates, setStatusUpdates] = useState<StatusUpdate[]>([]);
+  const [photoReports, setPhotoReports] = useState<PhotoReportItem[]>([]);
   const [registeredUsers, setRegisteredUsers] = useState<UserProfile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [selectedProject, setSelectedProject] = useState('');
@@ -207,7 +215,7 @@ export default function App() {
   }, [currentPalette]);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [editingMeasurement, setEditingMeasurement] = useState<Measurement | null>(null);
-  const [projectDetailTab, setProjectDetailTab] = useState<'details' | 'attachments' | 'history'>('details');
+  const [projectDetailTab, setProjectDetailTab] = useState<'details' | 'attachments' | 'history' | 'photos'>('details');
   const [settingsTab, setSettingsTab] = useState<'general' | 'appearance' | 'security'>('general');
   const [notification, setNotification] = useState<string | null>(null);
   const [imageEditingProjectId, setImageEditingProjectId] = useState<string | null>(null);
@@ -215,6 +223,12 @@ export default function App() {
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [isUpdatingProgress, setIsUpdatingProgress] = useState(false);
   const [tempProgress, setTempProgress] = useState(0);
+  const [isAddingPhoto, setIsAddingPhoto] = useState(false);
+  const [newPhoto, setNewPhoto] = useState({ url: '', caption: '' });
+  const [selectedPhotoUrl, setSelectedPhotoUrl] = useState<string | null>(null);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+
+  const photoFileInputRef = useRef<HTMLInputElement>(null);
 
   const handleQuickProgressUpdate = async () => {
     if (!viewingProject) return;
@@ -228,6 +242,55 @@ export default function App() {
       handleFirestoreError(error, OperationType.WRITE, `projects/${viewingProject.id}`);
     }
   };
+
+  const handleAddPhoto = async () => {
+    if (!viewingProject || !newPhoto.url) return;
+    try {
+      const photoData: PhotoReportItem = {
+        id: Date.now().toString(),
+        projectId: viewingProject.id,
+        url: newPhoto.url,
+        caption: newPhoto.caption,
+        date: new Date().toISOString(),
+      };
+      await setDoc(doc(db, 'photoReports', photoData.id), photoData);
+      setNewPhoto({ url: '', caption: '' });
+      setIsAddingPhoto(false);
+      showNotification('Foto adicionada ao relatório!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'photoReports');
+    }
+  };
+
+  const handleDeletePhoto = async (photoId: string) => {
+    try {
+      await deleteDoc(doc(db, 'photoReports', photoId));
+      showNotification('Foto removida!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `photoReports/${photoId}`);
+    }
+  };
+
+  const handlePhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !viewingProject) return;
+
+    setIsUploadingPhoto(true);
+    try {
+      const storage = getStorageInstance();
+      const fileRef = storageRef(storage, `photoReports/${viewingProject.id}/${Date.now()}_${file.name}`);
+      await uploadBytes(fileRef, file);
+      const url = await getDownloadURL(fileRef);
+      setNewPhoto(prev => ({ ...prev, url }));
+      showNotification('Foto carregada com sucesso!');
+    } catch (error) {
+      console.error('Error uploading photo:', error);
+      showNotification('Erro ao carregar foto. Verifique as permissões do Firebase Storage.');
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -296,12 +359,17 @@ export default function App() {
       setStatusUpdates(snapshot.docs.map(doc => doc.data() as StatusUpdate));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'statusUpdates'));
 
+    const unsubPhotoReports = onSnapshot(collection(db, 'photoReports'), (snapshot) => {
+      setPhotoReports(snapshot.docs.map(doc => doc.data() as PhotoReportItem));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'photoReports'));
+
     return () => {
       unsubProjects();
       unsubReports();
       unsubMeasurements();
       unsubAttachments();
       unsubStatusUpdates();
+      unsubPhotoReports();
     };
   }, [isLoggedIn, isAuthReady]);
 
@@ -775,69 +843,168 @@ export default function App() {
   const generateGeneralReport = () => {
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
     
-    // Header
-    doc.setFillColor(196, 160, 82); // axia-primary color
-    doc.rect(0, 0, pageWidth, 40, 'F');
-    
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(22);
-    doc.setFont('helvetica', 'bold');
-    doc.text('A.L GESTÃO DE OBRAS', 20, 20);
-    
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text('RELATÓRIO GERAL DE OBRAS', 20, 30);
-    doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, pageWidth - 70, 30);
-    
-    // Summary Table
-    const tableData = projects.map(p => [
-      p.name,
-      p.client,
-      p.status === 'in-progress' ? 'Em Andamento' : 
-      p.status === 'finished' ? 'Concluído' : 
-      p.status === 'paused' ? 'Paralisado' : 'Não Iniciado',
-      new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.budget),
-      `${p.progress}%`
-    ]);
-    
-    autoTable(doc, {
-      startY: 50,
-      head: [['Obra', 'Cliente', 'Status', 'Orçamento', 'Progresso']],
-      body: tableData,
-      theme: 'striped',
-      headStyles: { fillColor: [196, 160, 82], textColor: [255, 255, 255] },
-      styles: { fontSize: 9, cellPadding: 3 }
+    if (projects.length === 0) {
+      showNotification('Nenhum projeto encontrado para gerar relatório.');
+      return;
+    }
+
+    projects.forEach((project, index) => {
+      if (index > 0) {
+        doc.addPage();
+      }
+
+      // Header for each project page
+      doc.setFillColor(196, 160, 82); // axia-primary color
+      doc.rect(0, 0, pageWidth, 30, 'F');
+      
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(18);
+      doc.setFont('helvetica', 'bold');
+      doc.text('A.L GESTÃO DE OBRAS', 15, 15);
+      
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`RELATÓRIO DETALHADO DA OBRA - ${project.name.toUpperCase()}`, 15, 22);
+      doc.text(`Emissão: ${new Date().toLocaleDateString('pt-BR')}`, pageWidth - 15, 22, { align: 'right' });
+      
+      // Project Info Section
+      doc.setTextColor(51, 65, 85); // slate-700
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Informações Gerais', 15, 45);
+      
+      const generalInfo = [
+        ['Cliente', project.client],
+        ['Contrato', project.contractNumber],
+        ['Localidade', project.location],
+        ['Empresa Executora', project.executingCompany],
+        ['Status', getStatusLabel(project.status)],
+        ['Progresso', `${project.progress}%`],
+        ['Data de Início', project.startDate],
+        ['Previsão de Término', project.endDate]
+      ];
+
+      autoTable(doc, {
+        startY: 50,
+        body: generalInfo,
+        theme: 'grid',
+        styles: { fontSize: 10, cellPadding: 3 },
+        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 } }
+      });
+
+      // Description
+      const finalYInfo = (doc as any).lastAutoTable.finalY || 50;
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Descrição do Projeto', 15, finalYInfo + 10);
+      
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      const splitDescription = doc.splitTextToSize(project.description, pageWidth - 30);
+      doc.text(splitDescription, 15, finalYInfo + 17);
+      
+      const descriptionHeight = splitDescription.length * 5;
+      const financialStartY = finalYInfo + 20 + descriptionHeight;
+
+      // Financial Section
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Resumo Financeiro', 15, financialStartY);
+      
+      const financialInfo = [
+        ['Orçamento Total', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget)],
+        ['Total Medido', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.spent)],
+        ['Saldo Disponível', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget - project.spent)],
+        ['Utilização', `${Math.round((project.spent / project.budget) * 100)}%`]
+      ];
+
+      autoTable(doc, {
+        startY: financialStartY + 5,
+        body: financialInfo,
+        theme: 'striped',
+        styles: { fontSize: 10, cellPadding: 3 },
+        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 } }
+      });
+
+      // Recent Measurements
+      const finalYFinancial = (doc as any).lastAutoTable.finalY || financialStartY + 5;
+      const projectMeasurements = measurements.filter(m => m.projectId === project.id).slice(0, 5);
+      
+      if (projectMeasurements.length > 0) {
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Últimas Medições', 15, finalYFinancial + 10);
+        
+        const measurementData = projectMeasurements.map(m => [
+          m.date,
+          m.description,
+          new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(m.value),
+          m.status === 'paid' ? 'Pago' : m.status === 'approved' ? 'Aprovado' : 'Pendente'
+        ]);
+
+        autoTable(doc, {
+          startY: finalYFinancial + 15,
+          head: [['Data', 'Descrição', 'Valor', 'Status']],
+          body: measurementData,
+          theme: 'grid',
+          headStyles: { fillColor: [196, 160, 82] },
+          styles: { fontSize: 9, cellPadding: 2 }
+        });
+      }
+
+      // Recent Updates
+      const finalYMeasurements = (doc as any).lastAutoTable.finalY || finalYFinancial + 10;
+      const projectUpdates = statusUpdates.filter(u => u.projectId === project.id).slice(0, 5);
+      
+      if (projectUpdates.length > 0) {
+        // Check if we need a new page for updates if they are too many
+        if (finalYMeasurements + 30 > pageHeight - 20) {
+          doc.addPage();
+          doc.setFontSize(12);
+          doc.setFont('helvetica', 'bold');
+          doc.text('Histórico de Atualizações (Cont.)', 15, 20);
+          
+          const updateData = projectUpdates.map(u => [u.date, u.author, u.message]);
+          autoTable(doc, {
+            startY: 25,
+            head: [['Data', 'Autor', 'Mensagem']],
+            body: updateData,
+            theme: 'grid',
+            headStyles: { fillColor: [196, 160, 82] },
+            styles: { fontSize: 9, cellPadding: 2 }
+          });
+        } else {
+          doc.setFontSize(12);
+          doc.setFont('helvetica', 'bold');
+          doc.text('Histórico de Atualizações', 15, finalYMeasurements + 10);
+          
+          const updateData = projectUpdates.map(u => [u.date, u.author, u.message]);
+          autoTable(doc, {
+            startY: finalYMeasurements + 15,
+            head: [['Data', 'Autor', 'Mensagem']],
+            body: updateData,
+            theme: 'grid',
+            headStyles: { fillColor: [196, 160, 82] },
+            styles: { fontSize: 9, cellPadding: 2 }
+          });
+        }
+      }
     });
     
-    // Totals
-    const totalBudget = projects.reduce((acc, p) => acc + p.budget, 0);
-    const totalSpent = projects.reduce((acc, p) => acc + p.spent, 0);
-    const finalY = (doc as any).lastAutoTable.finalY || 50;
-    
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Resumo Financeiro Consolidado', 20, finalY + 15);
-    
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Total de Obras: ${projects.length}`, 20, finalY + 25);
-    doc.text(`Investimento Total: ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalBudget)}`, 20, finalY + 32);
-    doc.text(`Total Executado: ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalSpent)}`, 20, finalY + 39);
-    doc.text(`Saldo Global: ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalBudget - totalSpent)}`, 20, finalY + 46);
-    
-    // Footer
+    // Footer for all pages
     const pageCount = (doc as any).internal.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
       doc.setFontSize(8);
       doc.setTextColor(148, 163, 184); // slate-400
-      doc.text(`Página ${i} de ${pageCount}`, pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
-      doc.text('© 2026 A.L Gestão de Obras - Todos os direitos reservados', pageWidth / 2, doc.internal.pageSize.getHeight() - 5, { align: 'center' });
+      doc.text(`Página ${i} de ${pageCount}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
+      doc.text('© 2026 A.L Gestão de Obras - Relatório Gerencial Detalhado', pageWidth / 2, pageHeight - 5, { align: 'center' });
     }
     
-    doc.save(`Relatorio_Geral_Obras_${new Date().toISOString().split('T')[0]}.pdf`);
-    showNotification('Relatório Geral PDF gerado!');
+    doc.save(`Relatorio_Detalhado_Obras_${new Date().toISOString().split('T')[0]}.pdf`);
+    showNotification('Relatório Detalhado PDF gerado com sucesso!');
   };
 
   const handleUpdateAvatar = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1023,6 +1190,36 @@ export default function App() {
         onChange={handleFileChange} 
       />
       {/* Notification Toast */}
+      {/* Lightbox Modal */}
+      <AnimatePresence>
+        {selectedPhotoUrl && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 md:p-12"
+            onClick={() => setSelectedPhotoUrl(null)}
+          >
+            <button 
+              className="absolute top-6 right-6 text-white/70 hover:text-white transition-colors p-2"
+              onClick={() => setSelectedPhotoUrl(null)}
+            >
+              <X size={32} />
+            </button>
+            <motion.img 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              src={selectedPhotoUrl} 
+              alt="Full view" 
+              className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+              referrerPolicy="no-referrer"
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {notification && (
           <motion.div 
@@ -1465,29 +1662,6 @@ export default function App() {
                             </span>
                             <h2 className="text-4xl font-display font-bold text-white">{viewingProject.name}</h2>
                           </div>
-                          <div className="flex gap-3">
-                            <button 
-                              onClick={() => generateProjectReport(viewingProject)}
-                              className="bg-axia-accent hover:bg-axia-accent/80 backdrop-blur-md text-white p-3 rounded-2xl transition-all border border-white/20 flex items-center gap-2 font-bold"
-                            >
-                              <FileDown size={20} />
-                              Emitir Relatório
-                            </button>
-                            <button 
-                              onClick={() => startEditing(viewingProject)}
-                              className="bg-white/20 hover:bg-white/30 backdrop-blur-md text-white p-3 rounded-2xl transition-all border border-white/20 flex items-center gap-2 font-bold"
-                            >
-                              <Pencil size={20} />
-                              Editar
-                            </button>
-                            <button 
-                              onClick={() => setProjectToDelete(viewingProject)}
-                              className="bg-red-500/20 hover:bg-red-500/40 backdrop-blur-md text-white p-3 rounded-2xl transition-all border border-white/20 flex items-center gap-2 font-bold"
-                            >
-                              <Trash2 size={20} />
-                              Excluir
-                            </button>
-                          </div>
                         </div>
                       </div>
 
@@ -1514,6 +1688,13 @@ export default function App() {
                             >
                               Histórico
                               {projectDetailTab === 'history' && <motion.div layoutId="projectTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-axia-primary" />}
+                            </button>
+                            <button 
+                              onClick={() => setProjectDetailTab('photos')}
+                              className={`px-6 py-3 font-bold text-sm transition-all relative ${projectDetailTab === 'photos' ? 'text-axia-primary' : 'text-slate-400 hover:text-slate-600'}`}
+                            >
+                              Relatório Fotográfico
+                              {projectDetailTab === 'photos' && <motion.div layoutId="projectTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-axia-primary" />}
                             </button>
                           </div>
 
@@ -1674,6 +1855,181 @@ export default function App() {
                                 </div>
                               </div>
                             </div>
+                          ) : projectDetailTab === 'photos' ? (
+                            <div className="space-y-6">
+                              <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-xl font-bold flex items-center gap-2">
+                                  <Camera className="text-axia-primary" /> Relatório Fotográfico
+                                </h3>
+                                <button 
+                                  onClick={() => setIsAddingPhoto(true)}
+                                  className="bg-axia-primary text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-axia-primary/90 transition-all shadow-md shadow-axia-primary/20"
+                                >
+                                  <Plus size={18} /> Adicionar Foto
+                                </button>
+                              </div>
+
+                              {isAddingPhoto && (
+                                <motion.div 
+                                  initial={{ opacity: 0, y: -20 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  className="p-6 bg-slate-50 rounded-3xl border border-slate-200 shadow-inner space-y-4 mb-8"
+                                >
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Foto do Relatório</label>
+                                      <div className="space-y-3">
+                                        {!newPhoto.url ? (
+                                          <button 
+                                            onClick={() => photoFileInputRef.current?.click()}
+                                            disabled={isUploadingPhoto}
+                                            className="w-full aspect-video border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3 hover:border-axia-primary hover:bg-axia-primary/5 transition-all group disabled:opacity-50"
+                                          >
+                                            {isUploadingPhoto ? (
+                                              <div className="flex flex-col items-center gap-2">
+                                                <div className="w-8 h-8 border-3 border-axia-primary border-t-transparent rounded-full animate-spin" />
+                                                <span className="text-xs font-bold text-axia-primary">Enviando...</span>
+                                              </div>
+                                            ) : (
+                                              <>
+                                                <div className="p-3 bg-slate-100 rounded-full text-slate-400 group-hover:bg-axia-primary/10 group-hover:text-axia-primary transition-all">
+                                                  <Upload size={24} />
+                                                </div>
+                                                <div className="text-center">
+                                                  <p className="text-sm font-bold text-slate-600">Clique para anexar foto</p>
+                                                  <p className="text-[10px] text-slate-400">JPG, PNG ou GIF (Máx. 5MB)</p>
+                                                </div>
+                                              </>
+                                            )}
+                                          </button>
+                                        ) : (
+                                          <div className="relative aspect-video rounded-2xl overflow-hidden border border-slate-200 group">
+                                            <img 
+                                              src={newPhoto.url} 
+                                              alt="Preview" 
+                                              className="w-full h-full object-cover"
+                                              referrerPolicy="no-referrer"
+                                            />
+                                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center gap-2">
+                                              <button 
+                                                onClick={() => photoFileInputRef.current?.click()}
+                                                className="p-2 bg-white text-slate-900 rounded-full hover:bg-axia-primary hover:text-white transition-all"
+                                                title="Trocar foto"
+                                              >
+                                                <Upload size={18} />
+                                              </button>
+                                              <button 
+                                                onClick={() => setNewPhoto({ ...newPhoto, url: '' })}
+                                                className="p-2 bg-white text-red-600 rounded-full hover:bg-red-600 hover:text-white transition-all"
+                                                title="Remover"
+                                              >
+                                                <X size={18} />
+                                              </button>
+                                            </div>
+                                          </div>
+                                        )}
+                                        
+                                        <div className="flex gap-2">
+                                          <div className="relative flex-1">
+                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                              <Link size={14} className="text-slate-400" />
+                                            </div>
+                                            <input 
+                                              type="text" 
+                                              placeholder="Ou cole uma URL direta da imagem..."
+                                              value={newPhoto.url}
+                                              onChange={(e) => setNewPhoto({ ...newPhoto, url: e.target.value })}
+                                              className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-axia-primary/20"
+                                            />
+                                          </div>
+                                          <input 
+                                            type="file" 
+                                            ref={photoFileInputRef}
+                                            onChange={handlePhotoFileChange}
+                                            className="hidden"
+                                            accept="image/*"
+                                          />
+                                        </div>
+                                      </div>
+                                      {newPhoto.url && !newPhoto.url.startsWith('http') && (
+                                        <p className="text-[10px] text-amber-600 font-bold">URL inválida ou arquivo não carregado corretamente.</p>
+                                      )}
+                                    </div>
+                                    <div className="space-y-2">
+                                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Legenda / Observação</label>
+                                      <input 
+                                        type="text" 
+                                        placeholder="Ex: Fundação do bloco A concluída"
+                                        value={newPhoto.caption}
+                                        onChange={(e) => setNewPhoto({ ...newPhoto, caption: e.target.value })}
+                                        className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20"
+                                      />
+                                    </div>
+                                  </div>
+                                  <div className="flex justify-end gap-3 pt-2">
+                                    <button 
+                                      onClick={() => setIsAddingPhoto(false)}
+                                      className="px-4 py-2 text-slate-500 font-bold text-sm hover:bg-slate-100 rounded-xl transition-all"
+                                    >
+                                      Cancelar
+                                    </button>
+                                    <button 
+                                      onClick={handleAddPhoto}
+                                      disabled={!newPhoto.url}
+                                      className="px-6 py-2 bg-axia-primary text-white font-bold text-sm rounded-xl hover:bg-axia-primary/90 transition-all shadow-md shadow-axia-primary/20 disabled:opacity-50"
+                                    >
+                                      Salvar Foto
+                                    </button>
+                                  </div>
+                                </motion.div>
+                              )}
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                                {photoReports.filter(p => p.projectId === viewingProject.id).length === 0 ? (
+                                  <div className="col-span-full p-12 text-center text-slate-400 bg-slate-50 rounded-3xl border border-slate-100">
+                                    <Camera size={48} className="mx-auto mb-4 opacity-10" />
+                                    <p>Nenhuma foto registrada neste relatório.</p>
+                                  </div>
+                                ) : (
+                                  photoReports.filter(p => p.projectId === viewingProject.id).map(photo => (
+                                    <div key={photo.id} className="group bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300">
+                                      <div className="aspect-video relative overflow-hidden">
+                                        <img 
+                                          src={photo.url} 
+                                          alt={photo.caption}
+                                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                                          referrerPolicy="no-referrer"
+                                        />
+                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
+                                          <button 
+                                            onClick={() => setSelectedPhotoUrl(photo.url)}
+                                            className="p-3 bg-white text-axia-primary rounded-2xl hover:bg-slate-100 transition-all shadow-lg"
+                                            title="Visualizar Foto"
+                                          >
+                                            <Eye size={20} />
+                                          </button>
+                                          <button 
+                                            onClick={() => handleDeletePhoto(photo.id)}
+                                            className="p-3 bg-red-500 text-white rounded-2xl hover:bg-red-600 transition-all shadow-lg"
+                                            title="Excluir Foto"
+                                          >
+                                            <Trash2 size={20} />
+                                          </button>
+                                        </div>
+                                      </div>
+                                      <div className="p-4">
+                                        <p className="text-sm font-bold text-slate-900 mb-1 line-clamp-2">{photo.caption || 'Sem legenda'}</p>
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
+                                            <Calendar size={10} /> {new Date(photo.date).toLocaleDateString('pt-BR')}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            </div>
                           ) : (
                             <div className="space-y-6">
                               <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
@@ -1768,23 +2124,6 @@ export default function App() {
                             </div>
                           </div>
 
-                          <div className="space-y-4">
-                            <h4 className="font-bold text-slate-900">Equipe Responsável</h4>
-                            <div className="flex -space-x-2">
-                              {[1,2,3,4].map(i => (
-                                <img 
-                                  key={i}
-                                  src={`https://picsum.photos/seed/user${i}/100/100`} 
-                                  alt="Team" 
-                                  className="w-10 h-10 rounded-full border-2 border-white shadow-sm"
-                                  referrerPolicy="no-referrer"
-                                />
-                              ))}
-                              <div className="w-10 h-10 rounded-full bg-slate-100 border-2 border-white flex items-center justify-center text-xs font-bold text-slate-400">
-                                +2
-                              </div>
-                            </div>
-                          </div>
 
                           <button 
                             onClick={() => {
