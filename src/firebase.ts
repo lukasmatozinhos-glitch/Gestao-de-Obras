@@ -13,10 +13,11 @@ let storageInstance: FirebaseStorage | null = null;
 export const getStorageInstance = () => {
   if (!storageInstance) {
     try {
-      // Explicitly passing the storage bucket from config
-      storageInstance = getStorage(app, firebaseConfig.storageBucket);
+      // Initialize storage using the default bucket from firebaseConfig
+      console.log("Initializing Firebase Storage with default bucket from config");
+      storageInstance = getStorage(app);
     } catch (error) {
-      console.error("Firebase Storage could not be initialized. Make sure it is enabled in your Firebase Console.", error);
+      console.error("Firebase Storage could not be initialized:", error);
       throw error;
     }
   }

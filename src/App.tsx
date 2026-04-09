@@ -180,6 +180,13 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('darkMode');
+      return saved === 'true';
+    }
+    return false;
+  });
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserProfile>(DEFAULT_USER);
@@ -275,23 +282,50 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file || !viewingProject) return;
 
+    // Check file size (e.g., 5MB limit)
+    if (file.size > 5 * 1024 * 1024) {
+      showNotification('A foto é muito grande. O limite é 5MB.');
+      return;
+    }
+
     setIsUploadingPhoto(true);
     try {
       const storage = getStorageInstance();
       const fileRef = storageRef(storage, `photoReports/${viewingProject.id}/${Date.now()}_${file.name}`);
+      
+      console.log("Starting upload to:", fileRef.fullPath);
       await uploadBytes(fileRef, file);
+      
       const url = await getDownloadURL(fileRef);
       setNewPhoto(prev => ({ ...prev, url }));
       showNotification('Foto carregada com sucesso!');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error uploading photo:', error);
-      showNotification('Erro ao carregar foto. Verifique as permissões do Firebase Storage.');
+      
+      if (error.code === 'storage/retry-limit-exceeded') {
+        showNotification('Erro de conexão com o Storage. Verifique se o serviço está ativado no Console do Firebase.');
+      } else if (error.code === 'storage/unauthorized') {
+        showNotification('Sem permissão para upload. Verifique as regras de segurança do Storage.');
+      } else {
+        showNotification('Erro ao carregar foto. Tente novamente.');
+      }
     } finally {
       setIsUploadingPhoto(false);
+      // Reset input value to allow selecting the same file again
+      if (e.target) e.target.value = '';
     }
   };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('darkMode', isDarkMode.toString());
+  }, [isDarkMode]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -1274,7 +1308,7 @@ export default function App() {
       <motion.aside 
         initial={false}
         animate={{ width: isSidebarOpen ? 260 : 80 }}
-        className="bg-white border-r border-slate-200 flex flex-col z-30"
+        className="bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col z-30 transition-colors duration-300"
       >
         <div className="p-6 flex items-center gap-3">
           <div className="w-10 h-10 bg-axia-primary rounded-lg flex items-center justify-center flex-shrink-0 shadow-lg shadow-axia-primary/20">
@@ -1326,7 +1360,7 @@ export default function App() {
           />
         </nav>
 
-        <div className="p-4 border-t border-slate-100">
+        <div className="p-4 border-t border-slate-100 dark:border-slate-800">
           <NavItem 
             icon={<Settings size={20} />} 
             label="Configurações" 
@@ -1338,13 +1372,13 @@ export default function App() {
       </motion.aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col overflow-hidden">
+      <main className="flex-1 flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-950 transition-colors duration-300">
         {/* Header */}
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 z-20">
+        <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-8 z-20 transition-colors duration-300">
           <div className="flex items-center gap-4">
             <button 
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"
+              className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-500 dark:text-slate-400"
             >
               <Menu size={20} />
             </button>
@@ -1353,24 +1387,24 @@ export default function App() {
               <input 
                 type="text" 
                 placeholder="Buscar projetos, tarefas..." 
-                className="pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20 w-64 transition-all"
+                className="pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20 w-64 transition-all dark:text-white"
               />
             </div>
           </div>
 
           <div className="flex items-center gap-4">
-            <button className="relative p-2 hover:bg-slate-100 rounded-full text-slate-500">
+            <button className="relative p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-500 dark:text-slate-400">
               <Bell size={20} />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-axia-secondary rounded-full border-2 border-white"></span>
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-axia-secondary rounded-full border-2 border-white dark:border-slate-900"></span>
             </button>
-            <div className="h-8 w-px bg-slate-200 mx-2"></div>
+            <div className="h-8 w-px bg-slate-200 dark:bg-slate-800 mx-2"></div>
             <button 
               onClick={() => setShowProfile(true)}
-              className="flex items-center gap-3 hover:bg-slate-50 p-1.5 rounded-xl transition-colors text-left"
+              className="flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-800 p-1.5 rounded-xl transition-colors text-left"
             >
               <div className="text-right hidden sm:block">
-                <p className="text-sm font-semibold">{currentUser.name}</p>
-                <p className="text-xs text-slate-500">{currentUser.role}</p>
+                <p className="text-sm font-semibold dark:text-white">{currentUser.name}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{currentUser.role}</p>
               </div>
               <img 
                 src={currentUser.avatar} 
@@ -1395,8 +1429,8 @@ export default function App() {
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="text-3xl font-display font-bold text-slate-900">Dashboard de Obras</h2>
-                    <p className="text-slate-500">Bem-vindo de volta. Aqui está o resumo das suas operações.</p>
+                    <h2 className="text-3xl font-display font-bold text-slate-900 dark:text-white">Dashboard de Obras</h2>
+                    <p className="text-slate-500 dark:text-slate-400">Bem-vindo de volta. Aqui está o resumo das suas operações.</p>
                   </div>
                   <button 
                     onClick={() => {
@@ -1444,8 +1478,8 @@ export default function App() {
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                   {/* Projects per Client Chart */}
-                  <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                    <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
+                  <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                    <h3 className="text-lg font-bold mb-6 flex items-center gap-2 dark:text-white">
                       <User size={20} className="text-axia-primary" />
                       Obras por Cliente
                     </h3>
@@ -2333,10 +2367,10 @@ export default function App() {
                         <motion.div 
                           layout
                           key={project.id}
-                          className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col md:flex-row"
+                          className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col md:flex-row"
                         >
                           <div 
-                            className="md:w-1/3 bg-slate-100 relative min-h-[200px] cursor-pointer group/img overflow-hidden"
+                            className="md:w-1/3 bg-slate-100 dark:bg-slate-800 relative min-h-[200px] cursor-pointer group/img overflow-hidden"
                             onClick={() => handleImageClick(project.id)}
                           >
                             <img 
@@ -2359,42 +2393,42 @@ export default function App() {
                             <div className="flex justify-between items-start mb-2">
                               <div>
                                 <p className="text-[10px] font-bold text-axia-secondary uppercase tracking-widest mb-1 break-all">Contrato: {project.contractNumber}</p>
-                                <h3 className="text-xl font-bold text-slate-900 leading-tight">{project.name}</h3>
+                                <h3 className="text-xl font-bold text-slate-900 dark:text-white leading-tight">{project.name}</h3>
                               </div>
                               <div className="text-right">
-                                <p className="text-[10px] font-bold text-slate-400 uppercase">Valor do Contrato</p>
+                                <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">Valor do Contrato</p>
                                 <p className="text-lg font-bold text-axia-accent">
                                   {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget)}
                                 </p>
                               </div>
                             </div>
 
-                            <p className="text-sm text-slate-600 mb-6 line-clamp-2">{project.description}</p>
+                            <p className="text-sm text-slate-600 dark:text-slate-400 mb-6 line-clamp-2">{project.description}</p>
 
                             <div className="grid grid-cols-2 gap-4 mb-6">
-                              <div className="flex items-center gap-2 text-xs text-slate-500">
+                              <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                                 <MapPin size={14} className="text-axia-primary" />
                                 <span>{project.location}</span>
                               </div>
-                              <div className="flex items-center gap-2 text-xs text-slate-500">
+                              <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                                 <Calendar size={14} className="text-axia-primary" />
                                 <span>{project.startDate} até {project.endDate}</span>
                               </div>
-                              <div className="flex items-center gap-2 text-xs text-slate-500 col-span-2">
+                              <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 col-span-2">
                                 <Briefcase size={14} className="text-axia-primary shrink-0" />
                                 <span className="font-bold shrink-0">Executora:</span>
                                 <span className="break-words">{project.executingCompany}</span>
                               </div>
                             </div>
 
-                            <div className="mb-6 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                            <div className="mb-6 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-800">
                               <div className="flex items-center justify-between mb-2">
-                                <span className="text-[10px] font-bold text-slate-500 uppercase">Progresso Financeiro</span>
+                                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Progresso Financeiro</span>
                                 <span className="text-[10px] font-bold text-axia-accent">
                                   {Math.round((project.spent / project.budget) * 100)}% Medido
                                 </span>
                               </div>
-                              <div className="h-1.5 w-full bg-slate-200 rounded-full overflow-hidden mb-2">
+                              <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden mb-2">
                                 <motion.div 
                                   initial={{ width: 0 }}
                                   animate={{ width: `${(project.spent / project.budget) * 100}%` }}
@@ -2402,18 +2436,18 @@ export default function App() {
                                 />
                               </div>
                               <div className="flex justify-between text-[10px] font-bold">
-                                <div className="text-slate-400">Saldo: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget - project.spent)}</div>
+                                <div className="text-slate-400 dark:text-slate-500">Saldo: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget - project.spent)}</div>
                                 <div className="text-axia-primary">Medido: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.spent)}</div>
                               </div>
                             </div>
 
-                            <div className="mt-auto pt-4 border-t border-slate-100 flex items-center justify-between">
+                            <div className="mt-auto pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
                               <div className="flex-1 mr-8">
                                 <div className="flex items-center justify-between mb-1">
-                                  <span className="text-[10px] font-bold text-slate-500 uppercase">Progresso da Obra</span>
+                                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Progresso da Obra</span>
                                   <span className="text-xs font-bold text-axia-primary">{project.progress}%</span>
                                 </div>
-                                <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                                <div className="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                                   <motion.div 
                                     initial={{ width: 0 }}
                                     animate={{ width: `${project.progress}%` }}
@@ -2424,21 +2458,21 @@ export default function App() {
                               <div className="flex items-center gap-2">
                                 <button 
                                   onClick={() => startEditing(project)}
-                                  className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-axia-primary transition-colors"
+                                  className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-400 hover:text-axia-primary transition-colors"
                                   title="Editar Obra"
                                 >
                                   <Pencil size={18} />
                                 </button>
                                 <button 
                                   onClick={() => setProjectToDelete(project)}
-                                  className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-500 transition-colors"
+                                  className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-400 hover:text-red-500 transition-colors"
                                   title="Excluir Obra"
                                 >
                                   <Trash2 size={18} />
                                 </button>
                                 <button 
                                   onClick={() => setViewingProject(project)}
-                                  className="p-2 hover:bg-slate-100 rounded-lg text-axia-primary transition-colors"
+                                  className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-axia-primary transition-colors"
                                   title="Ver Detalhes"
                                 >
                                   <ChevronRight size={20} />
@@ -2464,17 +2498,17 @@ export default function App() {
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="text-3xl font-display font-bold text-slate-900">Medições de Obras</h2>
-                    <p className="text-slate-500">Registre e acompanhe as medições mensais de cada projeto.</p>
+                    <h2 className="text-3xl font-display font-bold text-slate-900 dark:text-white">Medições de Obras</h2>
+                    <p className="text-slate-500 dark:text-slate-400">Registre e acompanhe as medições mensais de cada projeto.</p>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                   {/* New Measurement Form */}
                   <div className="lg:col-span-1">
-                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm sticky top-8">
+                    <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm sticky top-8">
                       <div className="flex items-center justify-between mb-6">
-                        <h3 className="text-lg font-bold flex items-center gap-2">
+                        <h3 className="text-lg font-bold flex items-center gap-2 dark:text-white">
                           <Receipt className="text-axia-primary" /> {editingMeasurement ? 'Editar Medição' : 'Nova Medição'}
                         </h3>
                         {editingMeasurement && (
@@ -2491,47 +2525,47 @@ export default function App() {
                       </div>
                       <form onSubmit={handleAddMeasurement} className="space-y-4">
                         <div>
-                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Projeto</label>
+                          <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Projeto</label>
                           <select 
                             required
                             value={newMeasurement.projectId}
                             onChange={(e) => setNewMeasurement({...newMeasurement, projectId: e.target.value})}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20"
+                            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20 dark:text-white"
                           >
                             <option value="">Selecione a obra...</option>
                             {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                           </select>
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Data da Medição</label>
+                          <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Data da Medição</label>
                           <input 
                             required
                             type="date" 
                             value={newMeasurement.date}
                             onChange={(e) => setNewMeasurement({...newMeasurement, date: e.target.value})}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20" 
+                            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20 dark:text-white" 
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Valor Medido (R$)</label>
+                          <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Valor Medido (R$)</label>
                           <input 
                             required
                             type="number" 
                             value={newMeasurement.value}
                             onChange={(e) => setNewMeasurement({...newMeasurement, value: e.target.value})}
                             placeholder="0,00"
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20" 
+                            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20 dark:text-white" 
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Descrição dos Serviços</label>
+                          <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Descrição dos Serviços</label>
                           <textarea 
                             required
                             rows={3}
                             value={newMeasurement.description}
                             onChange={(e) => setNewMeasurement({...newMeasurement, description: e.target.value})}
                             placeholder="Ex: Execução de 500m de cabeamento..."
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20"
+                            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20 dark:text-white"
                           ></textarea>
                         </div>
                         <button 
@@ -2547,32 +2581,32 @@ export default function App() {
 
                   {/* Measurements History */}
                   <div className="lg:col-span-2 space-y-6">
-                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                      <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-                        <h3 className="text-lg font-bold">Histórico de Medições</h3>
-                        <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+                      <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                        <h3 className="text-lg font-bold dark:text-white">Histórico de Medições</h3>
+                        <div className="flex items-center gap-2 text-xs font-bold text-slate-400 dark:text-slate-500">
                           <TrendingUp size={14} />
                           <span>Total Medido: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(measurements.reduce((acc, m) => acc + m.value, 0))}</span>
                         </div>
                       </div>
-                      <div className="divide-y divide-slate-100">
+                      <div className="divide-y divide-slate-100 dark:divide-slate-800">
                         {measurements.length === 0 ? (
-                          <div className="p-20 text-center text-slate-400">
+                          <div className="p-20 text-center text-slate-400 dark:text-slate-600">
                             <Receipt size={48} className="mx-auto mb-4 opacity-20" />
                             <p>Nenhuma medição registrada ainda.</p>
                           </div>
                         ) : (
                           measurements.map((measurement) => (
-                            <div key={measurement.id} className="p-6 hover:bg-slate-50 transition-colors">
+                            <div key={measurement.id} className="p-6 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                               <div className="flex items-start justify-between mb-2">
                                 <div>
                                   <div className="flex items-center gap-2 mb-1">
-                                    <h4 className="font-bold text-slate-900">{measurement.projectName}</h4>
-                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700 border border-green-200">
+                                    <h4 className="font-bold text-slate-900 dark:text-white">{measurement.projectName}</h4>
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-900/30">
                                       {measurement.status === 'paid' ? 'Pago' : measurement.status === 'approved' ? 'Aprovado' : 'Pendente'}
                                     </span>
                                   </div>
-                                  <p className="text-xs text-slate-500 flex items-center gap-2">
+                                  <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
                                     <Calendar size={12} /> {measurement.date}
                                   </p>
                                 </div>
@@ -2583,14 +2617,14 @@ export default function App() {
                                   <div className="flex items-center justify-end gap-2 mt-1">
                                     <button 
                                       onClick={() => startEditingMeasurement(measurement)}
-                                      className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-axia-primary transition-colors"
+                                      className="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-axia-primary transition-colors"
                                       title="Editar Medição"
                                     >
                                       <Pencil size={14} />
                                     </button>
                                     <button 
                                       onClick={() => handleDeleteMeasurement(measurement)}
-                                      className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-red-500 transition-colors"
+                                      className="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-red-500 transition-colors"
                                       title="Excluir Medição"
                                     >
                                       <Trash2 size={14} />
@@ -2598,7 +2632,7 @@ export default function App() {
                                   </div>
                                 </div>
                               </div>
-                              <p className="text-sm text-slate-600 bg-slate-50 p-3 rounded-lg border border-slate-100 italic">
+                              <p className="text-sm text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-lg border border-slate-100 dark:border-slate-800 italic">
                                 "{measurement.description}"
                               </p>
                             </div>
@@ -2621,13 +2655,13 @@ export default function App() {
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="text-3xl font-display font-bold text-slate-900">Relatórios Semanais</h2>
-                    <p className="text-slate-500">Gerencie e anexe os relatórios de acompanhamento das obras.</p>
+                    <h2 className="text-3xl font-display font-bold text-slate-900 dark:text-white">Relatórios Semanais</h2>
+                    <p className="text-slate-500 dark:text-slate-400">Gerencie e anexe os relatórios de acompanhamento das obras.</p>
                   </div>
                   <div className="flex gap-3">
                     <button 
                       onClick={() => showNotification('Exportando todos os relatórios para PDF...')}
-                      className="bg-white text-slate-700 border border-slate-200 px-4 py-2 rounded-lg font-semibold flex items-center gap-2 hover:bg-slate-50 transition-colors"
+                      className="bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 px-4 py-2 rounded-lg font-semibold flex items-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
                     >
                       <Download size={18} />
                       Exportar Tudo
@@ -2657,34 +2691,34 @@ export default function App() {
                         border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center text-center transition-all cursor-pointer
                         ${isDragging 
                           ? 'border-axia-primary bg-axia-primary/5 scale-[1.02]' 
-                          : 'border-slate-200 bg-white hover:border-axia-primary/50 hover:bg-slate-50'
+                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-axia-primary/50 hover:bg-slate-50 dark:hover:bg-slate-800/50'
                         }
                       `}
                     >
                       <div className="w-16 h-16 bg-axia-primary/10 rounded-full flex items-center justify-center mb-4 text-axia-primary">
                         <Upload size={32} />
                       </div>
-                      <h4 className="text-lg font-bold text-slate-900 mb-2">Anexar Relatório Semanal</h4>
-                      <p className="text-sm text-slate-500 mb-6">Arraste seu arquivo PDF aqui ou clique para selecionar do computador.</p>
+                      <h4 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Anexar Relatório Semanal</h4>
+                      <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">Arraste seu arquivo PDF aqui ou clique para selecionar do computador.</p>
                       <div className="w-full space-y-4 text-left">
                         <div>
-                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Projeto</label>
+                          <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Projeto</label>
                           <select 
                             value={selectedProject}
                             onChange={(e) => setSelectedProject(e.target.value)}
-                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20"
+                            className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20 dark:text-white"
                           >
                             <option value="">Selecione a obra...</option>
                             {MOCK_PROJECTS.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
                           </select>
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Semana de Referência</label>
+                          <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Semana de Referência</label>
                           <input 
                             type="date" 
                             value={selectedDate}
                             onChange={(e) => setSelectedDate(e.target.value)}
-                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20" 
+                            className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20 dark:text-white" 
                           />
                         </div>
                         <button 
@@ -2701,31 +2735,31 @@ export default function App() {
                         <AlertCircle size={20} />
                         <h4 className="font-bold">Lembrete</h4>
                       </div>
-                      <p className="text-sm text-slate-700 leading-relaxed">
+                      <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
                         Os relatórios semanais devem ser enviados até toda sexta-feira às 18h para aprovação da diretoria técnica.
                       </p>
                     </div>
                   </div>
 
                   {/* Reports List */}
-                  <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="p-6 border-b border-slate-100">
-                      <h3 className="text-lg font-bold">Histórico de Envios</h3>
+                  <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+                    <div className="p-6 border-b border-slate-100 dark:border-slate-800">
+                      <h3 className="text-lg font-bold dark:text-white">Histórico de Envios</h3>
                     </div>
-                    <div className="divide-y divide-slate-100">
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800">
                       {reports.map((report) => (
-                        <div key={report.id} className="p-6 hover:bg-slate-50 transition-colors flex items-center gap-4">
-                          <div className="w-12 h-12 bg-red-50 text-red-500 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <div key={report.id} className="p-6 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors flex items-center gap-4">
+                          <div className="w-12 h-12 bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400 rounded-xl flex items-center justify-center flex-shrink-0">
                             <FileText size={24} />
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
-                              <h4 className="font-bold text-slate-900 truncate">{report.fileName}</h4>
+                              <h4 className="font-bold text-slate-900 dark:text-white truncate">{report.fileName}</h4>
                               <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${getReportStatusColor(report.status)}`}>
                                 {report.status === 'approved' ? 'Aprovado' : report.status === 'submitted' ? 'Em Análise' : 'Rascunho'}
                               </span>
                             </div>
-                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
                               <span className="flex items-center gap-1 font-medium text-axia-primary">
                                 <HardHat size={12} /> {report.projectName}
                               </span>
@@ -2740,14 +2774,14 @@ export default function App() {
                           <div className="flex items-center gap-2">
                             <button 
                               onClick={() => handleDownload(report.fileName)}
-                              className="p-2 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-axia-primary transition-colors" 
+                              className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-axia-primary transition-colors" 
                               title="Download"
                             >
                               <Download size={18} />
                             </button>
                             <button 
                               onClick={() => handleDelete(report.id)}
-                              className="p-2 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-red-500 transition-colors" 
+                              className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-red-500 transition-colors" 
                               title="Excluir"
                             >
                               <Trash2 size={18} />
@@ -2771,40 +2805,40 @@ export default function App() {
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="text-3xl font-display font-bold text-slate-900">Atualizações de Status</h2>
-                    <p className="text-slate-500">Registre o progresso diário e comunicados importantes das obras.</p>
+                    <h2 className="text-3xl font-display font-bold text-slate-900 dark:text-white">Atualizações de Status</h2>
+                    <p className="text-slate-500 dark:text-slate-400">Registre o progresso diário e comunicados importantes das obras.</p>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                   {/* New Update Form */}
                   <div className="lg:col-span-1">
-                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm sticky top-8">
-                      <h3 className="text-lg font-bold flex items-center gap-2 mb-6">
+                    <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm sticky top-8">
+                      <h3 className="text-lg font-bold flex items-center gap-2 mb-6 dark:text-white">
                         <MessageSquare className="text-axia-primary" /> Nova Atualização
                       </h3>
                       <form onSubmit={handleAddStatusUpdate} className="space-y-4">
                         <div>
-                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Projeto</label>
+                          <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Projeto</label>
                           <select 
                             required
                             value={newStatusUpdate.projectId}
                             onChange={(e) => setNewStatusUpdate({...newStatusUpdate, projectId: e.target.value})}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20"
+                            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20 dark:text-white"
                           >
                             <option value="">Selecione a obra...</option>
                             {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                           </select>
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Mensagem / Status</label>
+                          <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Mensagem / Status</label>
                           <textarea 
                             required
                             rows={5}
                             value={newStatusUpdate.message}
                             onChange={(e) => setNewStatusUpdate({...newStatusUpdate, message: e.target.value})}
                             placeholder="Descreva o que aconteceu hoje ou o status atual..."
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20"
+                            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20 dark:text-white"
                           ></textarea>
                         </div>
                         <button 
@@ -2820,13 +2854,13 @@ export default function App() {
 
                   {/* Updates History */}
                   <div className="lg:col-span-2 space-y-6">
-                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                      <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-                        <h3 className="text-lg font-bold">Histórico Geral de Atualizações</h3>
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+                      <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                        <h3 className="text-lg font-bold dark:text-white">Histórico Geral de Atualizações</h3>
                       </div>
-                      <div className="divide-y divide-slate-100">
+                      <div className="divide-y divide-slate-100 dark:divide-slate-800">
                         {statusUpdates.length === 0 ? (
-                          <div className="p-12 text-center text-slate-400">
+                          <div className="p-12 text-center text-slate-400 dark:text-slate-600">
                             <History size={48} className="mx-auto mb-4 opacity-10" />
                             <p>Nenhuma atualização registrada ainda.</p>
                           </div>
@@ -2834,16 +2868,16 @@ export default function App() {
                           statusUpdates.map((update) => {
                             const project = projects.find(p => p.id === update.projectId);
                             return (
-                              <div key={update.id} className="p-6 hover:bg-slate-50 transition-colors">
+                              <div key={update.id} className="p-6 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                                 <div className="flex items-start gap-4">
                                   <div className="w-10 h-10 bg-axia-primary/10 text-axia-primary rounded-full flex items-center justify-center flex-shrink-0">
                                     <User size={20} />
                                   </div>
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center justify-between mb-1">
-                                      <h4 className="font-bold text-slate-900">{update.author}</h4>
+                                      <h4 className="font-bold text-slate-900 dark:text-white">{update.author}</h4>
                                       <div className="flex items-center gap-3">
-                                        <span className="text-[10px] font-mono font-bold text-slate-400 uppercase bg-slate-100 px-2 py-0.5 rounded-md">{update.date}</span>
+                                        <span className="text-[10px] font-mono font-bold text-slate-400 dark:text-slate-500 uppercase bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">{update.date}</span>
                                         <button 
                                           onClick={() => handleDeleteStatusUpdate(update.id)}
                                           className="p-1 text-slate-300 hover:text-red-500 transition-colors"
@@ -2856,7 +2890,7 @@ export default function App() {
                                     <p className="text-[10px] font-bold text-axia-secondary uppercase tracking-wider mb-2">
                                       {project?.name || 'Projeto Excluído'}
                                     </p>
-                                    <p className="text-sm text-slate-600 leading-relaxed">{update.message}</p>
+                                    <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">{update.message}</p>
                                   </div>
                                 </div>
                               </div>
@@ -2907,198 +2941,122 @@ export default function App() {
                     </nav>
                   </div>
 
-                  <div className="md:col-span-2 space-y-6">
-                    <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-8">
-                      {settingsTab === 'general' && (
-                        <section className="space-y-4">
-                          <h3 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-2">Preferências Gerais</h3>
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="font-bold text-slate-700">Compactar Sidebar</p>
-                              <p className="text-xs text-slate-500">Reduzir o tamanho da barra lateral automaticamente.</p>
-                            </div>
-                            <button 
-                              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                              className={`w-12 h-6 rounded-full relative transition-colors ${isSidebarOpen ? 'bg-axia-primary' : 'bg-slate-200'}`}
-                            >
-                              <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${isSidebarOpen ? 'right-1' : 'left-1'}`} />
-                            </button>
-                          </div>
-                        </section>
-                      )}
-
-                      {settingsTab === 'appearance' && (
-                        <section className="space-y-6">
-                          <h3 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-2">Personalização Visual</h3>
-                          
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="font-bold text-slate-700">Modo Escuro</p>
-                              <p className="text-xs text-slate-500">Alternar entre tema claro e escuro.</p>
-                            </div>
-                            <button 
-                              onClick={() => showNotification('Modo escuro será implementado em breve.')}
-                              className="w-12 h-6 bg-slate-200 rounded-full relative transition-colors"
-                            >
-                              <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full shadow-sm" />
-                            </button>
-                          </div>
-
-                          <div className="space-y-4">
-                            <p className="font-bold text-slate-700">Paleta de Cores do Sistema</p>
-                            <p className="text-xs text-slate-500 mb-4">Escolha uma combinação de cores que melhor se adapta ao seu estilo de trabalho.</p>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                              {palettes.map((palette) => (
-                                <button
-                                  key={palette.id}
-                                  onClick={() => setCurrentPalette(palette.id)}
-                                  className={`p-4 rounded-2xl border-2 transition-all flex items-center gap-4 text-left ${
-                                    currentPalette === palette.id 
-                                      ? 'border-axia-primary bg-axia-primary/5 shadow-md' 
-                                      : 'border-slate-100 hover:border-slate-200 bg-slate-50'
-                                  }`}
+                    <div className="md:col-span-2 space-y-6">
+                      <div className="bg-white dark:bg-slate-900 p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-8">
+                        {settingsTab === 'general' && (
+                          <>
+                            <section className="space-y-4">
+                              <h3 className="text-lg font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-800 pb-2">Preferências Gerais</h3>
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="font-bold text-slate-700 dark:text-slate-200">Compactar Sidebar</p>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400">Reduzir o tamanho da barra lateral automaticamente.</p>
+                                </div>
+                                <button 
+                                  onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                                  className={`w-12 h-6 rounded-full relative transition-colors ${isSidebarOpen ? 'bg-axia-primary' : 'bg-slate-200'}`}
                                 >
-                                  <div className="flex -space-x-3">
-                                    <div className="w-10 h-10 rounded-xl border-2 border-white shadow-sm" style={{ backgroundColor: palette.primary }} />
-                                    <div className="w-10 h-10 rounded-xl border-2 border-white shadow-sm" style={{ backgroundColor: palette.secondary }} />
-                                  </div>
-                                  <div>
-                                    <p className={`font-bold text-sm ${currentPalette === palette.id ? 'text-axia-primary' : 'text-slate-700'}`}>
-                                      {palette.name}
-                                    </p>
-                                    <div className="flex gap-1 mt-1">
-                                      <div className="w-3 h-1 rounded-full" style={{ backgroundColor: palette.primary }} />
-                                      <div className="w-3 h-1 rounded-full" style={{ backgroundColor: palette.accent }} />
-                                    </div>
-                                  </div>
+                                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${isSidebarOpen ? 'right-1' : 'left-1'}`} />
                                 </button>
-                              ))}
-                            </div>
-                          </div>
-                        </section>
-                      )}
+                              </div>
+                            </section>
 
-                      {settingsTab === 'security' && (
-                        <section className="space-y-4">
-                          <h3 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-2">Segurança da Conta</h3>
-                          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                            <p className="text-sm text-slate-600">As opções de segurança e alteração de senha estão disponíveis através do provedor de autenticação.</p>
-                          </div>
-                        </section>
-                      )}
-
-                      {settingsTab === 'general' && (
-                        <section className="space-y-4">
-                          <h3 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-2">Preferências Gerais</h3>
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="font-bold text-slate-700">Compactar Sidebar</p>
-                              <p className="text-xs text-slate-500">Reduzir o tamanho da barra lateral automaticamente.</p>
-                            </div>
-                            <button 
-                              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                              className={`w-12 h-6 rounded-full relative transition-colors ${isSidebarOpen ? 'bg-axia-primary' : 'bg-slate-200'}`}
-                            >
-                              <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${isSidebarOpen ? 'right-1' : 'left-1'}`} />
-                            </button>
-                          </div>
-                        </section>
-                      )}
-
-                      {settingsTab === 'appearance' && (
-                        <section className="space-y-6">
-                          <h3 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-2">Personalização Visual</h3>
-                          
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="font-bold text-slate-700">Modo Escuro</p>
-                              <p className="text-xs text-slate-500">Alternar entre tema claro e escuro.</p>
-                            </div>
-                            <button 
-                              onClick={() => showNotification('Modo escuro será implementado em breve.')}
-                              className="w-12 h-6 bg-slate-200 rounded-full relative transition-colors"
-                            >
-                              <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full shadow-sm" />
-                            </button>
-                          </div>
-
-                          <div className="space-y-4">
-                            <p className="font-bold text-slate-700">Paleta de Cores do Sistema</p>
-                            <p className="text-xs text-slate-500 mb-4">Escolha uma combinação de cores que melhor se adapta ao seu estilo de trabalho.</p>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                              {palettes.map((palette) => (
-                                <button
-                                  key={palette.id}
-                                  onClick={() => setCurrentPalette(palette.id)}
-                                  className={`p-4 rounded-2xl border-2 transition-all flex items-center gap-4 text-left ${
-                                    currentPalette === palette.id 
-                                      ? 'border-axia-primary bg-axia-primary/5 shadow-md' 
-                                      : 'border-slate-100 hover:border-slate-200 bg-slate-50'
-                                  }`}
-                                >
-                                  <div className="flex -space-x-3">
-                                    <div className="w-10 h-10 rounded-xl border-2 border-white shadow-sm" style={{ backgroundColor: palette.primary }} />
-                                    <div className="w-10 h-10 rounded-xl border-2 border-white shadow-sm" style={{ backgroundColor: palette.secondary }} />
-                                  </div>
-                                  <div>
-                                    <p className={`font-bold text-sm ${currentPalette === palette.id ? 'text-axia-primary' : 'text-slate-700'}`}>
-                                      {palette.name}
-                                    </p>
-                                    <div className="flex gap-1 mt-1">
-                                      <div className="w-3 h-1 rounded-full" style={{ backgroundColor: palette.primary }} />
-                                      <div className="w-3 h-1 rounded-full" style={{ backgroundColor: palette.accent }} />
-                                    </div>
-                                  </div>
+                            <section className="space-y-4">
+                              <h3 className="text-lg font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-800 pb-2">Notificações</h3>
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="font-bold text-slate-700 dark:text-slate-200">Alertas de Prazo</p>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400">Receber avisos sobre tarefas próximas do vencimento.</p>
+                                </div>
+                                <button className="w-12 h-6 bg-axia-primary rounded-full relative">
+                                  <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full shadow-sm" />
                                 </button>
-                              ))}
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="font-bold text-slate-700 dark:text-slate-200">Relatórios Semanais</p>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400">Notificar quando novos relatórios forem aprovados.</p>
+                                </div>
+                                <button className="w-12 h-6 bg-axia-primary rounded-full relative">
+                                  <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full shadow-sm" />
+                                </button>
+                              </div>
+                            </section>
+                          </>
+                        )}
+
+                        {settingsTab === 'appearance' && (
+                          <section className="space-y-6">
+                            <h3 className="text-lg font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-800 pb-2">Personalização Visual</h3>
+                            
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="font-bold text-slate-700 dark:text-slate-200">Modo Escuro</p>
+                                <p className="text-xs text-slate-500 dark:text-slate-400">Alternar entre tema claro e escuro.</p>
+                              </div>
+                              <button 
+                                onClick={() => setIsDarkMode(!isDarkMode)}
+                                className={`w-12 h-6 rounded-full relative transition-colors ${isDarkMode ? 'bg-axia-primary' : 'bg-slate-200'}`}
+                              >
+                                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${isDarkMode ? 'right-1' : 'left-1'}`} />
+                              </button>
                             </div>
-                          </div>
-                        </section>
-                      )}
 
-                      {settingsTab === 'security' && (
-                        <section className="space-y-4">
-                          <h3 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-2">Segurança da Conta</h3>
-                          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                            <p className="text-sm text-slate-600">As opções de segurança e alteração de senha estão disponíveis através do provedor de autenticação.</p>
-                          </div>
-                        </section>
-                      )}
+                            <div className="space-y-4">
+                              <p className="font-bold text-slate-700 dark:text-slate-200">Paleta de Cores do Sistema</p>
+                              <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">Escolha uma combinação de cores que melhor se adapta ao seu estilo de trabalho.</p>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                {palettes.map((palette) => (
+                                  <button
+                                    key={palette.id}
+                                    onClick={() => setCurrentPalette(palette.id)}
+                                    className={`p-4 rounded-2xl border-2 transition-all flex items-center gap-4 text-left ${
+                                      currentPalette === palette.id 
+                                        ? 'border-axia-primary bg-axia-primary/5 shadow-md' 
+                                        : 'border-slate-100 dark:border-slate-800 hover:border-slate-200 dark:hover:border-slate-700 bg-slate-50 dark:bg-slate-800/50'
+                                    }`}
+                                  >
+                                    <div className="flex -space-x-3">
+                                      <div className="w-10 h-10 rounded-xl border-2 border-white dark:border-slate-700 shadow-sm" style={{ backgroundColor: palette.primary }} />
+                                      <div className="w-10 h-10 rounded-xl border-2 border-white dark:border-slate-700 shadow-sm" style={{ backgroundColor: palette.secondary }} />
+                                    </div>
+                                    <div>
+                                      <p className={`font-bold text-sm ${currentPalette === palette.id ? 'text-axia-primary' : 'text-slate-700 dark:text-slate-300'}`}>
+                                        {palette.name}
+                                      </p>
+                                      <div className="flex gap-1 mt-1">
+                                        <div className="w-3 h-1 rounded-full" style={{ backgroundColor: palette.primary }} />
+                                        <div className="w-3 h-1 rounded-full" style={{ backgroundColor: palette.accent }} />
+                                      </div>
+                                    </div>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </section>
+                        )}
 
-                      <section className="space-y-4">
-                        <h3 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-2">Notificações</h3>
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-bold text-slate-700">Alertas de Prazo</p>
-                            <p className="text-xs text-slate-500">Receber avisos sobre tarefas próximas do vencimento.</p>
-                          </div>
-                          <button className="w-12 h-6 bg-axia-primary rounded-full relative">
-                            <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full shadow-sm" />
-                          </button>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-bold text-slate-700">Relatórios Semanais</p>
-                            <p className="text-xs text-slate-500">Notificar quando novos relatórios forem aprovados.</p>
-                          </div>
-                          <button className="w-12 h-6 bg-axia-primary rounded-full relative">
-                            <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full shadow-sm" />
-                          </button>
-                        </div>
-                      </section>
+                        {settingsTab === 'security' && (
+                          <section className="space-y-4">
+                            <h3 className="text-lg font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-800 pb-2">Segurança da Conta</h3>
+                            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800">
+                              <p className="text-sm text-slate-600 dark:text-slate-400">As opções de segurança e alteração de senha estão disponíveis através do provedor de autenticação.</p>
+                            </div>
+                          </section>
+                        )}
+                      </div>
 
                       <div className="pt-4">
                         <button 
                           onClick={() => showNotification('Configurações salvas com sucesso.')}
                           className="w-full bg-axia-primary text-white py-3 rounded-xl font-bold hover:bg-axia-primary/90 transition-all shadow-lg shadow-axia-primary/20"
                         >
-                          Salvar Alterações
+                          Salvar Configurações
                         </button>
                       </div>
                     </div>
                   </div>
-                </div>
-              </motion.div>
+                </motion.div>
             )}
           </AnimatePresence>
         </div>
@@ -3225,7 +3183,7 @@ function NavItem({ icon, label, active, onClick, collapsed }: {
         w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200
         ${active 
           ? 'bg-axia-primary text-white shadow-lg shadow-axia-primary/20' 
-          : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
+          : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
         }
       `}
     >
@@ -3305,12 +3263,12 @@ function LoginPage({ onLogin, onRegister }: {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-4 font-sans transition-colors duration-300">
       <div className="w-full max-w-md">
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-[2.5rem] shadow-2xl shadow-slate-200/60 border border-slate-100 overflow-hidden"
+          className="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl shadow-slate-200/60 dark:shadow-black/40 border border-slate-100 dark:border-slate-800 overflow-hidden"
         >
           <div className="p-10">
             <div className="flex flex-col items-center mb-8">
@@ -3321,26 +3279,26 @@ function LoginPage({ onLogin, onRegister }: {
               <p className="text-xs uppercase tracking-[0.2em] text-axia-secondary font-bold">Gestão de Obras</p>
             </div>
 
-            <div className="flex p-1 bg-slate-100 rounded-2xl mb-8">
+            <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-2xl mb-8">
               <button 
                 onClick={() => setMode('login')}
-                className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all ${mode === 'login' ? 'bg-white text-axia-primary shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all ${mode === 'login' ? 'bg-white dark:bg-slate-700 text-axia-primary shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
               >
                 Login
               </button>
               <button 
                 onClick={() => setMode('register')}
-                className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all ${mode === 'register' ? 'bg-white text-axia-primary shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all ${mode === 'register' ? 'bg-white dark:bg-slate-700 text-axia-primary shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
               >
                 Cadastro
               </button>
             </div>
 
             <div className="mb-8">
-              <h2 className="text-2xl font-bold text-slate-900 mb-2">
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
                 {mode === 'login' ? 'Bem-vindo de volta' : 'Criar nova conta'}
               </h2>
-              <p className="text-slate-500 text-sm">
+              <p className="text-slate-500 dark:text-slate-400 text-sm">
                 {mode === 'login' 
                   ? 'Acesse sua conta para gerenciar suas obras.' 
                   : 'Preencha os dados abaixo para solicitar seu acesso.'}
@@ -3348,7 +3306,7 @@ function LoginPage({ onLogin, onRegister }: {
             </div>
 
             {error && (
-              <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl flex items-center gap-3 text-red-600 text-sm font-medium">
+              <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 rounded-2xl flex items-center gap-3 text-red-600 dark:text-red-400 text-sm font-medium">
                 <AlertCircle size={18} />
                 {error}
               </div>
@@ -3358,55 +3316,55 @@ function LoginPage({ onLogin, onRegister }: {
               {mode === 'register' && (
                 <>
                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">Nome Completo</label>
+                    <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider ml-1">Nome Completo</label>
                     <div className="relative">
                       <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                       <input 
                         type="text" 
                         value={name}
                         onChange={(e) => setName(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all font-medium"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all font-medium dark:text-white"
                         placeholder="Ex: Ricardo Silva"
                         required
                       />
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">Cargo / Função</label>
+                    <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider ml-1">Cargo / Função</label>
                     <div className="relative">
                       <Briefcase className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                       <input 
                         type="text" 
                         value={role}
                         onChange={(e) => setRole(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all font-medium"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all font-medium dark:text-white"
                         placeholder="Ex: Engenheiro Civil"
                         required
                       />
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">Telefone / WhatsApp</label>
+                    <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider ml-1">Telefone / WhatsApp</label>
                     <div className="relative">
                       <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                       <input 
                         type="tel" 
                         value={phone}
                         onChange={(e) => setPhone(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all font-medium"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all font-medium dark:text-white"
                         placeholder="Ex: +55 (11) 99999-9999"
                         required
                       />
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">Nível de Acesso</label>
+                    <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider ml-1">Nível de Acesso</label>
                     <div className="relative">
                       <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                       <select 
                         value={accessLevel}
                         onChange={(e) => setAccessLevel(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all font-medium appearance-none"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all font-medium appearance-none dark:text-white"
                         required
                       >
                         <option value="Usuário Padrão">Usuário Padrão</option>
@@ -3421,14 +3379,14 @@ function LoginPage({ onLogin, onRegister }: {
               )}
 
               <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">E-mail Corporativo</label>
+                <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider ml-1">E-mail Corporativo</label>
                 <div className="relative">
                   <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                   <input 
                     type="email" 
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all font-medium"
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all font-medium dark:text-white"
                     placeholder="seu@email.com"
                     required
                   />
@@ -3437,7 +3395,7 @@ function LoginPage({ onLogin, onRegister }: {
 
               <div className="space-y-2">
                 <div className="flex justify-between items-center px-1">
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Senha</label>
+                  <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Senha</label>
                   {mode === 'login' && (
                     <button type="button" className="text-xs font-bold text-axia-primary hover:underline">Esqueceu a senha?</button>
                   )}
@@ -3448,7 +3406,7 @@ function LoginPage({ onLogin, onRegister }: {
                     type="password" 
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all font-medium"
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all font-medium dark:text-white"
                     placeholder="Sua senha"
                     required
                   />
@@ -3457,8 +3415,8 @@ function LoginPage({ onLogin, onRegister }: {
 
               {mode === 'login' && (
                 <div className="flex items-center gap-2 px-1">
-                  <input type="checkbox" id="remember" className="rounded border-slate-300 text-axia-primary focus:ring-axia-primary" defaultChecked />
-                  <label htmlFor="remember" className="text-sm text-slate-600 font-medium cursor-pointer">Lembrar de mim</label>
+                  <input type="checkbox" id="remember" className="rounded border-slate-300 dark:border-slate-700 text-axia-primary focus:ring-axia-primary bg-transparent" defaultChecked />
+                  <label htmlFor="remember" className="text-sm text-slate-600 dark:text-slate-400 font-medium cursor-pointer">Lembrar de mim</label>
                 </div>
               )}
 
@@ -3479,8 +3437,8 @@ function LoginPage({ onLogin, onRegister }: {
             </form>
           </div>
 
-          <div className="bg-slate-50 p-6 border-t border-slate-100 text-center">
-            <p className="text-sm text-slate-500">
+          <div className="bg-slate-50 dark:bg-slate-800/50 p-6 border-t border-slate-100 dark:border-slate-800 text-center">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               {mode === 'login' ? (
                 <>Não tem acesso? <button onClick={() => setMode('register')} className="text-axia-primary font-bold hover:underline">Solicite aqui</button></>
               ) : (
@@ -3507,14 +3465,14 @@ function StatCard({ title, value, change, icon, color }: {
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const colors = {
-    blue: 'bg-blue-50',
-    orange: 'bg-orange-50',
-    green: 'bg-green-50',
-    slate: 'bg-slate-50'
+    blue: 'bg-blue-50 dark:bg-blue-900/20',
+    orange: 'bg-orange-50 dark:bg-orange-900/20',
+    green: 'bg-green-50 dark:bg-green-900/20',
+    slate: 'bg-slate-50 dark:bg-slate-800/50'
   };
 
   return (
-    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow relative">
+    <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition-all relative">
       <div className="flex items-start justify-between mb-4">
         <div className={`p-3 rounded-xl ${colors[color]}`}>
           {icon}
@@ -3522,7 +3480,7 @@ function StatCard({ title, value, change, icon, color }: {
         <div className="relative">
           <button 
             onClick={() => setShowMenu(!showMenu)}
-            className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-50 transition-colors"
+            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
           >
             <MoreVertical size={18} />
           </button>
@@ -3533,16 +3491,16 @@ function StatCard({ title, value, change, icon, color }: {
                 initial={{ opacity: 0, scale: 0.95, y: -10 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: -10 }}
-                className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 py-2 z-30"
+                className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-100 dark:border-slate-800 py-2 z-30"
               >
-                <button className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-axia-primary transition-colors flex items-center gap-2">
+                <button className="w-full text-left px-4 py-2 text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-axia-primary dark:hover:text-axia-primary transition-colors flex items-center gap-2">
                   <TrendingUp size={14} /> Ver Detalhes
                 </button>
-                <button className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-axia-primary transition-colors flex items-center gap-2">
+                <button className="w-full text-left px-4 py-2 text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-axia-primary dark:hover:text-axia-primary transition-colors flex items-center gap-2">
                   <BarChart3 size={14} /> Gerar Relatório
                 </button>
-                <div className="h-px bg-slate-100 my-1 mx-2"></div>
-                <button className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 transition-colors flex items-center gap-2">
+                <div className="h-px bg-slate-100 dark:bg-slate-800 my-1 mx-2"></div>
+                <button className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-2">
                   <AlertCircle size={14} /> Ocultar Card
                 </button>
               </motion.div>
@@ -3551,9 +3509,9 @@ function StatCard({ title, value, change, icon, color }: {
         </div>
       </div>
       <div>
-        <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">{title}</p>
-        <h4 className="text-3xl font-bold text-slate-900 mb-1">{value}</h4>
-        <p className="text-xs font-semibold text-slate-400">{change}</p>
+        <p className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">{title}</p>
+        <h4 className="text-3xl font-bold text-slate-900 dark:text-white mb-1">{value}</h4>
+        <p className="text-xs font-semibold text-slate-400 dark:text-slate-500">{change}</p>
       </div>
     </div>
   );
