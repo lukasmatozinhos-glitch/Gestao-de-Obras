@@ -213,6 +213,21 @@ export default function App() {
   const [imageEditingProjectId, setImageEditingProjectId] = useState<string | null>(null);
   const [showProfile, setShowProfile] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [isUpdatingProgress, setIsUpdatingProgress] = useState(false);
+  const [tempProgress, setTempProgress] = useState(0);
+
+  const handleQuickProgressUpdate = async () => {
+    if (!viewingProject) return;
+    try {
+      const projectRef = doc(db, 'projects', viewingProject.id);
+      await updateDoc(projectRef, { progress: tempProgress });
+      setViewingProject({ ...viewingProject, progress: tempProgress });
+      setIsUpdatingProgress(false);
+      showNotification('Progresso atualizado!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `projects/${viewingProject.id}`);
+    }
+  };
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -393,7 +408,8 @@ export default function App() {
     startDate: '',
     endDate: '',
     executingCompany: '',
-    status: 'not-started' as Project['status']
+    status: 'not-started' as Project['status'],
+    progress: 0
   });
 
   const [newMeasurement, setNewMeasurement] = useState({
@@ -416,7 +432,8 @@ export default function App() {
         const projectRef = doc(db, 'projects', editingProject.id);
         const updatedData = { 
           ...newProject, 
-          budget: Number(newProject.budget) 
+          budget: Number(newProject.budget),
+          progress: Number(newProject.progress)
         };
         await updateDoc(projectRef, updatedData);
         showNotification('Projeto atualizado com sucesso!');
@@ -430,7 +447,7 @@ export default function App() {
           contractNumber: newProject.contractNumber,
           description: newProject.description,
           status: newProject.status,
-          progress: 0,
+          progress: Number(newProject.progress) || 0,
           startDate: newProject.startDate,
           endDate: newProject.endDate,
           budget: Number(newProject.budget),
@@ -455,7 +472,8 @@ export default function App() {
         startDate: '',
         endDate: '',
         executingCompany: '',
-        status: 'not-started'
+        status: 'not-started',
+        progress: 0
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'projects');
@@ -524,7 +542,8 @@ export default function App() {
       startDate: project.startDate,
       endDate: project.endDate,
       executingCompany: project.executingCompany,
-      status: project.status
+      status: project.status,
+      progress: project.progress
     });
     setShowAddProject(true);
     setViewingProject(null);
@@ -1508,25 +1527,32 @@ export default function App() {
                               </section>
 
                               <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
-                                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Cliente</p>
-                                  <p className="font-bold text-slate-900">{viewingProject.client}</p>
+                                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
+                                  <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Cliente</p>
+                                  <p className="font-bold text-slate-900 text-base break-words">{viewingProject.client}</p>
                                 </div>
-                                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Contrato</p>
-                                  <p className="font-bold text-slate-900">{viewingProject.contractNumber}</p>
+                                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
+                                  <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Contrato</p>
+                                  <p className="font-bold text-slate-900 text-base break-all">{viewingProject.contractNumber}</p>
                                 </div>
-                                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Início</p>
-                                  <p className="font-bold text-slate-900">{viewingProject.startDate}</p>
+                                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
+                                  <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Início</p>
+                                  <p className="font-bold text-slate-900 text-base">{viewingProject.startDate}</p>
                                 </div>
-                                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Término</p>
-                                  <p className="font-bold text-slate-900">{viewingProject.endDate}</p>
+                                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
+                                  <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Término</p>
+                                  <p className="font-bold text-slate-900 text-base">{viewingProject.endDate}</p>
                                 </div>
-                                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 col-span-2">
-                                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Empresa Executora</p>
-                                  <p className="font-bold text-slate-900">{viewingProject.executingCompany}</p>
+                                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm col-span-2">
+                                  <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Empresa Executora</p>
+                                  <p className="font-bold text-slate-900 text-base break-words">{viewingProject.executingCompany}</p>
+                                </div>
+                                <div className="p-5 bg-axia-primary/10 rounded-2xl border border-axia-primary/20 shadow-sm col-span-2">
+                                  <p className="text-[11px] font-bold text-axia-primary uppercase mb-1.5 tracking-wider">Localidade</p>
+                                  <p className="font-bold text-slate-900 text-base flex items-center gap-2">
+                                    <MapPin size={18} className="text-axia-primary" />
+                                    {viewingProject.location}
+                                  </p>
                                 </div>
                               </div>
 
@@ -1534,39 +1560,39 @@ export default function App() {
                                 <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
                                   <TrendingUp className="text-axia-primary" /> Progresso Financeiro
                                 </h3>
-                                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 space-y-6">
-                                  <div className="flex items-center justify-between">
-                                    <div>
-                                      <p className="text-xs font-bold text-slate-500 uppercase mb-1">Orçamento Total</p>
+                                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-6">
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                    <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
+                                      <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Orçamento Total</p>
                                       <p className="text-2xl font-bold text-axia-accent">
                                         {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingProject.budget)}
                                       </p>
                                     </div>
-                                    <div className="text-right">
-                                      <p className="text-xs font-bold text-slate-500 uppercase mb-1">Total Medido</p>
+                                    <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
+                                      <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Total Medido</p>
                                       <p className="text-2xl font-bold text-axia-primary">
                                         {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingProject.spent)}
                                       </p>
                                     </div>
                                   </div>
                                   
-                                  <div className="space-y-2">
+                                  <div className="space-y-3">
                                     <div className="flex justify-between items-center">
-                                      <span className="text-xs font-bold text-slate-500 uppercase">Utilização do Orçamento</span>
-                                      <span className="text-sm font-bold text-axia-primary">
+                                      <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Utilização do Orçamento</span>
+                                      <span className="text-sm font-bold text-axia-primary bg-axia-primary/10 px-2 py-0.5 rounded-lg">
                                         {Math.round((viewingProject.spent / viewingProject.budget) * 100)}%
                                       </span>
                                     </div>
-                                    <div className="h-3 w-full bg-slate-200 rounded-full overflow-hidden">
+                                    <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-200">
                                       <motion.div 
                                         initial={{ width: 0 }}
                                         animate={{ width: `${(viewingProject.spent / viewingProject.budget) * 100}%` }}
                                         className="h-full bg-axia-accent rounded-full shadow-inner"
                                       />
                                     </div>
-                                    <div className="flex justify-between text-[10px] font-bold text-slate-400">
-                                      <span>Saldo Disponível: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingProject.budget - viewingProject.spent)}</span>
-                                      <span>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingProject.budget)}</span>
+                                    <div className="flex justify-between text-[11px] font-bold text-slate-400">
+                                      <span>Saldo: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingProject.budget - viewingProject.spent)}</span>
+                                      <span>Total: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingProject.budget)}</span>
                                     </div>
                                   </div>
                                 </div>
@@ -1681,19 +1707,64 @@ export default function App() {
                         </div>
 
                         <div className="space-y-8">
-                          <div className="p-6 bg-axia-primary/5 rounded-3xl border border-axia-primary/10">
-                            <h4 className="font-bold text-axia-primary mb-4 flex items-center gap-2">
-                              <Clock size={18} /> Cronograma
+                          <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm">
+                            <h4 className="font-bold text-axia-primary mb-6 flex items-center gap-2">
+                              <Clock size={18} /> Cronograma de Execução
                             </h4>
-                            <div className="space-y-4">
+                            <div className="space-y-6">
                               <div className="flex items-center justify-between">
-                                <span className="text-sm text-slate-600">Execução</span>
-                                <span className="text-sm font-bold text-slate-900">{viewingProject.progress}%</span>
+                                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Progresso Atual</span>
+                                <div className="flex items-center gap-2">
+                                  {isUpdatingProgress ? (
+                                    <div className="flex items-center gap-2">
+                                      <input 
+                                        type="number" 
+                                        min="0" 
+                                        max="100"
+                                        value={tempProgress}
+                                        onChange={(e) => setTempProgress(Number(e.target.value))}
+                                        className="w-16 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-axia-primary/20"
+                                      />
+                                      <button 
+                                        onClick={handleQuickProgressUpdate}
+                                        className="p-1.5 bg-axia-primary text-white rounded-lg hover:bg-axia-primary/90 shadow-sm"
+                                      >
+                                        <CheckCircle2 size={16} />
+                                      </button>
+                                      <button 
+                                        onClick={() => setIsUpdatingProgress(false)}
+                                        className="p-1.5 bg-slate-100 text-slate-500 rounded-lg hover:bg-slate-200"
+                                      >
+                                        <X size={16} />
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-lg font-bold text-slate-900">{viewingProject.progress}%</span>
+                                      <button 
+                                        onClick={() => {
+                                          setTempProgress(viewingProject.progress);
+                                          setIsUpdatingProgress(true);
+                                        }}
+                                        className="p-1.5 text-slate-400 hover:text-axia-primary hover:bg-axia-primary/5 rounded-lg transition-all"
+                                        title="Atualizar progresso"
+                                      >
+                                        <Pencil size={14} />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
-                              <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden">
-                                <div className="h-full bg-axia-primary rounded-full" style={{ width: `${viewingProject.progress}%` }} />
+                              <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+                                <div 
+                                  className="h-full bg-axia-primary rounded-full shadow-inner transition-all duration-500" 
+                                  style={{ width: `${viewingProject.progress}%` }} 
+                                />
                               </div>
-                              <p className="text-xs text-slate-500 italic">Última atualização: 24h atrás</p>
+                              <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                                <AlertCircle size={14} className="text-slate-400" />
+                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tight">Última atualização: Hoje</p>
+                              </div>
                             </div>
                           </div>
 
@@ -1883,6 +1954,19 @@ export default function App() {
                             </select>
                           </div>
                           <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Execução Atual (%)</label>
+                            <input 
+                              required
+                              type="number" 
+                              min="0"
+                              max="100"
+                              value={newProject.progress}
+                              onChange={e => setNewProject({...newProject, progress: Number(e.target.value)})}
+                              placeholder="Ex: 45"
+                              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-axia-primary/20"
+                            />
+                          </div>
+                          <div>
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Empresa Executora</label>
                             <input 
                               required
@@ -1935,7 +2019,7 @@ export default function App() {
                           <div className="md:w-2/3 p-6 flex flex-col">
                             <div className="flex justify-between items-start mb-2">
                               <div>
-                                <p className="text-[10px] font-bold text-axia-secondary uppercase tracking-widest mb-1">Contrato: {project.contractNumber}</p>
+                                <p className="text-[10px] font-bold text-axia-secondary uppercase tracking-widest mb-1 break-all">Contrato: {project.contractNumber}</p>
                                 <h3 className="text-xl font-bold text-slate-900 leading-tight">{project.name}</h3>
                               </div>
                               <div className="text-right">
@@ -1958,9 +2042,9 @@ export default function App() {
                                 <span>{project.startDate} até {project.endDate}</span>
                               </div>
                               <div className="flex items-center gap-2 text-xs text-slate-500 col-span-2">
-                                <Briefcase size={14} className="text-axia-primary" />
-                                <span className="font-bold">Executora:</span>
-                                <span>{project.executingCompany}</span>
+                                <Briefcase size={14} className="text-axia-primary shrink-0" />
+                                <span className="font-bold shrink-0">Executora:</span>
+                                <span className="break-words">{project.executingCompany}</span>
                               </div>
                             </div>
 
@@ -3128,8 +3212,8 @@ function StatCard({ title, value, change, icon, color }: {
         </div>
       </div>
       <div>
-        <p className="text-sm font-medium text-slate-500 mb-1">{title}</p>
-        <h4 className="text-2xl font-bold text-slate-900 mb-1">{value}</h4>
+        <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">{title}</p>
+        <h4 className="text-3xl font-bold text-slate-900 mb-1">{value}</h4>
         <p className="text-xs font-semibold text-slate-400">{change}</p>
       </div>
     </div>
