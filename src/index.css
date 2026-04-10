@@ -11,15 +11,15 @@
 }
 
 :root {
-  --axia-primary: #C5A059;
-  --axia-secondary: #1A1A1A;
-  --axia-accent: #E5C76B;
+  --axia-primary: #0033FF;
+  --axia-secondary: #001A80;
+  --axia-accent: #00BFFF;
 }
 
 .dark {
-  --axia-primary: #D4B475;
-  --axia-secondary: #F5F5F5;
-  --axia-accent: #F2D98C;
+  --axia-primary: #3366FF;
+  --axia-secondary: #E0E7FF;
+  --axia-accent: #70CFFF;
 }
 
 @layer base {

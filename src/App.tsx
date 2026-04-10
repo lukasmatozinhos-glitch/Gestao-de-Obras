@@ -213,12 +213,12 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState('');
   const [showAddProject, setShowAddProject] = useState(false);
   const [viewingProject, setViewingProject] = useState<Project | null>(null);
-  const [currentPalette, setCurrentPalette] = useState('forest');
+  const [currentPalette, setCurrentPalette] = useState('ocean');
 
   const palettes = [
     { id: 'forest', name: 'Floresta (Verde)', primary: '#10B981', secondary: '#1E293B', accent: '#34D399' },
     { id: 'original', name: 'Original (Ouro)', primary: '#C5A059', secondary: '#1A1A1A', accent: '#E5C76B' },
-    { id: 'ocean', name: 'Oceano (Azul)', primary: '#0EA5E9', secondary: '#0F172A', accent: '#38BDF8' },
+    { id: 'ocean', name: 'Oceano (Azul)', primary: '#0033FF', secondary: '#001A80', accent: '#00BFFF' },
     { id: 'royal', name: 'Real (Roxo)', primary: '#8B5CF6', secondary: '#111827', accent: '#A78BFA' },
     { id: 'sunset', name: 'Pôr do Sol (Laranja)', primary: '#F59E0B', secondary: '#451A03', accent: '#FBBF24' },
   ];
@@ -820,8 +820,17 @@ export default function App() {
     const pageHeight = doc.internal.pageSize.getHeight();
     
     // Header
-    doc.setFillColor(196, 160, 82); // axia-primary
+    doc.setFillColor(0, 51, 255); // axia-primary (Ocean Blue)
     doc.rect(0, 0, pageWidth, 35, 'F');
+    
+    // Logo Placeholder (Since file is not in system yet)
+    // If the user provides the logo, we can use doc.addImage
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(15, 7, 20, 20, 3, 3, 'F');
+    doc.setTextColor(0, 51, 255);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.text('AXIA', 25, 18, { align: 'center' });
     
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(24);
@@ -934,7 +943,7 @@ export default function App() {
       head: [['Campo', 'Informação']],
       body: detailsData,
       theme: 'striped',
-      headStyles: { fillColor: [196, 160, 82], textColor: [255, 255, 255] },
+      headStyles: { fillColor: [0, 51, 255], textColor: [255, 255, 255] },
       styles: { fontSize: 10, cellPadding: 5 }
     });
     
@@ -970,7 +979,7 @@ export default function App() {
         head: [['Data', 'Descrição', 'Valor', 'Status']],
         body: measurementData,
         theme: 'grid',
-        headStyles: { fillColor: [196, 160, 82], textColor: [255, 255, 255] },
+        headStyles: { fillColor: [0, 51, 255], textColor: [255, 255, 255] },
         styles: { fontSize: 9 }
       });
       
@@ -1000,7 +1009,7 @@ export default function App() {
         head: [['Data', 'Atualização', 'Autor']],
         body: updateData,
         theme: 'grid',
-        headStyles: { fillColor: [196, 160, 82], textColor: [255, 255, 255] },
+        headStyles: { fillColor: [0, 51, 255], textColor: [255, 255, 255] },
         styles: { fontSize: 9 },
         columnStyles: {
           1: { cellWidth: 100 }
@@ -1038,7 +1047,7 @@ export default function App() {
       }
 
       // Header for each project page
-      doc.setFillColor(196, 160, 82); // axia-primary color
+      doc.setFillColor(0, 51, 255); // axia-primary color (Ocean Blue)
       doc.rect(0, 0, pageWidth, 30, 'F');
       
       doc.setTextColor(255, 255, 255);
@@ -1131,7 +1140,7 @@ export default function App() {
           head: [['Data', 'Descrição', 'Valor', 'Status']],
           body: measurementData,
           theme: 'grid',
-          headStyles: { fillColor: [196, 160, 82] },
+          headStyles: { fillColor: [0, 51, 255] },
           styles: { fontSize: 9, cellPadding: 2 }
         });
       }
@@ -1154,7 +1163,7 @@ export default function App() {
             head: [['Data', 'Autor', 'Mensagem']],
             body: updateData,
             theme: 'grid',
-            headStyles: { fillColor: [196, 160, 82] },
+            headStyles: { fillColor: [0, 51, 255] },
             styles: { fontSize: 9, cellPadding: 2 }
           });
         } else {
@@ -1168,7 +1177,7 @@ export default function App() {
             head: [['Data', 'Autor', 'Mensagem']],
             body: updateData,
             theme: 'grid',
-            headStyles: { fillColor: [196, 160, 82] },
+            headStyles: { fillColor: [0, 51, 255] },
             styles: { fontSize: 9, cellPadding: 2 }
           });
         }
@@ -2319,11 +2328,45 @@ export default function App() {
                               setSelectedProject(viewingProject.name);
                               setActiveTab('reports');
                             }}
-                            className="w-full bg-axia-secondary text-white py-4 rounded-2xl font-bold hover:bg-axia-secondary/90 transition-all shadow-lg shadow-axia-secondary/20 flex items-center justify-center gap-2"
+                            className="w-full bg-axia-secondary text-white py-4 rounded-2xl font-bold hover:bg-axia-secondary/90 transition-all shadow-lg shadow-axia-secondary/20 flex items-center justify-center gap-2 mb-4"
                           >
                             <FileText size={20} />
-                            Relatório Mensal
+                            Relatório Semanal
                           </button>
+
+                          <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm">
+                            <h4 className="font-bold text-axia-primary mb-4 flex items-center gap-2">
+                              <ClipboardList size={18} /> Histórico de Medições
+                            </h4>
+                            <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                              {measurementBulletins.filter(b => b.projectId === viewingProject.id).length === 0 ? (
+                                <p className="text-xs text-slate-400 text-center py-4 italic">Nenhuma medição registrada.</p>
+                              ) : (
+                                measurementBulletins
+                                  .filter(b => b.projectId === viewingProject.id)
+                                  .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                                  .map(bulletin => (
+                                    <div key={bulletin.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100 hover:border-axia-primary/30 transition-colors">
+                                      <div className="min-w-0 flex-1">
+                                        <p className="text-xs font-bold text-slate-900 truncate">{bulletin.rcNumber} - {bulletin.supplier}</p>
+                                        <p className="text-[10px] text-slate-500">{new Date(bulletin.date).toLocaleDateString('pt-BR')}</p>
+                                      </div>
+                                      <div className="text-right ml-3">
+                                        <p className="text-xs font-bold text-axia-primary">
+                                          {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(bulletin.value)}
+                                        </p>
+                                        <button 
+                                          onClick={() => generateBulletinPDF(bulletin)}
+                                          className="text-[10px] text-slate-400 hover:text-axia-primary font-bold uppercase flex items-center gap-1 ml-auto"
+                                        >
+                                          <FileDown size={10} /> PDF
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
