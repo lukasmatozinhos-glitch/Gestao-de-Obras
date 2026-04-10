@@ -823,36 +823,17 @@ export default function App() {
     doc.setFillColor(0, 51, 255); // axia-primary (Ocean Blue)
     doc.rect(0, 0, pageWidth, 35, 'F');
     
-    // Logo - Using a high-quality drawing to match the attached logo
-    // Blue rounded rect with white globe and text
-    const logoX = 15;
-    const logoY = 5;
-    const logoSize = 25;
+    // Logo - Brand Name Only
+    const logoX = 25;
+    const logoY = 18;
     
-    // Draw the globe icon (stylized)
-    doc.setDrawColor(255, 255, 255);
-    doc.setLineWidth(0.3);
-    const centerX = logoX + 12.5;
-    const centerY = logoY + 10;
-    const radius = 8;
-    
-    // Draw globe petals (stylized Flower of Life)
-    for (let i = 0; i < 6; i++) {
-      const angle = (i * Math.PI) / 3;
-      const px = centerX + Math.cos(angle) * (radius / 2);
-      const py = centerY + Math.sin(angle) * (radius / 2);
-      doc.circle(px, py, radius / 2, 'S');
-    }
-    doc.circle(centerX, centerY, radius, 'S');
-    
-    // Logo Text
     doc.setTextColor(255, 255, 255);
-    doc.setFontSize(14);
+    doc.setFontSize(16);
     doc.setFont('helvetica', 'bold');
-    doc.text('AXIA', centerX, logoY + 22, { align: 'center' });
-    doc.setFontSize(7);
+    doc.text('AXIA', logoX, logoY, { align: 'center' });
+    doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
-    doc.text('ENERGIA', centerX, logoY + 26, { align: 'center' });
+    doc.text('ENERGIA', logoX, logoY + 5, { align: 'center' });
     
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(24);
@@ -923,26 +904,17 @@ export default function App() {
     doc.setFillColor(0, 51, 255); // axia-primary (Ocean Blue)
     doc.rect(0, 0, pageWidth, 35, 'F');
     
-    // Logo
+    // Logo - Brand Name Only
     const centerX = 25;
-    const centerY = 12;
-    const radius = 7;
-    doc.setDrawColor(255, 255, 255);
-    doc.setLineWidth(0.2);
-    for (let i = 0; i < 6; i++) {
-      const angle = (i * Math.PI) / 3;
-      const px = centerX + Math.cos(angle) * (radius / 2);
-      const py = centerY + Math.sin(angle) * (radius / 2);
-      doc.circle(px, py, radius / 2, 'S');
-    }
-    doc.circle(centerX, centerY, radius, 'S');
+    const centerY = 18;
     
     doc.setTextColor(255, 255, 255);
-    doc.setFontSize(12);
+    doc.setFontSize(14);
     doc.setFont('helvetica', 'bold');
-    doc.text('AXIA', centerX, 24, { align: 'center' });
-    doc.setFontSize(5);
-    doc.text('ENERGIA', centerX, 27, { align: 'center' });
+    doc.text('AXIA', centerX, centerY, { align: 'center' });
+    doc.setFontSize(6);
+    doc.setFont('helvetica', 'normal');
+    doc.text('ENERGIA', centerX, centerY + 4, { align: 'center' });
     
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(18);
@@ -1092,26 +1064,17 @@ export default function App() {
       doc.setFillColor(0, 51, 255); // axia-primary color (Ocean Blue)
       doc.rect(0, 0, pageWidth, 30, 'F');
       
-      // Logo
+      // Logo - Brand Name Only
       const lCenterX = 20;
-      const lCenterY = 10;
-      const lRadius = 5;
-      doc.setDrawColor(255, 255, 255);
-      doc.setLineWidth(0.1);
-      for (let j = 0; j < 6; j++) {
-        const angle = (j * Math.PI) / 3;
-        const px = lCenterX + Math.cos(angle) * (lRadius / 2);
-        const py = lCenterY + Math.sin(angle) * (lRadius / 2);
-        doc.circle(px, py, lRadius / 2, 'S');
-      }
-      doc.circle(lCenterX, lCenterY, lRadius, 'S');
+      const lCenterY = 15;
       
       doc.setTextColor(255, 255, 255);
-      doc.setFontSize(10);
+      doc.setFontSize(12);
       doc.setFont('helvetica', 'bold');
-      doc.text('AXIA', lCenterX, 20, { align: 'center' });
-      doc.setFontSize(4);
-      doc.text('ENERGIA', lCenterX, 23, { align: 'center' });
+      doc.text('AXIA', lCenterX, lCenterY, { align: 'center' });
+      doc.setFontSize(5);
+      doc.setFont('helvetica', 'normal');
+      doc.text('ENERGIA', lCenterX, lCenterY + 4, { align: 'center' });
       
       doc.setTextColor(255, 255, 255);
       doc.setFontSize(16);
