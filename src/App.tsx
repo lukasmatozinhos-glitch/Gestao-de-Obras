@@ -823,23 +823,45 @@ export default function App() {
     doc.setFillColor(0, 51, 255); // axia-primary (Ocean Blue)
     doc.rect(0, 0, pageWidth, 35, 'F');
     
-    // Logo Placeholder (Since file is not in system yet)
-    // If the user provides the logo, we can use doc.addImage
-    doc.setFillColor(255, 255, 255);
-    doc.roundedRect(15, 7, 20, 20, 3, 3, 'F');
-    doc.setTextColor(0, 51, 255);
-    doc.setFontSize(8);
+    // Logo - Using a high-quality drawing to match the attached logo
+    // Blue rounded rect with white globe and text
+    const logoX = 15;
+    const logoY = 5;
+    const logoSize = 25;
+    
+    // Draw the globe icon (stylized)
+    doc.setDrawColor(255, 255, 255);
+    doc.setLineWidth(0.3);
+    const centerX = logoX + 12.5;
+    const centerY = logoY + 10;
+    const radius = 8;
+    
+    // Draw globe petals (stylized Flower of Life)
+    for (let i = 0; i < 6; i++) {
+      const angle = (i * Math.PI) / 3;
+      const px = centerX + Math.cos(angle) * (radius / 2);
+      const py = centerY + Math.sin(angle) * (radius / 2);
+      doc.circle(px, py, radius / 2, 'S');
+    }
+    doc.circle(centerX, centerY, radius, 'S');
+    
+    // Logo Text
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(14);
     doc.setFont('helvetica', 'bold');
-    doc.text('AXIA', 25, 18, { align: 'center' });
+    doc.text('AXIA', centerX, logoY + 22, { align: 'center' });
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'normal');
+    doc.text('ENERGIA', centerX, logoY + 26, { align: 'center' });
     
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(24);
     doc.setFont('helvetica', 'bold');
-    doc.text('BOLETIM DE MEDIÇÃO', pageWidth / 2, 18, { align: 'center' });
+    doc.text('BOLETIM DE MEDIÇÃO', pageWidth / 2 + 10, 18, { align: 'center' });
     
     doc.setFontSize(11);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Documento de Registro de Medição de Obra - Emissão: ${new Date().toLocaleDateString('pt-BR')}`, pageWidth / 2, 28, { align: 'center' });
+    doc.text(`Documento de Registro de Medição de Obra - Emissão: ${new Date().toLocaleDateString('pt-BR')}`, pageWidth / 2 + 10, 28, { align: 'center' });
 
     // Content
     doc.setTextColor(51, 65, 85); // slate-700
@@ -886,8 +908,8 @@ export default function App() {
     // Footer
     doc.setFontSize(8);
     doc.setTextColor(148, 163, 184);
-    doc.text('Este documento é um registro oficial de medição gerado pelo sistema A.L Gestão de Obras.', pageWidth / 2, pageHeight - 15, { align: 'center' });
-    doc.text('© 2026 A.L Gestão de Obras - Todos os direitos reservados', pageWidth / 2, pageHeight - 10, { align: 'center' });
+    doc.text('Este documento é um registro oficial de medição gerado pelo sistema AXIA ENERGIA.', pageWidth / 2, pageHeight - 15, { align: 'center' });
+    doc.text('© 2026 AXIA ENERGIA - Todos os direitos reservados', pageWidth / 2, pageHeight - 10, { align: 'center' });
 
     doc.save(`Boletim_${bulletin.projectName.replace(/\s+/g, '_')}_${bulletin.rcNumber}.pdf`);
     showNotification('Boletim PDF (Horizontal) gerado com sucesso!');
@@ -898,18 +920,38 @@ export default function App() {
     const pageWidth = doc.internal.pageSize.getWidth();
     
     // Header
-    doc.setFillColor(196, 160, 82); // axia-primary color
-    doc.rect(0, 0, pageWidth, 40, 'F');
+    doc.setFillColor(0, 51, 255); // axia-primary (Ocean Blue)
+    doc.rect(0, 0, pageWidth, 35, 'F');
+    
+    // Logo
+    const centerX = 25;
+    const centerY = 12;
+    const radius = 7;
+    doc.setDrawColor(255, 255, 255);
+    doc.setLineWidth(0.2);
+    for (let i = 0; i < 6; i++) {
+      const angle = (i * Math.PI) / 3;
+      const px = centerX + Math.cos(angle) * (radius / 2);
+      const py = centerY + Math.sin(angle) * (radius / 2);
+      doc.circle(px, py, radius / 2, 'S');
+    }
+    doc.circle(centerX, centerY, radius, 'S');
     
     doc.setTextColor(255, 255, 255);
-    doc.setFontSize(22);
+    doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
-    doc.text('A.L GESTÃO DE OBRAS', 20, 20);
+    doc.text('AXIA', centerX, 24, { align: 'center' });
+    doc.setFontSize(5);
+    doc.text('ENERGIA', centerX, 27, { align: 'center' });
+    
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text('RELATÓRIO DE PROJETO', pageWidth / 2 + 10, 18, { align: 'center' });
     
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    doc.text('RELATÓRIO TÉCNICO DE OBRA', 20, 30);
-    doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, pageWidth - 70, 30);
+    doc.text(`${project.name.toUpperCase()}`, pageWidth / 2 + 10, 26, { align: 'center' });
     
     // Project Info
     doc.setTextColor(30, 41, 59); // slate-800
@@ -1024,7 +1066,7 @@ export default function App() {
       doc.setFontSize(8);
       doc.setTextColor(148, 163, 184); // slate-400
       doc.text(`Página ${i} de ${pageCount}`, pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
-      doc.text('© 2026 A.L Gestão de Obras - Todos os direitos reservados', pageWidth / 2, doc.internal.pageSize.getHeight() - 5, { align: 'center' });
+      doc.text('© 2026 AXIA ENERGIA - Todos os direitos reservados', pageWidth / 2, doc.internal.pageSize.getHeight() - 5, { align: 'center' });
     }
     
     doc.save(`Relatorio_${project.name.replace(/\s+/g, '_')}.pdf`);
@@ -1050,14 +1092,35 @@ export default function App() {
       doc.setFillColor(0, 51, 255); // axia-primary color (Ocean Blue)
       doc.rect(0, 0, pageWidth, 30, 'F');
       
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(18);
-      doc.setFont('helvetica', 'bold');
-      doc.text('A.L GESTÃO DE OBRAS', 15, 15);
+      // Logo
+      const lCenterX = 20;
+      const lCenterY = 10;
+      const lRadius = 5;
+      doc.setDrawColor(255, 255, 255);
+      doc.setLineWidth(0.1);
+      for (let j = 0; j < 6; j++) {
+        const angle = (j * Math.PI) / 3;
+        const px = lCenterX + Math.cos(angle) * (lRadius / 2);
+        const py = lCenterY + Math.sin(angle) * (lRadius / 2);
+        doc.circle(px, py, lRadius / 2, 'S');
+      }
+      doc.circle(lCenterX, lCenterY, lRadius, 'S');
       
+      doc.setTextColor(255, 255, 255);
       doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      doc.text('AXIA', lCenterX, 20, { align: 'center' });
+      doc.setFontSize(4);
+      doc.text('ENERGIA', lCenterX, 23, { align: 'center' });
+      
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(16);
+      doc.setFont('helvetica', 'bold');
+      doc.text('RELATÓRIO GERAL DE OBRAS', pageWidth / 2 + 10, 15, { align: 'center' });
+      
+      doc.setFontSize(9);
       doc.setFont('helvetica', 'normal');
-      doc.text(`RELATÓRIO DETALHADO DA OBRA - ${project.name.toUpperCase()}`, 15, 22);
+      doc.text(`OBRA: ${project.name.toUpperCase()}`, pageWidth / 2 + 10, 22, { align: 'center' });
       doc.text(`Emissão: ${new Date().toLocaleDateString('pt-BR')}`, pageWidth - 15, 22, { align: 'right' });
       
       // Project Info Section
@@ -1191,7 +1254,7 @@ export default function App() {
       doc.setFontSize(8);
       doc.setTextColor(148, 163, 184); // slate-400
       doc.text(`Página ${i} de ${pageCount}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
-      doc.text('© 2026 A.L Gestão de Obras - Relatório Gerencial Detalhado', pageWidth / 2, pageHeight - 5, { align: 'center' });
+      doc.text('© 2026 AXIA ENERGIA - Relatório Gerencial Detalhado', pageWidth / 2, pageHeight - 5, { align: 'center' });
     }
     
     doc.save(`Relatorio_Detalhado_Obras_${new Date().toISOString().split('T')[0]}.pdf`);
@@ -2336,31 +2399,32 @@ export default function App() {
 
                           <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm">
                             <h4 className="font-bold text-axia-primary mb-4 flex items-center gap-2">
-                              <ClipboardList size={18} /> Histórico de Medições
+                              <TrendingUp size={18} /> Histórico de Medições
                             </h4>
                             <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-                              {measurementBulletins.filter(b => b.projectId === viewingProject.id).length === 0 ? (
+                              {measurements.filter(m => m.projectId === viewingProject.id).length === 0 ? (
                                 <p className="text-xs text-slate-400 text-center py-4 italic">Nenhuma medição registrada.</p>
                               ) : (
-                                measurementBulletins
-                                  .filter(b => b.projectId === viewingProject.id)
+                                measurements
+                                  .filter(m => m.projectId === viewingProject.id)
                                   .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                                  .map(bulletin => (
-                                    <div key={bulletin.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100 hover:border-axia-primary/30 transition-colors">
+                                  .map(measurement => (
+                                    <div key={measurement.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100 hover:border-axia-primary/30 transition-colors">
                                       <div className="min-w-0 flex-1">
-                                        <p className="text-xs font-bold text-slate-900 truncate">{bulletin.rcNumber} - {bulletin.supplier}</p>
-                                        <p className="text-[10px] text-slate-500">{new Date(bulletin.date).toLocaleDateString('pt-BR')}</p>
+                                        <p className="text-xs font-bold text-slate-900 truncate">{measurement.description}</p>
+                                        <p className="text-[10px] text-slate-500">{new Date(measurement.date).toLocaleDateString('pt-BR')}</p>
                                       </div>
                                       <div className="text-right ml-3">
                                         <p className="text-xs font-bold text-axia-primary">
-                                          {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(bulletin.value)}
+                                          {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(measurement.value)}
                                         </p>
-                                        <button 
-                                          onClick={() => generateBulletinPDF(bulletin)}
-                                          className="text-[10px] text-slate-400 hover:text-axia-primary font-bold uppercase flex items-center gap-1 ml-auto"
-                                        >
-                                          <FileDown size={10} /> PDF
-                                        </button>
+                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md uppercase ${
+                                          measurement.status === 'paid' ? 'bg-green-100 text-green-600' : 
+                                          measurement.status === 'approved' ? 'bg-blue-100 text-blue-600' : 
+                                          'bg-amber-100 text-amber-600'
+                                        }`}>
+                                          {measurement.status === 'paid' ? 'Pago' : measurement.status === 'approved' ? 'Aprovado' : 'Pendente'}
+                                        </span>
                                       </div>
                                     </div>
                                   ))
