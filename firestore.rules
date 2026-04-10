@@ -56,6 +56,10 @@ service cloud.firestore {
       return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
     }
 
+    function isValidUrl(url) {
+      return url is string && (url.matches("^https://.*") || url.matches("^http://.*"));
+    }
+
     // ===============================================================
     // Domain Validators
     // ===============================================================
@@ -76,6 +80,15 @@ service cloud.firestore {
       return data.id is string && data.projectId is string &&
              data.url is string && isValidUrl(data.url) &&
              data.date is string && (!('caption' in data) || data.caption is string);
+    }
+
+    function isValidBulletin(data) {
+      return data.id is string && data.projectId is string &&
+             data.projectName is string && data.contractNumber is string &&
+             data.rcNumber is string && data.sapItem is string &&
+             data.installation is string && data.supplier is string &&
+             data.value is number && data.date is string &&
+             data.status in ['pending', 'approved', 'paid'];
     }
 
     // ===============================================================
@@ -120,6 +133,12 @@ service cloud.firestore {
     match /photoReports/{photoId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidPhotoReport(request.resource.data);
+      allow update, delete: if isAdmin();
+    }
+
+    match /measurementBulletins/{bulletinId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidBulletin(request.resource.data);
       allow update, delete: if isAdmin();
     }
   }

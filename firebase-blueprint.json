@@ -104,6 +104,25 @@
         "date": { "type": "string" }
       },
       "required": ["id", "projectId", "url", "date"]
+    },
+    "MeasurementBulletin": {
+      "title": "MeasurementBulletin",
+      "description": "Detailed measurement bulletin",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "projectName": { "type": "string" },
+        "contractNumber": { "type": "string" },
+        "rcNumber": { "type": "string" },
+        "sapItem": { "type": "string" },
+        "installation": { "type": "string" },
+        "supplier": { "type": "string" },
+        "value": { "type": "number" },
+        "date": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "paid"] }
+      },
+      "required": ["id", "projectId", "projectName", "contractNumber", "rcNumber", "sapItem", "installation", "supplier", "value", "date", "status"]
     }
   },
   "firestore": {
@@ -134,6 +153,10 @@
     "/photoReports/{photoId}": {
       "schema": "PhotoReportItem",
       "description": "Photo report documents"
+    },
+    "/measurementBulletins/{bulletinId}": {
+      "schema": "MeasurementBulletin",
+      "description": "Measurement bulletin documents"
     }
   }
 }

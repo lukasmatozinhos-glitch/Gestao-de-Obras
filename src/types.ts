@@ -83,3 +83,17 @@ export interface StatusUpdate {
   message: string;
   author: string;
 }
+
+export interface MeasurementBulletin {
+  id: string;
+  projectId: string;
+  projectName: string;
+  contractNumber: string;
+  rcNumber: string;
+  sapItem: string;
+  installation: string;
+  supplier: string;
+  value: number;
+  date: string;
+  status: 'pending' | 'approved' | 'paid';
+}
