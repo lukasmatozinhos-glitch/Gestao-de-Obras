@@ -239,11 +239,16 @@ export default function App() {
   const [showProfile, setShowProfile] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [isUpdatingProgress, setIsUpdatingProgress] = useState(false);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [isAddingBulletin, setIsAddingBulletin] = useState(false);
+  const [isUploadingReport, setIsUploadingReport] = useState(false);
   const [tempProgress, setTempProgress] = useState(0);
   const [isAddingPhoto, setIsAddingPhoto] = useState(false);
+  const [isSubmittingPhoto, setIsSubmittingPhoto] = useState(false);
   const [newPhoto, setNewPhoto] = useState({ url: '', caption: '' });
   const [selectedPhotoUrl, setSelectedPhotoUrl] = useState<string | null>(null);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
 
   const photoFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -253,15 +258,17 @@ export default function App() {
       const projectRef = doc(db, 'projects', viewingProject.id);
       await updateDoc(projectRef, { progress: tempProgress });
       setViewingProject({ ...viewingProject, progress: tempProgress });
-      setIsUpdatingProgress(false);
       showNotification('Progresso atualizado!');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `projects/${viewingProject.id}`);
+    } finally {
+      setIsUpdatingProgress(false);
     }
   };
 
   const handleAddPhoto = async () => {
-    if (!viewingProject || !newPhoto.url) return;
+    if (!viewingProject || !newPhoto.url || isSubmittingPhoto) return;
+    setIsSubmittingPhoto(true);
     try {
       const photoData: PhotoReportItem = {
         id: Date.now().toString(),
@@ -272,10 +279,12 @@ export default function App() {
       };
       await setDoc(doc(db, 'photoReports', photoData.id), photoData);
       setNewPhoto({ url: '', caption: '' });
-      setIsAddingPhoto(false);
       showNotification('Foto adicionada ao relatório!');
+      setIsAddingPhoto(false);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'photoReports');
+    } finally {
+      setIsSubmittingPhoto(false);
     }
   };
 
@@ -292,33 +301,23 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file || !viewingProject) return;
 
-    // Check file size (e.g., 5MB limit)
-    if (file.size > 5 * 1024 * 1024) {
-      showNotification('A foto é muito grande. O limite é 5MB.');
+    // Check file size (e.g., 10MB limit for original file, we will compress)
+    if (file.size > 10 * 1024 * 1024) {
+      showNotification('A foto é muito grande. O limite é 10MB.');
       return;
     }
 
     setIsUploadingPhoto(true);
     try {
-      const storage = getStorageInstance();
-      const fileRef = storageRef(storage, `photoReports/${viewingProject.id}/${Date.now()}_${file.name}`);
+      showNotification('Comprimindo foto...');
+      // Compress to avoid 1MB Firestore limit. Increased quality and resolution for better PDF results.
+      const compressedBase64 = await compressImage(file, 1280, 1280, 0.8);
       
-      console.log("Starting upload to:", fileRef.fullPath);
-      await uploadBytes(fileRef, file);
-      
-      const url = await getDownloadURL(fileRef);
-      setNewPhoto(prev => ({ ...prev, url }));
+      setNewPhoto(prev => ({ ...prev, url: compressedBase64 }));
       showNotification('Foto carregada com sucesso!');
     } catch (error: any) {
-      console.error('Error uploading photo:', error);
-      
-      if (error.code === 'storage/retry-limit-exceeded') {
-        showNotification('Erro de conexão com o Storage. Verifique se o serviço está ativado no Console do Firebase.');
-      } else if (error.code === 'storage/unauthorized') {
-        showNotification('Sem permissão para upload. Verifique as regras de segurança do Storage.');
-      } else {
-        showNotification('Erro ao carregar foto. Tente novamente.');
-      }
+      console.error('Error processing photo:', error);
+      showNotification('Erro ao processar foto. Tente novamente.');
     } finally {
       setIsUploadingPhoto(false);
       // Reset input value to allow selecting the same file again
@@ -353,11 +352,13 @@ export default function App() {
           }
         } catch (error) {
           handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+        } finally {
+          setIsAuthReady(true);
         }
       } else {
         setIsLoggedIn(false);
+        setIsAuthReady(true);
       }
-      setIsAuthReady(true);
     });
 
     // Test connection
@@ -612,30 +613,56 @@ export default function App() {
     }
   };
 
-  const handleAttachmentUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'pdf' | 'image') => {
+  const handleAttachmentUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'pdf' | 'image') => {
     const file = e.target.files?.[0];
     if (!file || !viewingProject) return;
 
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const attachmentId = Math.random().toString(36).substr(2, 9);
-        const newAttachment: Attachment = {
-          id: attachmentId,
-          projectId: viewingProject.id,
-          name: file.name,
-          type: type,
-          url: event.target?.result as string,
-          uploadedAt: new Date().toLocaleString('pt-BR'),
-          size: (file.size / (1024 * 1024)).toFixed(2) + ' MB'
-        };
-        await setDoc(doc(db, 'attachments', attachmentId), newAttachment);
-        showNotification(`${type === 'pdf' ? 'PDF' : 'Foto'} anexado com sucesso!`);
-      } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, 'attachments');
+    if (file.size > 10 * 1024 * 1024) {
+      showNotification('O arquivo é muito grande. Limite de 10MB.');
+      return;
+    }
+
+    setIsUploadingAttachment(true);
+    try {
+      let url = '';
+      let displaySize = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
+
+      if (type === 'image') {
+        showNotification('Comprimindo imagem...');
+        url = await compressImage(file, 1280, 1280, 0.8);
+        // Recalculate size roughly from base64 (approx 4/3 of binary)
+        const base64Length = url.length - url.indexOf(',') - 1;
+        displaySize = (base64Length / (1024 * 1024)).toFixed(2) + ' MB';
+      } else {
+        showNotification('Lendo arquivo...');
+        url = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (event) => resolve(event.target?.result as string);
+          reader.onerror = (err) => reject(err);
+          reader.readAsDataURL(file);
+        });
       }
-    };
-    reader.readAsDataURL(file);
+
+      const attachmentId = Math.random().toString(36).substr(2, 9);
+      const newAttachment: Attachment = {
+        id: attachmentId,
+        projectId: viewingProject.id,
+        name: file.name,
+        type: type,
+        url: url,
+        uploadedAt: new Date().toLocaleString('pt-BR'),
+        size: displaySize
+      };
+
+      await setDoc(doc(db, 'attachments', attachmentId), newAttachment);
+      showNotification(`${type === 'pdf' ? 'PDF' : 'Foto'} anexado com sucesso!`);
+    } catch (error) {
+      console.error('Error uploading attachment:', error);
+      handleFirestoreError(error, OperationType.WRITE, 'attachments');
+    } finally {
+      setIsUploadingAttachment(false);
+      if (e.target) e.target.value = '';
+    }
   };
 
   const handleDeleteAttachment = async (id: string) => {
@@ -756,6 +783,7 @@ export default function App() {
     const project = projects.find(p => p.id === newBulletin.projectId);
     if (!project) return;
 
+    setIsAddingBulletin(true);
     try {
       const bulletinId = `bull-${Date.now()}`;
       const bulletin: MeasurementBulletin = {
@@ -791,6 +819,8 @@ export default function App() {
     } catch (error) {
       console.error('Error adding bulletin:', error);
       handleFirestoreError(error, OperationType.WRITE, 'measurementBulletins');
+    } finally {
+      setIsAddingBulletin(false);
     }
   };
 
@@ -823,22 +853,21 @@ export default function App() {
     doc.setFillColor(0, 51, 255); // axia-primary (Ocean Blue)
     doc.rect(0, 0, pageWidth, 35, 'F');
     
-    // Logo - Brand Name Only
-    const logoX = 25;
-    const logoY = 18;
-    
+    // Logo - AXIA ENERGIA (Single Line)
     doc.setTextColor(255, 255, 255);
-    doc.setFontSize(16);
     doc.setFont('helvetica', 'bold');
-    doc.text('AXIA', logoX, logoY, { align: 'center' });
-    doc.setFontSize(8);
+    doc.setFontSize(22);
+    doc.text('AXIA', 20, 18);
+    
+    const bAxiaWidth = doc.getTextWidth('AXIA');
     doc.setFont('helvetica', 'normal');
-    doc.text('ENERGIA', logoX, logoY + 5, { align: 'center' });
+    doc.setFontSize(22);
+    doc.text(' ENERGIA', 20 + bAxiaWidth, 18);
     
     doc.setTextColor(255, 255, 255);
-    doc.setFontSize(24);
+    doc.setFontSize(22);
     doc.setFont('helvetica', 'bold');
-    doc.text('BOLETIM DE MEDIÇÃO', pageWidth / 2 + 10, 18, { align: 'center' });
+    doc.text('BOLETIM DE MEDIÇÃO', pageWidth / 2 + 20, 18, { align: 'center' });
     
     doc.setFontSize(11);
     doc.setFont('helvetica', 'normal');
@@ -886,6 +915,57 @@ export default function App() {
     doc.line(pageWidth - 120, signatureY, pageWidth - 40, signatureY);
     doc.text('Representante do Fornecedor', pageWidth - 80, signatureY + 5, { align: 'center' });
 
+    // Photographic Report for the Bulletin
+    const projectPhotos = photoReports.filter(p => p.projectId === bulletin.projectId).slice(0, 3);
+    if (projectPhotos.length > 0) {
+      doc.addPage('a4', 'landscape');
+      doc.setFillColor(0, 51, 255);
+      doc.rect(0, 0, pageWidth, 20, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text('ANEXO FOTOGRÁFICO DA MEDIÇÃO', pageWidth / 2, 13, { align: 'center' });
+
+      let photoX = 20;
+      let photoY = 30;
+      const photoWidth = (pageWidth - 60) / 3;
+      const photoHeight = 50;
+
+      projectPhotos.forEach((photo, idx) => {
+        try {
+          const imgProps = doc.getImageProperties(photo.url);
+          const aspectRatio = imgProps.width / imgProps.height;
+          const photoWidth = (pageWidth - 60) / 3;
+          const photoHeight = photoWidth / aspectRatio;
+
+          // Adjust Y if photo height pushes caption off page
+          if (photoY + photoHeight + 15 > pageHeight) {
+            doc.addPage('a4', 'landscape');
+            doc.setFillColor(0, 51, 255);
+            doc.rect(0, 0, pageWidth, 20, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.setFontSize(14);
+            doc.setFont('helvetica', 'bold');
+            doc.text('ANEXO FOTOGRÁFICO DA MEDIÇÃO (CONT.)', pageWidth / 2, 13, { align: 'center' });
+            photoY = 30;
+            photoX = 20;
+          }
+
+          doc.addImage(photo.url, 'JPEG', photoX, photoY, photoWidth, photoHeight);
+          doc.setFontSize(8);
+          doc.setTextColor(100, 116, 139);
+          const splitCap = doc.splitTextToSize(photo.caption || 'Registro de Obra', photoWidth);
+          doc.text(splitCap, photoX, photoY + photoHeight + 5);
+          
+          photoX += photoWidth + 10;
+          if (photoX + photoWidth > pageWidth - 10) {
+            photoX = 20;
+            photoY += 70; // Fixed spacing for rows
+          }
+        } catch (e) {}
+      });
+    }
+
     // Footer
     doc.setFontSize(8);
     doc.setTextColor(148, 163, 184);
@@ -904,22 +984,21 @@ export default function App() {
     doc.setFillColor(0, 51, 255); // axia-primary (Ocean Blue)
     doc.rect(0, 0, pageWidth, 35, 'F');
     
-    // Logo - Brand Name Only
-    const centerX = 25;
-    const centerY = 18;
-    
+    // Logo - AXIA ENERGIA (Single Line)
     doc.setTextColor(255, 255, 255);
-    doc.setFontSize(14);
     doc.setFont('helvetica', 'bold');
-    doc.text('AXIA', centerX, centerY, { align: 'center' });
-    doc.setFontSize(6);
+    doc.setFontSize(22);
+    doc.text('AXIA', 20, 18);
+    
+    const axiaReportWidthValue = doc.getTextWidth('AXIA');
     doc.setFont('helvetica', 'normal');
-    doc.text('ENERGIA', centerX, centerY + 4, { align: 'center' });
+    doc.setFontSize(22);
+    doc.text(' ENERGIA', 20 + axiaReportWidthValue, 18);
     
     doc.setTextColor(255, 255, 255);
-    doc.setFontSize(18);
+    doc.setFontSize(22);
     doc.setFont('helvetica', 'bold');
-    doc.text('RELATÓRIO DE PROJETO', pageWidth / 2 + 10, 18, { align: 'center' });
+    doc.text('RELATÓRIO DE PROJETO', pageWidth / 2 + 20, 18, { align: 'center' });
     
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
@@ -1029,6 +1108,60 @@ export default function App() {
           1: { cellWidth: 100 }
         }
       });
+      currentY = (doc as any).lastAutoTable.finalY + 15;
+    }
+
+    // Photographic Report Section
+    const projectPhotos = photoReports.filter(p => p.projectId === project.id);
+    if (projectPhotos.length > 0) {
+      if (currentY > doc.internal.pageSize.getHeight() - 40) {
+        doc.addPage();
+        currentY = 20;
+      } else {
+        currentY += 10;
+      }
+
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Relatório Fotográfico', 20, currentY);
+      currentY += 10;
+
+      projectPhotos.forEach((photo, index) => {
+        try {
+          const imgProps = doc.getImageProperties(photo.url);
+          const aspectRatio = imgProps.width / imgProps.height;
+          const imgWidth = pageWidth - 40;
+          const imgHeight = imgWidth / aspectRatio;
+          
+          const estimatedHeight = imgHeight + 25; // Image + Caption space
+
+          // Check if we need a new page for the photo
+          if (currentY + estimatedHeight > doc.internal.pageSize.getHeight()) {
+            doc.addPage();
+            currentY = 20;
+          }
+
+          // Add the photo maintaining aspect ratio
+          doc.addImage(photo.url, 'JPEG', 20, currentY, imgWidth, imgHeight);
+          currentY += imgHeight + 5;
+
+          // Add the caption
+          doc.setFontSize(9);
+          doc.setFont('helvetica', 'italic');
+          doc.setTextColor(100, 116, 139);
+          const captionText = photo.caption || 'Sem descrição';
+          const splitCaption = doc.splitTextToSize(captionText, pageWidth - 40);
+          doc.text(splitCaption, 20, currentY);
+          
+          currentY += (splitCaption.length * 5) + 15;
+        } catch (err) {
+          console.error('Error adding image to PDF:', err);
+          doc.setFontSize(9);
+          doc.setTextColor(255, 0, 0);
+          doc.text('[Erro ao carregar imagem]', 20, currentY);
+          currentY += 10;
+        }
+      });
     }
     
     // Footer
@@ -1043,6 +1176,17 @@ export default function App() {
     
     doc.save(`Relatorio_${project.name.replace(/\s+/g, '_')}.pdf`);
     showNotification('Relatório PDF gerado com sucesso!');
+  };
+
+  const handleGenerateGeneralReport = () => {
+    setIsGeneratingReport(true);
+    setTimeout(() => {
+      try {
+        generateGeneralReport();
+      } finally {
+        setIsGeneratingReport(false);
+      }
+    }, 100);
   };
 
   const generateGeneralReport = () => {
@@ -1064,22 +1208,21 @@ export default function App() {
       doc.setFillColor(0, 51, 255); // axia-primary color (Ocean Blue)
       doc.rect(0, 0, pageWidth, 30, 'F');
       
-      // Logo - Brand Name Only
-      const lCenterX = 20;
-      const lCenterY = 15;
-      
+      // Logo - AXIA ENERGIA (Single Line)
       doc.setTextColor(255, 255, 255);
-      doc.setFontSize(12);
       doc.setFont('helvetica', 'bold');
-      doc.text('AXIA', lCenterX, lCenterY, { align: 'center' });
-      doc.setFontSize(5);
+      doc.setFontSize(18);
+      doc.text('AXIA', 20, 15);
+      
+      const gAxiaWidth = doc.getTextWidth('AXIA');
       doc.setFont('helvetica', 'normal');
-      doc.text('ENERGIA', lCenterX, lCenterY + 4, { align: 'center' });
+      doc.setFontSize(18);
+      doc.text(' ENERGIA', 20 + gAxiaWidth, 15);
       
       doc.setTextColor(255, 255, 255);
-      doc.setFontSize(16);
+      doc.setFontSize(18);
       doc.setFont('helvetica', 'bold');
-      doc.text('RELATÓRIO GERAL DE OBRAS', pageWidth / 2 + 10, 15, { align: 'center' });
+      doc.text('RELATÓRIO GERAL DE OBRAS', pageWidth / 2 + 20, 15, { align: 'center' });
       
       doc.setFontSize(9);
       doc.setFont('helvetica', 'normal');
@@ -1208,6 +1351,51 @@ export default function App() {
           });
         }
       }
+      
+      const projectPhotos = photoReports.filter(p => p.projectId === project.id).slice(0, 4);
+      if (projectPhotos.length > 0) {
+        const lastTable = (doc as any).lastAutoTable;
+        let finalYPhotos = lastTable ? lastTable.finalY : finalYMeasurements + 15;
+        let cPY = 0;
+        
+        if (finalYPhotos + 40 > pageHeight - 30) {
+          doc.addPage();
+          doc.setFontSize(12);
+          doc.setFont('helvetica', 'bold');
+          doc.text('Relatório Fotográfico', 15, 20);
+          cPY = 30;
+        } else {
+          doc.setFontSize(12);
+          doc.setFont('helvetica', 'bold');
+          doc.text('Relatório Fotográfico', 15, finalYPhotos + 15);
+          cPY = finalYPhotos + 22;
+        }
+
+        projectPhotos.forEach((photo) => {
+          try {
+            const imgProps = doc.getImageProperties(photo.url);
+            const aspectRatio = imgProps.width / imgProps.height;
+            const imgWidth = pageWidth - 30;
+            const imgHeight = imgWidth / aspectRatio;
+
+            if (cPY + imgHeight + 15 > pageHeight - 20) {
+              doc.addPage();
+              cPY = 20;
+            }
+
+            doc.addImage(photo.url, 'JPEG', 15, cPY, imgWidth, imgHeight);
+            cPY += imgHeight + 5;
+
+            doc.setFontSize(8);
+            doc.setFont('helvetica', 'italic');
+            doc.setTextColor(148, 163, 184);
+            const cap = photo.caption || 'Sem descrição';
+            const sCap = doc.splitTextToSize(cap, pageWidth - 30);
+            doc.text(sCap, 15, cPY);
+            cPY += (sCap.length * 4) + 8;
+          } catch (e) {}
+        });
+      }
     });
     
     // Footer for all pages
@@ -1287,11 +1475,14 @@ export default function App() {
       return;
     }
 
+    setIsUploadingReport(true);
     try {
       const reportId = `rep-${Date.now()}`;
+      const project = projects.find(p => p.name === selectedProject);
+      
       const newReport: WeeklyReport = {
         id: reportId,
-        projectId: '1', // Simplificado para o exemplo
+        projectId: project?.id || '1',
         projectName: selectedProject,
         weekEnding: selectedDate,
         status: 'submitted',
@@ -1307,6 +1498,8 @@ export default function App() {
       setSelectedDate('');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'reports');
+    } finally {
+      setIsUploadingReport(false);
     }
   };
 
@@ -1493,14 +1686,15 @@ export default function App() {
         animate={{ width: isSidebarOpen ? 260 : 80 }}
         className="bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col z-30 transition-colors duration-300"
       >
-        <div className="p-6 flex items-center gap-3">
-          <div className="w-10 h-10 bg-axia-primary rounded-lg flex items-center justify-center flex-shrink-0 shadow-lg shadow-axia-primary/20">
-            <Logo size={28} className="text-white" />
-          </div>
-          {isSidebarOpen && (
+        <div className="p-6 flex flex-col items-start gap-0">
+          {isSidebarOpen ? (
             <div className="overflow-hidden whitespace-nowrap">
-              <h1 className="text-xl font-display font-bold text-axia-primary">A.L</h1>
-              <p className="text-[10px] uppercase tracking-widest text-axia-secondary font-bold">Gestão de Obras</p>
+              <h1 className="text-2xl font-display font-black tracking-tighter text-axia-primary">AXIA</h1>
+              <p className="text-[10px] uppercase tracking-[0.2em] text-axia-secondary font-bold -mt-1">ENERGIA</p>
+            </div>
+          ) : (
+            <div className="w-10 h-10 bg-axia-primary rounded-lg flex items-center justify-center flex-shrink-0 shadow-lg shadow-axia-primary/20">
+              <span className="text-white font-black text-xl">A</span>
             </div>
           )}
         </div>
@@ -1642,6 +1836,9 @@ export default function App() {
                     change="Aguardando início" 
                     icon={<Clock className="text-slate-400" />} 
                     color="slate"
+                    onClickDetails={() => setActiveTab('projects')}
+                    onClickReport={handleGenerateGeneralReport}
+                    isGeneratingReport={isGeneratingReport}
                   />
                   <StatCard 
                     title="Em Andamento" 
@@ -1649,6 +1846,9 @@ export default function App() {
                     change="Execução ativa" 
                     icon={<HardHat className="text-axia-primary" />} 
                     color="blue"
+                    onClickDetails={() => setActiveTab('projects')}
+                    onClickReport={handleGenerateGeneralReport}
+                    isGeneratingReport={isGeneratingReport}
                   />
                   <StatCard 
                     title="Paralisadas" 
@@ -1656,6 +1856,9 @@ export default function App() {
                     change="Necessita atenção" 
                     icon={<AlertCircle className="text-axia-secondary" />} 
                     color="orange"
+                    onClickDetails={() => setActiveTab('projects')}
+                    onClickReport={handleGenerateGeneralReport}
+                    isGeneratingReport={isGeneratingReport}
                   />
                   <StatCard 
                     title="Finalizadas" 
@@ -1663,6 +1866,9 @@ export default function App() {
                     change="Concluídas com sucesso" 
                     icon={<CheckCircle2 className="text-axia-accent" />} 
                     color="green"
+                    onClickDetails={() => setActiveTab('projects')}
+                    onClickReport={handleGenerateGeneralReport}
+                    isGeneratingReport={isGeneratingReport}
                   />
                 </div>
 
@@ -2006,31 +2212,43 @@ export default function App() {
                           ) : projectDetailTab === 'attachments' ? (
                             <div className="space-y-8">
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="p-6 bg-slate-50 rounded-3xl border border-slate-200 border-dashed flex flex-col items-center justify-center text-center group hover:bg-white hover:border-axia-primary transition-all cursor-pointer relative">
+                                <div className={`p-6 bg-slate-50 rounded-3xl border border-slate-200 border-dashed flex flex-col items-center justify-center text-center group hover:bg-white hover:border-axia-primary transition-all cursor-pointer relative ${isUploadingAttachment ? 'opacity-50 pointer-events-none' : ''}`}>
                                   <input 
                                     type="file" 
                                     accept=".pdf" 
                                     className="absolute inset-0 opacity-0 cursor-pointer" 
                                     onChange={(e) => handleAttachmentUpload(e, 'pdf')}
                                   />
-                                  <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-red-500 shadow-sm mb-3 group-hover:scale-110 transition-transform">
-                                    <FileText size={24} />
-                                  </div>
-                                  <h4 className="font-bold text-slate-900">Anexar Contrato / PDF</h4>
-                                  <p className="text-xs text-slate-500">Clique para selecionar arquivo</p>
+                                  {isUploadingAttachment ? (
+                                    <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-axia-primary shadow-sm mb-3">
+                                      <div className="w-6 h-6 border-2 border-axia-primary/30 border-t-axia-primary rounded-full animate-spin" />
+                                    </div>
+                                  ) : (
+                                    <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-red-500 shadow-sm mb-3 group-hover:scale-110 transition-transform">
+                                      <FileText size={24} />
+                                    </div>
+                                  )}
+                                  <h4 className="font-bold text-slate-900">{isUploadingAttachment ? 'Enviando...' : 'Anexar Contrato / PDF'}</h4>
+                                  <p className="text-xs text-slate-500">{isUploadingAttachment ? 'Aguarde um momento' : 'Clique para selecionar arquivo'}</p>
                                 </div>
-                                <div className="p-6 bg-slate-50 rounded-3xl border border-slate-200 border-dashed flex flex-col items-center justify-center text-center group hover:bg-white hover:border-axia-primary transition-all cursor-pointer relative">
+                                <div className={`p-6 bg-slate-50 rounded-3xl border border-slate-200 border-dashed flex flex-col items-center justify-center text-center group hover:bg-white hover:border-axia-primary transition-all cursor-pointer relative ${isUploadingAttachment ? 'opacity-50 pointer-events-none' : ''}`}>
                                   <input 
                                     type="file" 
                                     accept="image/*" 
                                     className="absolute inset-0 opacity-0 cursor-pointer" 
                                     onChange={(e) => handleAttachmentUpload(e, 'image')}
                                   />
-                                  <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-axia-primary shadow-sm mb-3 group-hover:scale-110 transition-transform">
-                                    <Camera size={24} />
-                                  </div>
-                                  <h4 className="font-bold text-slate-900">Anexar Foto da Obra</h4>
-                                  <p className="text-xs text-slate-500">Clique para selecionar imagem</p>
+                                  {isUploadingAttachment ? (
+                                    <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-axia-primary shadow-sm mb-3">
+                                      <div className="w-6 h-6 border-2 border-axia-primary/30 border-t-axia-primary rounded-full animate-spin" />
+                                    </div>
+                                  ) : (
+                                    <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-axia-primary shadow-sm mb-3 group-hover:scale-110 transition-transform">
+                                      <Camera size={24} />
+                                    </div>
+                                  )}
+                                  <h4 className="font-bold text-slate-900">{isUploadingAttachment ? 'Enviando...' : 'Anexar Foto da Obra'}</h4>
+                                  <p className="text-xs text-slate-500">{isUploadingAttachment ? 'Aguarde um momento' : 'Clique para selecionar imagem'}</p>
                                 </div>
                               </div>
 
@@ -2199,10 +2417,11 @@ export default function App() {
                                     </button>
                                     <button 
                                       onClick={handleAddPhoto}
-                                      disabled={!newPhoto.url}
-                                      className="px-6 py-2 bg-axia-primary text-white font-bold text-sm rounded-xl hover:bg-axia-primary/90 transition-all shadow-md shadow-axia-primary/20 disabled:opacity-50"
+                                      disabled={!newPhoto.url || isSubmittingPhoto}
+                                      className="px-6 py-2 bg-axia-primary text-white font-bold text-sm rounded-xl hover:bg-axia-primary/90 transition-all shadow-md shadow-axia-primary/20 disabled:opacity-50 flex items-center gap-2"
                                     >
-                                      Salvar Foto
+                                      {isSubmittingPhoto && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                                      {isSubmittingPhoto ? 'Salvando...' : 'Salvar Foto'}
                                     </button>
                                   </div>
                                 </motion.div>
@@ -2350,14 +2569,26 @@ export default function App() {
 
 
                           <button 
-                            onClick={() => {
-                              setSelectedProject(viewingProject.name);
-                              setActiveTab('reports');
+                            onClick={async () => {
+                              setIsGeneratingReport(true);
+                              // Small delay to allow UI to show loading state
+                              setTimeout(() => {
+                                try {
+                                  generateProjectReport(viewingProject);
+                                } finally {
+                                  setIsGeneratingReport(false);
+                                }
+                              }, 100);
                             }}
-                            className="w-full bg-axia-secondary text-white py-4 rounded-2xl font-bold hover:bg-axia-secondary/90 transition-all shadow-lg shadow-axia-secondary/20 flex items-center justify-center gap-2 mb-4"
+                            disabled={isGeneratingReport}
+                            className="w-full bg-axia-secondary text-white py-4 rounded-2xl font-bold hover:bg-axia-secondary/90 transition-all shadow-lg shadow-axia-secondary/20 flex items-center justify-center gap-2 mb-4 disabled:opacity-70"
                           >
-                            <FileText size={20} />
-                            Relatório Semanal
+                            {isGeneratingReport ? (
+                              <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            ) : (
+                              <FileText size={20} />
+                            )}
+                            {isGeneratingReport ? 'Gerando...' : 'Relatório Semanal'}
                           </button>
 
                           <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm">
@@ -2934,7 +3165,7 @@ export default function App() {
                             className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20 dark:text-white"
                           >
                             <option value="">Selecione a obra...</option>
-                            {MOCK_PROJECTS.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                            {projects.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
                           </select>
                         </div>
                         <div>
@@ -2948,9 +3179,15 @@ export default function App() {
                         </div>
                         <button 
                           onClick={handleUpload}
-                          className="w-full bg-axia-primary text-white py-2.5 rounded-xl font-bold hover:bg-axia-primary/90 transition-all"
+                          disabled={isUploadingReport}
+                          className="w-full bg-axia-primary text-white py-2.5 rounded-xl font-bold hover:bg-axia-primary/90 transition-all flex items-center justify-center gap-2 disabled:opacity-70"
                         >
-                          Fazer Upload
+                          {isUploadingReport ? (
+                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          ) : (
+                            <Upload size={18} />
+                          )}
+                          {isUploadingReport ? 'Enviando...' : 'Fazer Upload'}
                         </button>
                       </div>
                     </div>
@@ -3231,10 +3468,15 @@ export default function App() {
                         </div>
                         <button 
                           type="submit"
-                          className="w-full bg-axia-primary text-white py-3 rounded-xl font-bold hover:bg-axia-primary/90 transition-all shadow-lg shadow-axia-primary/20 flex items-center justify-center gap-2"
+                          disabled={isAddingBulletin}
+                          className="w-full bg-axia-primary text-white py-3 rounded-xl font-bold hover:bg-axia-primary/90 transition-all shadow-lg shadow-axia-primary/20 flex items-center justify-center gap-2 disabled:opacity-70"
                         >
-                          <Plus size={18} />
-                          Gerar Boletim
+                          {isAddingBulletin ? (
+                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          ) : (
+                            <Plus size={18} />
+                          )}
+                          {isAddingBulletin ? 'Processando...' : 'Gerar Boletim'}
                         </button>
                       </form>
                     </div>
@@ -3690,11 +3932,8 @@ function LoginPage({ onLogin, onRegister }: {
         >
           <div className="p-10">
             <div className="flex flex-col items-center mb-8">
-              <div className="w-20 h-20 bg-axia-primary rounded-2xl flex items-center justify-center mb-4 shadow-lg shadow-axia-primary/30">
-                <Logo size={56} className="text-white" />
-              </div>
-              <h1 className="text-3xl font-display font-bold text-axia-primary tracking-tight">A.L</h1>
-              <p className="text-xs uppercase tracking-[0.2em] text-axia-secondary font-bold">Gestão de Obras</p>
+              <h1 className="text-4xl font-display font-black tracking-tighter text-axia-primary">AXIA</h1>
+              <p className="text-xs uppercase tracking-[0.4em] text-axia-secondary font-bold -mt-1 ml-1">ENERGIA</p>
             </div>
 
             <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-2xl mb-8">
@@ -3874,12 +4113,15 @@ function LoginPage({ onLogin, onRegister }: {
   );
 }
 
-function StatCard({ title, value, change, icon, color }: { 
+function StatCard({ title, value, change, icon, color, onClickDetails, onClickReport, isGeneratingReport }: { 
   title: string, 
   value: string, 
   change: string, 
   icon: React.ReactNode,
-  color: 'blue' | 'orange' | 'green' | 'slate'
+  color: 'blue' | 'orange' | 'green' | 'slate',
+  onClickDetails?: () => void,
+  onClickReport?: () => void,
+  isGeneratingReport?: boolean
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const colors = {
@@ -3911,14 +4153,36 @@ function StatCard({ title, value, change, icon, color }: {
                 exit={{ opacity: 0, scale: 0.95, y: -10 }}
                 className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-100 dark:border-slate-800 py-2 z-30"
               >
-                <button className="w-full text-left px-4 py-2 text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-axia-primary dark:hover:text-axia-primary transition-colors flex items-center gap-2">
+                <button 
+                  onClick={() => {
+                    onClickDetails?.();
+                    setShowMenu(false);
+                  }}
+                  className="w-full text-left px-4 py-2 text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-axia-primary dark:hover:text-axia-primary transition-colors flex items-center gap-2"
+                >
                   <TrendingUp size={14} /> Ver Detalhes
                 </button>
-                <button className="w-full text-left px-4 py-2 text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-axia-primary dark:hover:text-axia-primary transition-colors flex items-center gap-2">
-                  <BarChart3 size={14} /> Gerar Relatório
+                <button 
+                  onClick={() => {
+                    if (isGeneratingReport) return;
+                    onClickReport?.();
+                    setShowMenu(false);
+                  }}
+                  disabled={isGeneratingReport}
+                  className="w-full text-left px-4 py-2 text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-axia-primary dark:hover:text-axia-primary transition-colors flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isGeneratingReport ? (
+                    <div className="w-3.5 h-3.5 border-2 border-axia-primary/30 border-t-axia-primary rounded-full animate-spin" />
+                  ) : (
+                    <BarChart3 size={14} />
+                  )}
+                  {isGeneratingReport ? 'Gerando...' : 'Gerar Relatório'}
                 </button>
                 <div className="h-px bg-slate-100 dark:bg-slate-800 my-1 mx-2"></div>
-                <button className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-2">
+                <button 
+                  onClick={() => setShowMenu(false)}
+                  className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-2"
+                >
                   <AlertCircle size={14} /> Ocultar Card
                 </button>
               </motion.div>
