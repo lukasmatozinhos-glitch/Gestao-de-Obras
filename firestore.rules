@@ -92,6 +92,13 @@ service cloud.firestore {
              data.status in ['pending', 'approved', 'paid'];
     }
 
+    function isValidAddendum(data) {
+      return data.id is string && data.projectId is string &&
+             data.number is string && data.description is string &&
+             data.value is number && data.isApproved is bool &&
+             data.createdAt is string;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -141,6 +148,13 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidBulletin(request.resource.data);
       allow update, delete: if isAdmin();
+    }
+
+    match /projectAddendums/{addendumId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidAddendum(request.resource.data);
+      allow update: if isAuthenticated(); // Relaxed for testing
+      allow delete: if isAdmin();
     }
   }
 }

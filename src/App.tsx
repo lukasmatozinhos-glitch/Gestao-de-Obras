@@ -89,7 +89,7 @@ import {
   Legend
 } from 'recharts';
 import { MOCK_PROJECTS, MOCK_RESOURCES, MOCK_REPORTS, MOCK_MEASUREMENTS, MOCK_ATTACHMENTS, MOCK_STATUS_UPDATES } from './constants';
-import { Project, WeeklyReport, Measurement, UserProfile, Attachment, StatusUpdate, PhotoReportItem, MeasurementBulletin } from './types';
+import { Project, WeeklyReport, Measurement, UserProfile, Attachment, StatusUpdate, PhotoReportItem, MeasurementBulletin, ProjectAddendum } from './types';
 
 const Logo = ({ size = 40, className = "" }: { size?: number, className?: string }) => (
   <svg 
@@ -198,6 +198,7 @@ export default function App() {
   const [statusUpdates, setStatusUpdates] = useState<StatusUpdate[]>([]);
   const [photoReports, setPhotoReports] = useState<PhotoReportItem[]>([]);
   const [measurementBulletins, setMeasurementBulletins] = useState<MeasurementBulletin[]>([]);
+  const [addendums, setAddendums] = useState<ProjectAddendum[]>([]);
   const [newBulletin, setNewBulletin] = useState({
     projectId: '',
     rcNumber: '',
@@ -232,7 +233,7 @@ export default function App() {
   }, [currentPalette]);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [editingMeasurement, setEditingMeasurement] = useState<Measurement | null>(null);
-  const [projectDetailTab, setProjectDetailTab] = useState<'details' | 'attachments' | 'history' | 'photos'>('details');
+  const [projectDetailTab, setProjectDetailTab] = useState<'details' | 'attachments' | 'history' | 'photos' | 'addendums'>('details');
   const [settingsTab, setSettingsTab] = useState<'general' | 'appearance' | 'security'>('general');
   const [notification, setNotification] = useState<string | null>(null);
   const [imageEditingProjectId, setImageEditingProjectId] = useState<string | null>(null);
@@ -244,8 +245,16 @@ export default function App() {
   const [isUploadingReport, setIsUploadingReport] = useState(false);
   const [tempProgress, setTempProgress] = useState(0);
   const [isAddingPhoto, setIsAddingPhoto] = useState(false);
+  const [isAddingAddendum, setIsAddingAddendum] = useState(false);
   const [isSubmittingPhoto, setIsSubmittingPhoto] = useState(false);
   const [newPhoto, setNewPhoto] = useState({ url: '', caption: '' });
+  const [newAddendum, setNewAddendum] = useState({
+    number: '',
+    description: '',
+    rcNumber: '',
+    value: '',
+    isApproved: false
+  });
   const [selectedPhotoUrl, setSelectedPhotoUrl] = useState<string | null>(null);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
@@ -294,6 +303,58 @@ export default function App() {
       showNotification('Foto removida!');
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `photoReports/${photoId}`);
+    }
+  };
+
+  const handleAddAddendum = async () => {
+    if (!viewingProject || !newAddendum.number || !newAddendum.description || !newAddendum.value) {
+      showNotification('Por favor, preencha todos os campos obrigatórios.');
+      return;
+    }
+
+    try {
+      const addendumId = `add-${Date.now()}`;
+      const addendum: ProjectAddendum = {
+        id: addendumId,
+        projectId: viewingProject.id,
+        number: newAddendum.number,
+        description: newAddendum.description,
+        rcNumber: newAddendum.rcNumber,
+        value: parseFloat(newAddendum.value),
+        isApproved: newAddendum.isApproved,
+        createdAt: new Date().toISOString()
+      };
+
+      await setDoc(doc(db, 'projectAddendums', addendumId), addendum);
+      setNewAddendum({ number: '', description: '', rcNumber: '', value: '', isApproved: false });
+      setIsAddingAddendum(false);
+      showNotification('Aditivo registrado com sucesso!');
+    } catch (error) {
+       handleFirestoreError(error, OperationType.WRITE, 'projectAddendums');
+    }
+  };
+
+  const handleDeleteAddendum = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'projectAddendums', id));
+      showNotification('Aditivo excluído com sucesso.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `projectAddendums/${id}`);
+    }
+  };
+
+  const handleToggleAddendumApproval = async (addendum: ProjectAddendum) => {
+    if (!addendum.id) {
+      console.error('Addendum ID is missing');
+      return;
+    }
+    try {
+      await updateDoc(doc(db, 'projectAddendums', addendum.id), {
+        isApproved: !addendum.isApproved
+      });
+      showNotification(`Aditivo marcado como ${!addendum.isApproved ? 'Realizado' : 'Pendente'}.`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `projectAddendums/${addendum.id}`);
     }
   };
 
@@ -385,32 +446,36 @@ export default function App() {
       : query(collection(db, 'projects'), where('createdBy', '==', currentUser.id));
 
     const unsubProjects = onSnapshot(projectsQuery, (snapshot) => {
-      setProjects(snapshot.docs.map(doc => doc.data() as Project));
+      setProjects(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Project)));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'projects'));
 
     const unsubReports = onSnapshot(collection(db, 'reports'), (snapshot) => {
-      setReports(snapshot.docs.map(doc => doc.data() as WeeklyReport));
+      setReports(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WeeklyReport)));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'reports'));
 
     const unsubMeasurements = onSnapshot(collection(db, 'measurements'), (snapshot) => {
-      setMeasurements(snapshot.docs.map(doc => doc.data() as Measurement));
+      setMeasurements(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Measurement)));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'measurements'));
 
     const unsubAttachments = onSnapshot(collection(db, 'attachments'), (snapshot) => {
-      setAttachments(snapshot.docs.map(doc => doc.data() as Attachment));
+      setAttachments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Attachment)));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'attachments'));
 
     const unsubStatusUpdates = onSnapshot(query(collection(db, 'statusUpdates'), orderBy('date', 'desc')), (snapshot) => {
-      setStatusUpdates(snapshot.docs.map(doc => doc.data() as StatusUpdate));
+      setStatusUpdates(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StatusUpdate)));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'statusUpdates'));
 
     const unsubPhotoReports = onSnapshot(collection(db, 'photoReports'), (snapshot) => {
-      setPhotoReports(snapshot.docs.map(doc => doc.data() as PhotoReportItem));
+      setPhotoReports(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PhotoReportItem)));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'photoReports'));
 
     const unsubBulletins = onSnapshot(collection(db, 'measurementBulletins'), (snapshot) => {
-      setMeasurementBulletins(snapshot.docs.map(doc => doc.data() as MeasurementBulletin));
+      setMeasurementBulletins(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MeasurementBulletin)));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'measurementBulletins'));
+
+    const unsubAddendums = onSnapshot(collection(db, 'projectAddendums'), (snapshot) => {
+      setAddendums(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProjectAddendum)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'projectAddendums'));
 
     return () => {
       unsubProjects();
@@ -420,6 +485,7 @@ export default function App() {
       unsubStatusUpdates();
       unsubPhotoReports();
       unsubBulletins();
+      unsubAddendums();
     };
   }, [isLoggedIn, isAuthReady]);
 
@@ -2126,6 +2192,13 @@ export default function App() {
                               Relatório Fotográfico
                               {projectDetailTab === 'photos' && <motion.div layoutId="projectTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-axia-primary" />}
                             </button>
+                            <button 
+                              onClick={() => setProjectDetailTab('addendums')}
+                              className={`px-6 py-3 font-bold text-sm transition-all relative ${projectDetailTab === 'addendums' ? 'text-axia-primary' : 'text-slate-400 hover:text-slate-600'}`}
+                            >
+                              Aditivos
+                              {projectDetailTab === 'addendums' && <motion.div layoutId="projectTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-axia-primary" />}
+                            </button>
                           </div>
 
                           {projectDetailTab === 'details' ? (
@@ -2473,7 +2546,172 @@ export default function App() {
                                 )}
                               </div>
                             </div>
-                          ) : (
+                          ) : projectDetailTab === 'addendums' ? (
+                            <div className="space-y-6">
+                              <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-xl font-bold flex items-center gap-2">
+                                  <Link className="text-axia-primary" /> Gestão de Aditivos
+                                </h3>
+                                <button 
+                                  onClick={() => setIsAddingAddendum(true)}
+                                  className="bg-axia-primary text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-axia-primary/90 transition-all shadow-md shadow-axia-primary/20"
+                                >
+                                  <Plus size={18} /> Novo Aditivo
+                                </button>
+                              </div>
+
+                              {isAddingAddendum && (
+                                <motion.div 
+                                  initial={{ opacity: 0, y: -20 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  className="p-6 bg-slate-50 rounded-3xl border border-slate-200 shadow-inner space-y-4 mb-8"
+                                >
+                                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                    <div className="space-y-2">
+                                      <label className="text-xs font-bold text-slate-500 uppercase">N° do Aditivo</label>
+                                      <input 
+                                        type="text" 
+                                        value={newAddendum.number}
+                                        onChange={(e) => setNewAddendum({...newAddendum, number: e.target.value})}
+                                        className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:border-axia-primary focus:ring-1 focus:ring-axia-primary outline-none transition-all bg-white"
+                                        placeholder="Ex: 001/2024"
+                                      />
+                                    </div>
+                                    <div className="space-y-2 lg:col-span-2">
+                                      <label className="text-xs font-bold text-slate-500 uppercase">Descrição</label>
+                                      <input 
+                                        type="text" 
+                                        value={newAddendum.description}
+                                        onChange={(e) => setNewAddendum({...newAddendum, description: e.target.value})}
+                                        className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:border-axia-primary focus:ring-1 focus:ring-axia-primary outline-none transition-all bg-white"
+                                        placeholder="Motivo do aditivo..."
+                                      />
+                                    </div>
+                                    <div className="space-y-2">
+                                      <label className="text-xs font-bold text-slate-500 uppercase">RC do Aditivo (Opcional)</label>
+                                      <input 
+                                        type="text" 
+                                        value={newAddendum.rcNumber}
+                                        onChange={(e) => setNewAddendum({...newAddendum, rcNumber: e.target.value})}
+                                        className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:border-axia-primary focus:ring-1 focus:ring-axia-primary outline-none transition-all bg-white"
+                                        placeholder="N° da RC"
+                                      />
+                                    </div>
+                                    <div className="space-y-2">
+                                      <label className="text-xs font-bold text-slate-500 uppercase">Valor do Aditivo</label>
+                                      <input 
+                                        type="number" 
+                                        value={newAddendum.value}
+                                        onChange={(e) => setNewAddendum({...newAddendum, value: e.target.value})}
+                                        className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:border-axia-primary focus:ring-1 focus:ring-axia-primary outline-none transition-all bg-white"
+                                        placeholder="R$ 0,00"
+                                      />
+                                    </div>
+                                    <div className="flex items-end pb-2">
+                                      <label className="flex items-center gap-3 cursor-pointer group">
+                                        <div className="relative">
+                                          <input 
+                                            type="checkbox" 
+                                            className="sr-only peer"
+                                            checked={newAddendum.isApproved}
+                                            onChange={(e) => setNewAddendum({...newAddendum, isApproved: e.target.checked})}
+                                          />
+                                          <div className="w-10 h-6 bg-slate-200 rounded-full peer peer-checked:bg-axia-primary transition-all after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full shadow-sm" />
+                                        </div>
+                                        <span className="text-sm font-bold text-slate-600 group-hover:text-axia-primary transition-colors">Realizado</span>
+                                      </label>
+                                    </div>
+                                  </div>
+                                  <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
+                                    <button 
+                                      onClick={() => setIsAddingAddendum(false)}
+                                      className="px-6 py-2 text-sm font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-all"
+                                    >
+                                      Cancelar
+                                    </button>
+                                    <button 
+                                      onClick={handleAddAddendum}
+                                      className="bg-axia-primary text-white px-8 py-2 rounded-xl font-bold text-sm hover:shadow-lg hover:shadow-axia-primary/25 transition-all"
+                                    >
+                                      Salvar Aditivo
+                                    </button>
+                                  </div>
+                                </motion.div>
+                              )}
+
+                              <div className="grid grid-cols-1 gap-4">
+                                {addendums.filter(a => a.projectId === viewingProject.id).length === 0 ? (
+                                  <div className="p-12 text-center text-slate-400 bg-slate-50 rounded-3xl border border-slate-100">
+                                    <FilePlus size={48} className="mx-auto mb-4 opacity-10" />
+                                    <p>Nenhum aditivo registrado para esta obra.</p>
+                                  </div>
+                                ) : (
+                                  addendums.filter(a => a.projectId === viewingProject.id).sort((a,b) => b.createdAt.localeCompare(a.createdAt)).map(addendum => (
+                                    <div key={addendum.id} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm hover:shadow-md transition-all group relative overflow-hidden">
+                                      {addendum.isApproved && (
+                                        <div className="absolute top-0 right-0 w-24 h-24 -mr-8 -mt-8 bg-green-500/10 rounded-full flex items-end justify-center pb-4 transition-transform group-hover:scale-110">
+                                          <ShieldCheck size={24} className="text-green-500" />
+                                        </div>
+                                      )}
+                                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                                        <div className="space-y-3 flex-1">
+                                          <div className="flex items-center gap-3">
+                                            <button 
+                                              onClick={() => handleToggleAddendumApproval(addendum)}
+                                              className="px-2.5 py-1 bg-axia-primary/10 text-axia-primary text-[10px] font-black uppercase rounded-lg border border-axia-primary/20 cursor-pointer hover:bg-axia-primary/20 transition-all"
+                                            >
+                                              Aditivo {addendum.number}
+                                            </button>
+                                            <button 
+                                              onClick={() => handleToggleAddendumApproval(addendum)}
+                                              className={`px-2.5 py-1 text-[10px] font-black uppercase rounded-lg border transition-all cursor-pointer hover:scale-105 active:scale-95 ${addendum.isApproved ? 'bg-green-50 text-green-600 border-green-100' : 'bg-amber-50 text-amber-600 border-amber-100'}`}
+                                            >
+                                              {addendum.isApproved ? 'Realizado' : 'Pendente'}
+                                            </button>
+                                          </div>
+                                          <h4 className="text-lg font-bold text-slate-800 leading-tight">{addendum.description}</h4>
+                                          <div className="flex flex-wrap items-center gap-5 text-xs font-bold text-slate-500">
+                                            {addendum.rcNumber && (
+                                              <span className="flex items-center gap-1.5 bg-slate-100 px-2 py-1 rounded-md">
+                                                <Receipt size={14} className="text-axia-primary" /> RC: {addendum.rcNumber}
+                                              </span>
+                                            )}
+                                            <span className="flex items-center gap-1.5 bg-slate-100 px-2 py-1 rounded-md">
+                                                <Calendar size={14} className="text-axia-primary" /> {new Date(addendum.createdAt).toLocaleDateString('pt-BR')}
+                                            </span>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-8 pl-4 md:border-l border-slate-100">
+                                          <div className="text-right">
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Valor do Aditivo</p>
+                                            <p className="text-2xl font-black text-axia-primary">
+                                              {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(addendum.value)}
+                                            </p>
+                                          </div>
+                                          <div className="flex flex-col gap-2">
+                                            <button 
+                                              onClick={() => handleToggleAddendumApproval(addendum)}
+                                              title={addendum.isApproved ? "Marcar como pendente" : "Marcar como realizado"}
+                                              className={`p-2 rounded-xl transition-all shadow-sm ${addendum.isApproved ? 'bg-amber-50 text-amber-500 hover:bg-amber-100' : 'bg-green-50 text-green-500 hover:bg-green-100'}`}
+                                            >
+                                              {addendum.isApproved ? <Clock size={20} /> : <CheckCircle2 size={20} />}
+                                            </button>
+                                            <button 
+                                              onClick={() => handleDeleteAddendum(addendum.id)}
+                                              title="Excluir aditivo"
+                                              className="p-2 bg-red-50 text-red-500 rounded-xl hover:bg-red-100 transition-all shadow-sm"
+                                            >
+                                              <Trash2 size={20} />
+                                            </button>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          ) : projectDetailTab === 'history' ? (
                             <div className="space-y-6">
                               <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
                                 <History className="text-axia-primary" /> Histórico de Atualizações
@@ -2501,6 +2739,11 @@ export default function App() {
                                   ))
                                 )}
                               </div>
+                            </div>
+                          ) : (
+                            <div className="p-12 text-center text-slate-400 bg-slate-50 rounded-3xl border border-slate-100">
+                              <History size={48} className="mx-auto mb-4 opacity-10" />
+                              <p>Selecione uma aba para visualizar o conteúdo.</p>
                             </div>
                           )}
                         </div>

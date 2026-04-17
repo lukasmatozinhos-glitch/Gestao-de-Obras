@@ -123,6 +123,22 @@
         "status": { "type": "string", "enum": ["pending", "approved", "paid"] }
       },
       "required": ["id", "projectId", "projectName", "contractNumber", "rcNumber", "sapItem", "installation", "supplier", "value", "date", "status"]
+    },
+    "ProjectAddendum": {
+      "title": "ProjectAddendum",
+      "description": "An addendum to a project contract",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "number": { "type": "string" },
+        "description": { "type": "string" },
+        "rcNumber": { "type": "string" },
+        "value": { "type": "number" },
+        "isApproved": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "projectId", "number", "description", "value", "isApproved", "createdAt"]
     }
   },
   "firestore": {
@@ -157,6 +173,10 @@
     "/measurementBulletins/{bulletinId}": {
       "schema": "MeasurementBulletin",
       "description": "Measurement bulletin documents"
+    },
+    "/projectAddendums/{addendumId}": {
+      "schema": "ProjectAddendum",
+      "description": "Project addendum documents"
     }
   }
 }

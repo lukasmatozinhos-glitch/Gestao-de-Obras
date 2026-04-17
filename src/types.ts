@@ -1,3 +1,14 @@
+export interface ProjectAddendum {
+  id: string;
+  projectId: string;
+  number: string;
+  description: string;
+  rcNumber?: string;
+  value: number;
+  isApproved: boolean;
+  createdAt: string;
+}
+
 export interface PhotoReportItem {
   id: string;
   projectId: string;
