@@ -152,7 +152,7 @@
         "startDate": { "type": "string" },
         "endDate": { "type": "string" },
         "progress": { "type": "number" },
-        "status": { "type": "string", "enum": ["pending", "in-progress", "completed", "delayed"] },
+        "status": { "type": "string", "enum": ["pending", "in-progress", "completed", "delayed", "scheduled"] },
         "predictedEndDate": { "type": "string" },
         "dependencies": { "type": "array", "items": { "type": "string" } },
         "category": { "type": "string" },

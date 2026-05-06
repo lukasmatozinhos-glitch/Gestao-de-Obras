@@ -3521,11 +3521,13 @@ export default function App() {
                                         activity.status === 'completed' ? 'bg-green-50 text-green-600 border-green-100' :
                                         activity.status === 'in-progress' ? 'bg-blue-50 text-blue-600 border-blue-100' :
                                         activity.status === 'delayed' ? 'bg-red-50 text-red-600 border-red-100' :
+                                        activity.status === 'scheduled' ? 'bg-purple-50 text-purple-600 border-purple-100' :
                                         'bg-slate-50 text-slate-600 border-slate-100'
                                       }`}>
                                         {activity.status === 'completed' ? 'Concluído' : 
                                          activity.status === 'in-progress' ? 'Em Andamento' : 
-                                         activity.status === 'delayed' ? 'Atrasada' : 'Pendente'}
+                                         activity.status === 'delayed' ? 'Atrasada' : 
+                                         activity.status === 'scheduled' ? 'Programado' : 'Pendente'}
                                       </span>
                                     </td>
                                     <td className="px-6 py-4">
@@ -3635,6 +3637,7 @@ export default function App() {
                                     animate={{ width: `${Math.max(widthPos, 2)}%`, opacity: 1 }}
                                     className={`absolute h-4 rounded-l-full shadow-sm mt-3 flex items-center justify-between px-1 cursor-pointer transition-all hover:scale-[1.02] z-20 ${
                                       activity.status === 'completed' ? 'bg-green-500 rounded-r-full' : 
+                                      activity.status === 'scheduled' ? 'bg-purple-500 rounded-r-full' :
                                       activity.status === 'delayed' ? 'bg-axia-primary' : 'bg-axia-primary rounded-r-full'
                                     }`}
                                     style={{ left: `${startPos}%` }}
@@ -4708,6 +4711,7 @@ export default function App() {
                         className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
                       >
                         <option value="pending">Pendente</option>
+                        <option value="scheduled">Programado</option>
                         <option value="in-progress">Em Andamento</option>
                         <option value="completed">Concluído</option>
                         <option value="delayed">Atrasada</option>

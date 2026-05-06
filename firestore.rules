@@ -111,7 +111,7 @@ service cloud.firestore {
              data.startDate is string &&
              data.endDate is string &&
              data.progress is number &&
-             data.status in ['pending', 'in-progress', 'completed', 'delayed'] &&
+             data.status in ['pending', 'in-progress', 'completed', 'delayed', 'scheduled'] &&
              data.order is number &&
              (!('predictedEndDate' in data) || data.predictedEndDate is string) &&
              (!('category' in data) || data.category is string) &&
