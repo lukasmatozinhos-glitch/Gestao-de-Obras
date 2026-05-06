@@ -44,6 +44,8 @@ import {
   MessageSquare,
   FileDown,
   Eye,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { jsPDF } from 'jspdf';
@@ -231,7 +233,12 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState('');
   const [showAddProject, setShowAddProject] = useState(false);
   const [viewingProject, setViewingProject] = useState<Project | null>(null);
-  const [currentPalette, setCurrentPalette] = useState('ocean');
+  const [currentPalette, setCurrentPalette] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('currentPalette') || 'ocean';
+    }
+    return 'ocean';
+  });
 
   const palettes = [
     { id: 'forest', name: 'Floresta (Verde)', primary: '#10B981', secondary: '#1E293B', accent: '#34D399' },
@@ -247,6 +254,7 @@ export default function App() {
     root.style.setProperty('--axia-primary', palette.primary);
     root.style.setProperty('--axia-secondary', palette.secondary);
     root.style.setProperty('--axia-accent', palette.accent);
+    localStorage.setItem('currentPalette', currentPalette);
   }, [currentPalette]);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [editingMeasurement, setEditingMeasurement] = useState<Measurement | null>(null);
@@ -2023,6 +2031,13 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setIsDarkMode(!isDarkMode)}
+              className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-500 dark:text-slate-400 transition-colors"
+              title={isDarkMode ? "Ativar Modo Claro" : "Ativar Modo Escuro"}
+            >
+              {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
+            </button>
             <button className="relative p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-500 dark:text-slate-400">
               <Bell size={20} />
               <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-axia-secondary rounded-full border-2 border-white dark:border-slate-900"></span>
