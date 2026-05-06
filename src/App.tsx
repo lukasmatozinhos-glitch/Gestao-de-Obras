@@ -1838,7 +1838,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden">
+    <div className="flex h-screen bg-slate-50 dark:bg-slate-950 overflow-hidden transition-colors duration-300">
       <input 
         type="file" 
         ref={fileInputRef} 
@@ -1899,19 +1899,19 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border border-slate-200"
+              className="bg-white dark:bg-slate-900 rounded-3xl p-8 max-w-md w-full shadow-2xl border border-slate-200 dark:border-slate-800"
             >
-              <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mb-6 mx-auto">
+              <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-2xl flex items-center justify-center mb-6 mx-auto">
                 <AlertCircle size={32} />
               </div>
-              <h3 className="text-2xl font-display font-bold text-slate-900 text-center mb-2">Excluir Obra?</h3>
-              <p className="text-slate-500 text-center mb-8">
-                Tem certeza que deseja excluir a obra <span className="font-bold text-slate-900">"{projectToDelete.name}"</span>? Esta ação é irreversível e apagará todos os dados relacionados (medições, anexos e relatórios).
+              <h3 className="text-2xl font-display font-bold text-slate-900 dark:text-white text-center mb-2">Excluir Obra?</h3>
+              <p className="text-slate-500 dark:text-slate-400 text-center mb-8">
+                Tem certeza que deseja excluir a obra <span className="font-bold text-slate-900 dark:text-white">"{projectToDelete.name}"</span>? Esta ação é irreversível e apagará todos os dados relacionados (medições, anexos e relatórios).
               </p>
               <div className="flex gap-4">
                 <button 
                   onClick={() => setProjectToDelete(null)}
-                  className="flex-1 px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-all"
+                  className="flex-1 px-6 py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-all"
                 >
                   Cancelar
                 </button>
@@ -2331,9 +2331,9 @@ export default function App() {
                       Voltar para Lista
                     </button>
 
-                    <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
                       <div 
-                        className="h-64 bg-slate-100 relative cursor-pointer group/banner overflow-hidden"
+                        className="h-64 bg-slate-100 dark:bg-slate-800 relative cursor-pointer group/banner overflow-hidden"
                         onClick={() => handleImageClick(viewingProject.id)}
                       >
                         <img 
