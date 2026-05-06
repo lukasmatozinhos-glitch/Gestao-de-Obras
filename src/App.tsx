@@ -89,6 +89,7 @@ import {
   Legend
 } from 'recharts';
 import { MOCK_PROJECTS, MOCK_RESOURCES, MOCK_REPORTS, MOCK_MEASUREMENTS, MOCK_ATTACHMENTS, MOCK_STATUS_UPDATES } from './constants';
+import html2canvas from 'html2canvas';
 import { Project, WeeklyReport, Measurement, UserProfile, Attachment, StatusUpdate, PhotoReportItem, MeasurementBulletin, ProjectAddendum, ScheduleActivity } from './types';
 
 const Logo = ({ size = 40, className = "" }: { size?: number, className?: string }) => (
@@ -203,6 +204,7 @@ export default function App() {
   const [selectedScheduleProjectId, setSelectedScheduleProjectId] = useState<string>('');
   const [isAddingActivity, setIsAddingActivity] = useState(false);
   const [editingActivity, setEditingActivity] = useState<ScheduleActivity | null>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
   const [newActivity, setNewActivity] = useState<Omit<ScheduleActivity, 'id' | 'projectId'>>({
     name: '',
     responsible: '',
@@ -409,12 +411,12 @@ export default function App() {
     }
   };
 
-  const exportScheduleToPDF = (projectId: string) => {
+  const exportScheduleToPDF = async (projectId: string) => {
     const project = projects.find(p => p.id === projectId);
     if (!project) return;
 
     const projectActivities = activities.filter(a => a.projectId === projectId);
-    const doc = new jsPDF();
+    const doc = new jsPDF('p', 'mm', 'a4');
     
     // Header
     doc.setFillColor(0, 51, 255);
@@ -433,23 +435,78 @@ export default function App() {
     doc.text(`Período: ${project.startDate} a ${project.endDate}`, 15, 55);
     doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, 15, 60);
 
-    // Table
+    // Table (Without Progress column as requested)
     const tableData = projectActivities.map(a => [
-      a.name,
+      a.name.toUpperCase(),
       a.responsible,
       `${new Date(a.startDate).toLocaleDateString('pt-BR')} - ${new Date(a.endDate).toLocaleDateString('pt-BR')}`,
-      `${a.progress}%`,
       a.status === 'completed' ? 'Concluído' : a.status === 'in-progress' ? 'Em Andamento' : 'Pendente'
     ]);
 
     autoTable(doc, {
       startY: 70,
-      head: [['Atividade', 'Responsável', 'Período', 'Progresso', 'Status']],
+      head: [['ATIVIDADE', 'RESPONSÁVEL', 'PERÍODO', 'STATUS']],
       body: tableData,
       theme: 'striped',
       headStyles: { fillColor: [0, 51, 255], textColor: [255, 255, 255] },
       styles: { fontSize: 8 }
     });
+
+    // Add Timeline Visual if Ref exists
+    if (timelineRef.current) {
+      try {
+        const canvas = await html2canvas(timelineRef.current, {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          backgroundColor: '#FFFFFF',
+          onclone: (clonedDoc) => {
+            const elements = clonedDoc.getElementsByTagName('*');
+            for (let i = 0; i < elements.length; i++) {
+              const el = elements[i] as HTMLElement;
+              const style = window.getComputedStyle(el);
+              
+              // Handle oklch colors specifically for common elements
+              if (style.color.includes('oklch')) {
+                if (el.classList.contains('text-white')) el.style.color = '#ffffff';
+                else if (el.classList.contains('text-slate-400')) el.style.color = '#94a3b8';
+                else el.style.color = '#1e293b';
+              }
+              
+              if (style.backgroundColor.includes('oklch')) {
+                if (el.classList.contains('bg-axia-primary')) el.style.backgroundColor = '#0033FF';
+                else if (el.classList.contains('bg-green-500')) el.style.backgroundColor = '#22c55e';
+                else if (el.classList.contains('bg-red-500')) el.style.backgroundColor = '#ef4444';
+                else if (el.classList.contains('bg-white')) el.style.backgroundColor = '#ffffff';
+                else el.style.backgroundColor = '#f8fafc';
+              }
+              
+              if (style.borderColor.includes('oklch')) {
+                if (el.classList.contains('border-red-500')) el.style.borderColor = '#ef4444';
+                else el.style.borderColor = '#e2e8f0';
+              }
+            }
+          }
+        });
+        const imgData = canvas.toDataURL('image/png');
+        const imgProps = doc.getImageProperties(imgData);
+        const pdfWidth = doc.internal.pageSize.getWidth() - 30;
+        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+        
+        // Ensure it fits on page or add new page
+        const finalY = (doc as any).lastAutoTable.finalY + 15;
+        if (finalY + pdfHeight > doc.internal.pageSize.getHeight()) {
+          doc.addPage();
+          doc.text('VISUALIZAÇÃO DO CRONOGRAMA', 15, 20);
+          doc.addImage(imgData, 'PNG', 15, 30, pdfWidth, pdfHeight);
+        } else {
+          doc.text('VISUALIZAÇÃO DO CRONOGRAMA', 15, finalY - 5);
+          doc.addImage(imgData, 'PNG', 15, finalY, pdfWidth, pdfHeight);
+        }
+      } catch (err) {
+        console.error('Error capturing timeline:', err);
+      }
+    }
 
     doc.save(`cronograma_${project.name.toLowerCase().replace(/\s+/g, '_')}.pdf`);
     showNotification('Cronograma exportado com sucesso!');
@@ -3444,7 +3501,7 @@ export default function App() {
                       </div>
 
                       {/* Visual Timeline (Basic Gantt) */}
-                      <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 p-8 shadow-sm">
+                      <div ref={timelineRef} className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 p-8 shadow-sm">
                         <div className="flex items-center justify-between mb-8">
                           <h3 className="text-xl font-black text-slate-800 dark:text-white tracking-tight">Timeline Visual</h3>
                           <div className="flex items-center gap-4">
@@ -3460,11 +3517,23 @@ export default function App() {
                         </div>
 
                         <div className="relative pt-12 pb-6 min-h-[300px]">
+                          {/* Today Line Indicator */}
+                          <div 
+                            className="absolute top-0 bottom-0 border-l border-dashed border-red-500 z-10 pointer-events-none"
+                            style={{ 
+                              left: `${(new Date().getMonth() + (new Date().getDate() / 31)) / 12 * 100}%` 
+                            }}
+                          >
+                            <div className="absolute -top-6 -left-1/2 bg-red-500 text-[8px] text-white px-1.5 py-0.5 rounded-full font-black whitespace-nowrap shadow-sm">
+                              HOJE
+                            </div>
+                          </div>
+
                           {/* Calendar Header inside Timeline */}
                           <div className="absolute top-0 right-0 left-0 h-10 flex border-b border-slate-100 dark:border-slate-800 overflow-hidden">
                             {Array.from({ length: 12 }).map((_, i) => (
                               <div key={i} className="flex-1 border-r border-slate-50 dark:border-slate-800/50 text-[10px] font-bold text-slate-400 items-end pb-2 flex justify-center uppercase tracking-tighter">
-                                {new Date(2024, i, 1).toLocaleDateString('pt-BR', { month: 'short' })}
+                                {new Date(new Date().getFullYear(), i, 1).toLocaleDateString('pt-BR', { month: 'short' })}
                               </div>
                             ))}
                           </div>
@@ -3490,11 +3559,7 @@ export default function App() {
                                       activity.status === 'completed' ? 'bg-green-500' : 'bg-axia-primary'
                                     }`}
                                     style={{ left: `${startPos}%` }}
-                                  >
-                                    <div className="text-[8px] font-black text-white truncate uppercase tracking-tighter">
-                                      {activity.progress}%
-                                    </div>
-                                  </motion.div>
+                                  />
                                 </div>
                               );
                             })}
