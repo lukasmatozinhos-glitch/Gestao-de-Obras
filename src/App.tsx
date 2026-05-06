@@ -3609,11 +3609,11 @@ export default function App() {
                                       setIsAddingActivity(true);
                                     }}
                                   >
-                                    <span className="text-[6px] font-black text-white whitespace-nowrap -translate-x-full pr-1">
+                                    <span className="text-[6px] font-black text-slate-500 dark:text-slate-400 whitespace-nowrap -translate-x-full pr-1">
                                       {formatInputDate(activity.startDate)}
                                     </span>
                                     {activity.status !== 'delayed' && (
-                                      <span className="text-[6px] font-black text-white whitespace-nowrap translate-x-full pl-1">
+                                      <span className="text-[6px] font-black text-slate-500 dark:text-slate-400 whitespace-nowrap translate-x-full pl-1">
                                         {formatInputDate(activity.endDate)}
                                       </span>
                                     )}
@@ -3631,7 +3631,7 @@ export default function App() {
                                         setIsAddingActivity(true);
                                       }}
                                     >
-                                      <span className="text-[6px] font-black text-white whitespace-nowrap translate-x-full pl-1">
+                                      <span className="text-[6px] font-black text-slate-500 dark:text-slate-400 whitespace-nowrap translate-x-full pl-1">
                                         {formatInputDate(activity.predictedEndDate || activity.endDate)}
                                       </span>
                                     </motion.div>
