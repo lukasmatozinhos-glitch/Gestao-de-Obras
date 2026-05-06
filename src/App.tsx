@@ -3813,17 +3813,23 @@ export default function App() {
                                     const left = (startOffset / windowDuration) * 100;
                                     const width = (duration / windowDuration) * 100;
 
-                                    if (left > 100 || (left + width) < 0) return null;
+                                    if (left > 100 || (left + width + 50) < 0) return null; // Added buffer for delayed parts
+
+                                    const hasDelay = activity.status === 'delayed' && activity.predictedEndDate;
+                                    const predictedEnd = hasDelay ? new Date(activity.predictedEndDate!) : end;
+                                    const delayedDuration = Math.max(predictedEnd.getTime() - end.getTime(), 0);
+                                    const delayedWidth = (delayedDuration / windowDuration) * 100;
 
                                     return (
-                                      <div key={`bar-${activity.id}`} className="h-12 flex items-center pointer-events-auto relative px-0">
+                                      <div key={`bar-group-${activity.id}`} className="h-12 flex items-center pointer-events-auto relative px-0">
+                                        {/* Main Bar */}
                                         <motion.div 
                                           initial={{ width: 0, opacity: 0 }}
                                           animate={{ width: `${Math.max(width, 2)}%`, opacity: 1 }}
-                                          className={`h-6 rounded shadow-sm relative flex items-center justify-between px-2 cursor-pointer transition-all hover:brightness-110 z-20 ${
-                                            activity.status === 'completed' ? 'bg-green-200 border border-green-300' : 
-                                            activity.status === 'scheduled' ? 'bg-purple-200 border border-purple-300' :
-                                            activity.status === 'delayed' ? 'bg-red-200 border border-red-300' : 'bg-blue-200 border border-blue-300'
+                                          className={`h-6 rounded-l shadow-sm relative flex items-center justify-between px-2 cursor-pointer transition-all hover:brightness-110 z-20 ${
+                                            activity.status === 'completed' ? 'bg-green-200 border border-green-300 rounded-r' : 
+                                            activity.status === 'scheduled' ? 'bg-purple-200 border border-purple-300 rounded-r' :
+                                            activity.status === 'delayed' ? 'bg-red-500 text-white border border-red-600' : 'bg-blue-200 border border-blue-300 rounded-r'
                                           }`}
                                           style={{ left: `${left}%` }}
                                           onClick={() => {
@@ -3834,10 +3840,33 @@ export default function App() {
                                           <span className="absolute -left-16 text-[8px] font-bold text-slate-500 dark:text-slate-400">
                                             {formatInputDate(activity.startDate)}
                                           </span>
-                                          <span className="absolute -right-16 text-[8px] font-bold text-slate-500 dark:text-slate-400">
-                                            {formatInputDate(activity.endDate)}
-                                          </span>
+                                          {!hasDelay && (
+                                            <span className="absolute -right-16 text-[8px] font-bold text-slate-500 dark:text-slate-400">
+                                              {formatInputDate(activity.endDate)}
+                                            </span>
+                                          )}
+                                          {activity.status === 'delayed' && (
+                                            <span className="text-[7px] font-black uppercase tracking-tighter opacity-80">Atrasado</span>
+                                          )}
                                         </motion.div>
+
+                                        {/* Delayed (Hatched) Segment */}
+                                        {hasDelay && delayedWidth > 0 && (
+                                          <motion.div
+                                            initial={{ width: 0, opacity: 0 }}
+                                            animate={{ width: `${delayedWidth}%`, opacity: 1 }}
+                                            className="h-6 bg-hatched-red border-t border-b border-r border-red-600 rounded-r shadow-sm relative z-10 cursor-pointer"
+                                            style={{ left: `${left + width}%` }}
+                                            onClick={() => {
+                                              setEditingActivity(activity);
+                                              setIsAddingActivity(true);
+                                            }}
+                                          >
+                                            <span className="absolute -right-16 text-[8px] font-bold text-slate-500 dark:text-slate-400">
+                                              {formatInputDate(activity.predictedEndDate!)}
+                                            </span>
+                                          </motion.div>
+                                        )}
                                       </div>
                                     );
                                   })}
