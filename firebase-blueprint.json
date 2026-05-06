@@ -139,6 +139,25 @@
         "createdAt": { "type": "string" }
       },
       "required": ["id", "projectId", "number", "description", "value", "isApproved", "createdAt"]
+    },
+    "ScheduleActivity": {
+      "title": "ScheduleActivity",
+      "description": "An activity in a project schedule",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "name": { "type": "string" },
+        "responsible": { "type": "string" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "progress": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "in-progress", "completed"] },
+        "dependencies": { "type": "array", "items": { "type": "string" } },
+        "category": { "type": "string" },
+        "order": { "type": "number" }
+      },
+      "required": ["id", "projectId", "name", "responsible", "startDate", "endDate", "progress", "status", "order"]
     }
   },
   "firestore": {
@@ -177,6 +196,10 @@
     "/projectAddendums/{addendumId}": {
       "schema": "ProjectAddendum",
       "description": "Project addendum documents"
+    },
+    "/scheduleActivities/{activityId}": {
+      "schema": "ScheduleActivity",
+      "description": "Schedule activity documents"
     }
   }
 }

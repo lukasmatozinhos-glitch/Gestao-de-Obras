@@ -99,6 +99,14 @@ service cloud.firestore {
              data.createdAt is string;
     }
 
+    function isValidScheduleActivity(data) {
+      return data.id is string && data.projectId is string &&
+             data.name is string && data.responsible is string &&
+             data.startDate is string && data.endDate is string &&
+             data.progress is number && data.status in ['pending', 'in-progress', 'completed'] &&
+             data.order is number;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -154,6 +162,13 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidAddendum(request.resource.data);
       allow update: if isAuthenticated(); // Relaxed for testing
+      allow delete: if isAdmin();
+    }
+
+    match /scheduleActivities/{activityId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidScheduleActivity(request.resource.data);
+      allow update: if isAuthenticated() && isValidScheduleActivity(request.resource.data);
       allow delete: if isAdmin();
     }
   }

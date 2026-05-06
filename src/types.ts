@@ -9,6 +9,20 @@ export interface ProjectAddendum {
   createdAt: string;
 }
 
+export interface ScheduleActivity {
+  id: string;
+  projectId: string;
+  name: string;
+  responsible: string;
+  startDate: string;
+  endDate: string;
+  progress: number;
+  status: 'pending' | 'in-progress' | 'completed';
+  dependencies?: string[];
+  category?: string;
+  order: number;
+}
+
 export interface PhotoReportItem {
   id: string;
   projectId: string;

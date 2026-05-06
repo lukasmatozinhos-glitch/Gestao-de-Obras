@@ -89,7 +89,7 @@ import {
   Legend
 } from 'recharts';
 import { MOCK_PROJECTS, MOCK_RESOURCES, MOCK_REPORTS, MOCK_MEASUREMENTS, MOCK_ATTACHMENTS, MOCK_STATUS_UPDATES } from './constants';
-import { Project, WeeklyReport, Measurement, UserProfile, Attachment, StatusUpdate, PhotoReportItem, MeasurementBulletin, ProjectAddendum } from './types';
+import { Project, WeeklyReport, Measurement, UserProfile, Attachment, StatusUpdate, PhotoReportItem, MeasurementBulletin, ProjectAddendum, ScheduleActivity } from './types';
 
 const Logo = ({ size = 40, className = "" }: { size?: number, className?: string }) => (
   <svg 
@@ -199,6 +199,20 @@ export default function App() {
   const [photoReports, setPhotoReports] = useState<PhotoReportItem[]>([]);
   const [measurementBulletins, setMeasurementBulletins] = useState<MeasurementBulletin[]>([]);
   const [addendums, setAddendums] = useState<ProjectAddendum[]>([]);
+  const [activities, setActivities] = useState<ScheduleActivity[]>([]);
+  const [selectedScheduleProjectId, setSelectedScheduleProjectId] = useState<string>('');
+  const [isAddingActivity, setIsAddingActivity] = useState(false);
+  const [editingActivity, setEditingActivity] = useState<ScheduleActivity | null>(null);
+  const [newActivity, setNewActivity] = useState<Omit<ScheduleActivity, 'id' | 'projectId'>>({
+    name: '',
+    responsible: '',
+    startDate: new Date().toISOString().split('T')[0],
+    endDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    progress: 0,
+    status: 'pending',
+    category: '',
+    order: activities.length
+  });
   const [newBulletin, setNewBulletin] = useState({
     projectId: '',
     rcNumber: '',
@@ -358,6 +372,89 @@ export default function App() {
     }
   };
 
+  const handleAddActivity = async (activity: Omit<ScheduleActivity, 'id' | 'projectId'>) => {
+    if (!selectedScheduleProjectId) {
+      showNotification('Selecione um projeto primeiro.');
+      return;
+    }
+    try {
+      const activityId = `act-${Date.now()}`;
+      const newActivity: ScheduleActivity = {
+        ...activity,
+        id: activityId,
+        projectId: selectedScheduleProjectId
+      };
+      await setDoc(doc(db, 'scheduleActivities', activityId), newActivity);
+      showNotification('Atividade adicionada com sucesso!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'scheduleActivities');
+    }
+  };
+
+  const handleUpdateActivity = async (id: string, updates: Partial<ScheduleActivity>) => {
+    try {
+      await updateDoc(doc(db, 'scheduleActivities', id), updates);
+      showNotification('Atividade atualizada.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `scheduleActivities/${id}`);
+    }
+  };
+
+  const handleDeleteActivity = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'scheduleActivities', id));
+      showNotification('Atividade removida.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `scheduleActivities/${id}`);
+    }
+  };
+
+  const exportScheduleToPDF = (projectId: string) => {
+    const project = projects.find(p => p.id === projectId);
+    if (!project) return;
+
+    const projectActivities = activities.filter(a => a.projectId === projectId);
+    const doc = new jsPDF();
+    
+    // Header
+    doc.setFillColor(0, 51, 255);
+    doc.rect(0, 0, 210, 40, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(22);
+    doc.setFont('helvetica', 'bold');
+    doc.text('CRONOGRAMA DE OBRA', 15, 20);
+    doc.setFontSize(12);
+    doc.text(project.name.toUpperCase(), 15, 30);
+
+    // Project Info
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(10);
+    doc.text(`Cliente: ${project.client}`, 15, 50);
+    doc.text(`Período: ${project.startDate} a ${project.endDate}`, 15, 55);
+    doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, 15, 60);
+
+    // Table
+    const tableData = projectActivities.map(a => [
+      a.name,
+      a.responsible,
+      `${new Date(a.startDate).toLocaleDateString('pt-BR')} - ${new Date(a.endDate).toLocaleDateString('pt-BR')}`,
+      `${a.progress}%`,
+      a.status === 'completed' ? 'Concluído' : a.status === 'in-progress' ? 'Em Andamento' : 'Pendente'
+    ]);
+
+    autoTable(doc, {
+      startY: 70,
+      head: [['Atividade', 'Responsável', 'Período', 'Progresso', 'Status']],
+      body: tableData,
+      theme: 'striped',
+      headStyles: { fillColor: [0, 51, 255], textColor: [255, 255, 255] },
+      styles: { fontSize: 8 }
+    });
+
+    doc.save(`cronograma_${project.name.toLowerCase().replace(/\s+/g, '_')}.pdf`);
+    showNotification('Cronograma exportado com sucesso!');
+  };
+
   const handlePhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !viewingProject) return;
@@ -477,6 +574,10 @@ export default function App() {
       setAddendums(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProjectAddendum)));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'projectAddendums'));
 
+    const unsubActivities = onSnapshot(query(collection(db, 'scheduleActivities'), orderBy('order', 'asc')), (snapshot) => {
+      setActivities(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ScheduleActivity)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'scheduleActivities'));
+
     return () => {
       unsubProjects();
       unsubReports();
@@ -486,6 +587,7 @@ export default function App() {
       unsubPhotoReports();
       unsubBulletins();
       unsubAddendums();
+      unsubActivities();
     };
   }, [isLoggedIn, isAuthReady]);
 
@@ -1778,6 +1880,13 @@ export default function App() {
             label="Projetos" 
             active={activeTab === 'projects'} 
             onClick={() => setActiveTab('projects')}
+            collapsed={!isSidebarOpen}
+          />
+          <NavItem 
+            icon={<Calendar size={20} />} 
+            label="Cronograma" 
+            active={activeTab === 'schedule'} 
+            onClick={() => setActiveTab('schedule')}
             collapsed={!isSidebarOpen}
           />
           <NavItem 
@@ -3187,6 +3296,223 @@ export default function App() {
               </motion.div>
             )}
 
+            {activeTab === 'schedule' && (
+              <motion.div 
+                key="schedule"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="space-y-6"
+              >
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">Cronograma de Obras</h2>
+                    <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">Gestão de prazos e atividades</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <select 
+                      value={selectedScheduleProjectId}
+                      onChange={(e) => setSelectedScheduleProjectId(e.target.value)}
+                      className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2 text-sm font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all shadow-sm"
+                    >
+                      <option value="">Selecione um Projeto</option>
+                      {projects.map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                    <button 
+                      onClick={() => setIsAddingActivity(true)}
+                      className="bg-axia-primary text-white px-6 py-2 rounded-xl font-bold text-sm hover:shadow-lg hover:shadow-axia-primary/25 transition-all flex items-center gap-2"
+                    >
+                      <Plus size={18} />
+                      Nova Atividade
+                    </button>
+                    <button 
+                      onClick={() => selectedScheduleProjectId && exportScheduleToPDF(selectedScheduleProjectId)}
+                      disabled={!selectedScheduleProjectId}
+                      className="bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 px-6 py-2 rounded-xl font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-all flex items-center gap-2 disabled:opacity-50"
+                    >
+                      <Download size={18} />
+                      Exportar
+                    </button>
+                  </div>
+                </div>
+
+                {!selectedScheduleProjectId ? (
+                  <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 p-12 text-center">
+                    <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-400">
+                      <Calendar size={32} />
+                    </div>
+                    <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">Nenhum projeto selecionado</h3>
+                    <p className="text-slate-500 dark:text-slate-400 text-sm max-w-sm mx-auto mb-6">Selecione um projeto acima para visualizar ou criar seu cronograma de atividades.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    {/* Activity Form / Header etc can go here if needed as sidebar, but user wants customization */}
+                    <div className="lg:col-span-12 space-y-6">
+                      <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 overflow-hidden shadow-sm">
+                        <div className="p-6 border-b border-slate-50 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50 flex items-center justify-between">
+                          <h3 className="font-bold text-slate-800 dark:text-white">Lista de Atividades</h3>
+                          <div className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-4">
+                             <span>Início: {projects.find(p => p.id === selectedScheduleProjectId)?.startDate || '-'}</span>
+                             <span>Fim: {projects.find(p => p.id === selectedScheduleProjectId)?.endDate || '-'}</span>
+                          </div>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left border-collapse">
+                            <thead>
+                              <tr className="border-b border-slate-50 dark:border-slate-800">
+                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Atividade</th>
+                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Responsável</th>
+                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Período</th>
+                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Progresso</th>
+                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Status</th>
+                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-right">Ações</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+                              {activities.filter(a => a.projectId === selectedScheduleProjectId).length === 0 ? (
+                                <tr>
+                                  <td colSpan={6} className="px-6 py-12 text-center text-slate-400 italic">Nenhuma atividade cadastrada.</td>
+                                </tr>
+                              ) : (
+                                activities.filter(a => a.projectId === selectedScheduleProjectId).map(activity => (
+                                  <tr key={activity.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
+                                    <td className="px-6 py-4">
+                                      <div className="font-bold text-slate-800 dark:text-slate-200">{activity.name}</div>
+                                      <div className="text-[10px] text-slate-400">{activity.category || 'Sem categoria'}</div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-6 h-6 rounded-full bg-axia-primary/10 flex items-center justify-center text-axia-primary text-[10px] font-bold">
+                                          {activity.responsible.charAt(0)}
+                                        </div>
+                                        <span className="text-sm font-medium text-slate-600 dark:text-slate-400">{activity.responsible}</span>
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <div className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                                        {new Date(activity.startDate).toLocaleDateString('pt-BR')} - {new Date(activity.endDate).toLocaleDateString('pt-BR')}
+                                      </div>
+                                      <div className="text-[10px] text-slate-400">
+                                        {Math.ceil((new Date(activity.endDate).getTime() - new Date(activity.startDate).getTime()) / (1000 * 60 * 60 * 24))} dias
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <div className="flex items-center gap-3">
+                                        <div className="flex-1 h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden min-w-[60px]">
+                                          <div 
+                                            className="h-full bg-axia-primary rounded-full" 
+                                            style={{ width: `${activity.progress}%` }}
+                                          />
+                                        </div>
+                                        <span className="text-xs font-black text-axia-primary">{activity.progress}%</span>
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <span className={`px-2 py-1 rounded-md text-[10px] font-black uppercase border ${
+                                        activity.status === 'completed' ? 'bg-green-50 text-green-600 border-green-100' :
+                                        activity.status === 'in-progress' ? 'bg-blue-50 text-blue-600 border-blue-100' :
+                                        'bg-slate-50 text-slate-600 border-slate-100'
+                                      }`}>
+                                        {activity.status === 'completed' ? 'Concluído' : 
+                                         activity.status === 'in-progress' ? 'Em Andamento' : 'Pendente'}
+                                      </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-right">
+                                      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button 
+                                          onClick={() => setEditingActivity(activity)}
+                                          className="p-1.5 text-slate-400 hover:text-axia-primary transition-colors"
+                                        >
+                                          <Pencil size={14} />
+                                        </button>
+                                        <button 
+                                          onClick={() => handleDeleteActivity(activity.id)}
+                                          className="p-1.5 text-slate-400 hover:text-red-500 transition-colors"
+                                        >
+                                          <Trash2 size={14} />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* Visual Timeline (Basic Gantt) */}
+                      <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 p-8 shadow-sm">
+                        <div className="flex items-center justify-between mb-8">
+                          <h3 className="text-xl font-black text-slate-800 dark:text-white tracking-tight">Timeline Visual</h3>
+                          <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-2">
+                              <div className="w-3 h-3 rounded bg-axia-primary" />
+                              <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Execução</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="w-3 h-3 rounded bg-green-500" />
+                              <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Concluído</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="relative pt-12 pb-6 min-h-[300px]">
+                          {/* Calendar Header inside Timeline */}
+                          <div className="absolute top-0 right-0 left-0 h-10 flex border-b border-slate-100 dark:border-slate-800 overflow-hidden">
+                            {Array.from({ length: 12 }).map((_, i) => (
+                              <div key={i} className="flex-1 border-r border-slate-50 dark:border-slate-800/50 text-[10px] font-bold text-slate-400 items-end pb-2 flex justify-center uppercase tracking-tighter">
+                                {new Date(2024, i, 1).toLocaleDateString('pt-BR', { month: 'short' })}
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="space-y-4 pt-4">
+                            {activities.filter(a => a.projectId === selectedScheduleProjectId).map((activity, idx) => {
+                              const start = new Date(activity.startDate);
+                              const end = new Date(activity.endDate);
+                              const totalMonths = 12;
+                              // Simplified calculation for demo purposes - usually you'd normalize to project start/end
+                              const startPos = (start.getMonth() + (start.getDate() / 31)) / totalMonths * 100;
+                              const widthPos = ((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 365)) * 100;
+
+                              return (
+                                <div key={activity.id} className="relative h-10 group">
+                                  <div className="absolute left-0 -top-1 text-[10px] font-bold text-slate-400 group-hover:text-axia-primary transition-colors">
+                                    {activity.name}
+                                  </div>
+                                  <motion.div 
+                                    initial={{ width: 0, opacity: 0 }}
+                                    animate={{ width: `${Math.max(widthPos, 5)}%`, opacity: 1 }}
+                                    className={`absolute h-4 rounded-full shadow-sm mt-3 flex items-center px-2 cursor-pointer transition-all hover:scale-[1.02] ${
+                                      activity.status === 'completed' ? 'bg-green-500' : 'bg-axia-primary'
+                                    }`}
+                                    style={{ left: `${startPos}%` }}
+                                  >
+                                    <div className="text-[8px] font-black text-white truncate uppercase tracking-tighter">
+                                      {activity.progress}%
+                                    </div>
+                                  </motion.div>
+                                </div>
+                              );
+                            })}
+                            
+                            {activities.filter(a => a.projectId === selectedScheduleProjectId).length === 0 && (
+                              <div className="h-40 flex items-center justify-center border-2 border-dashed border-slate-50 dark:border-slate-800 rounded-3xl">
+                                <p className="text-slate-400 text-sm italic">Adicione atividades para visualizar na timeline.</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            )}
+
             {activeTab === 'measurements' && (
               <motion.div 
                 key="measurements"
@@ -4061,6 +4387,198 @@ export default function App() {
                     className="w-full flex items-center justify-center gap-2 py-4 px-4 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-2xl transition-all shadow-sm"
                   >
                     <LogOut size={20} /> Sair da Conta
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {(isAddingActivity || editingActivity) && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                setIsAddingActivity(false);
+                setEditingActivity(null);
+              }}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-xl rounded-[2.5rem] shadow-2xl relative z-10 overflow-hidden border border-slate-100 dark:border-slate-800"
+            >
+              <div className="p-8">
+                <div className="flex items-center justify-between mb-8">
+                  <div>
+                    <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">
+                      {editingActivity ? 'Editar Atividade' : 'Nova Atividade'}
+                    </h3>
+                    <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wider">
+                      {editingActivity ? 'Atualizar cronograma' : 'Adicionar ao cronograma'}
+                    </p>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setIsAddingActivity(false);
+                      setEditingActivity(null);
+                    }}
+                    className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-400 transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="space-y-5">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Nome da Atividade</label>
+                    <input 
+                      type="text" 
+                      placeholder="Ex: Terraplanagem, Fundação..."
+                      value={editingActivity ? editingActivity.name : newActivity.name}
+                      onChange={(e) => {
+                        if (editingActivity) setEditingActivity({...editingActivity, name: e.target.value});
+                        else setNewActivity({...newActivity, name: e.target.value});
+                      }}
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-medium text-slate-700 dark:text-slate-200"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Responsável</label>
+                      <input 
+                        type="text" 
+                        placeholder="Nome do responsável"
+                        value={editingActivity ? editingActivity.responsible : newActivity.responsible}
+                        onChange={(e) => {
+                          if (editingActivity) setEditingActivity({...editingActivity, responsible: e.target.value});
+                          else setNewActivity({...newActivity, responsible: e.target.value});
+                        }}
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-medium text-slate-700 dark:text-slate-200"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Categoria</label>
+                      <input 
+                        type="text" 
+                        placeholder="Ex: Engenharia, Civil..."
+                        value={editingActivity ? (editingActivity.category || '') : newActivity.category}
+                        onChange={(e) => {
+                          if (editingActivity) setEditingActivity({...editingActivity, category: e.target.value});
+                          else setNewActivity({...newActivity, category: e.target.value});
+                        }}
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-medium text-slate-700 dark:text-slate-200"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Data Início</label>
+                      <div className="relative">
+                        <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                        <input 
+                          type="date" 
+                          value={editingActivity ? editingActivity.startDate : newActivity.startDate}
+                          onChange={(e) => {
+                            if (editingActivity) setEditingActivity({...editingActivity, startDate: e.target.value});
+                            else setNewActivity({...newActivity, startDate: e.target.value});
+                          }}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Data Fim</label>
+                      <div className="relative">
+                        <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                        <input 
+                          type="date" 
+                          value={editingActivity ? editingActivity.endDate : newActivity.endDate}
+                          onChange={(e) => {
+                            if (editingActivity) setEditingActivity({...editingActivity, endDate: e.target.value});
+                            else setNewActivity({...newActivity, endDate: e.target.value});
+                          }}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Progresso (%)</label>
+                      <input 
+                        type="number" 
+                        min="0"
+                        max="100"
+                        value={editingActivity ? editingActivity.progress : newActivity.progress}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value) || 0;
+                          if (editingActivity) setEditingActivity({...editingActivity, progress: val});
+                          else setNewActivity({...newActivity, progress: val});
+                        }}
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Status</label>
+                      <select 
+                        value={editingActivity ? editingActivity.status : newActivity.status}
+                        onChange={(e) => {
+                          const val = e.target.value as any;
+                          if (editingActivity) setEditingActivity({...editingActivity, status: val});
+                          else setNewActivity({...newActivity, status: val});
+                        }}
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                      >
+                        <option value="pending">Pendente</option>
+                        <option value="in-progress">Em Andamento</option>
+                        <option value="completed">Concluído</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-4 mt-10">
+                  <button 
+                    onClick={() => {
+                      setIsAddingActivity(false);
+                      setEditingActivity(null);
+                    }}
+                    className="flex-1 py-4 px-6 text-slate-500 font-bold rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    onClick={() => {
+                      if (editingActivity) {
+                        handleUpdateActivity(editingActivity.id, editingActivity);
+                        setEditingActivity(null);
+                      } else {
+                        handleAddActivity(newActivity);
+                        setIsAddingActivity(false);
+                        setNewActivity({
+                          name: '',
+                          responsible: '',
+                          startDate: new Date().toISOString().split('T')[0],
+                          endDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                          progress: 0,
+                          status: 'pending',
+                          category: '',
+                          order: activities.length + 1
+                        });
+                      }
+                    }}
+                    disabled={editingActivity ? (!editingActivity.name || !editingActivity.responsible) : (!newActivity.name || !newActivity.responsible)}
+                    className="flex-[2] py-4 px-6 bg-axia-primary text-white font-bold rounded-2xl hover:shadow-xl hover:shadow-axia-primary/25 transition-all disabled:opacity-50 shadow-lg shadow-axia-primary/20"
+                  >
+                    {editingActivity ? 'Salvar Alterações' : 'Salvar Atividade'}
                   </button>
                 </div>
               </div>
