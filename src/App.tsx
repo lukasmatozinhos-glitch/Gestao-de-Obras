@@ -3451,7 +3451,6 @@ export default function App() {
                                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Atividade</th>
                                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Responsável</th>
                                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Período</th>
-                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Progresso</th>
                                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Status</th>
                                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-right">Ações</th>
                               </tr>
@@ -3459,7 +3458,7 @@ export default function App() {
                             <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
                               {activities.filter(a => a.projectId === selectedScheduleProjectId).length === 0 ? (
                                 <tr>
-                                  <td colSpan={6} className="px-6 py-12 text-center text-slate-400 italic">Nenhuma atividade cadastrada.</td>
+                                  <td colSpan={5} className="px-6 py-12 text-center text-slate-400 italic">Nenhuma atividade cadastrada.</td>
                                 </tr>
                               ) : (
                                 activities.filter(a => a.projectId === selectedScheduleProjectId).map(activity => (
@@ -3487,17 +3486,6 @@ export default function App() {
                                       )}
                                       <div className="text-[10px] text-slate-400">
                                         {Math.ceil((new Date(activity.endDate).getTime() - new Date(activity.startDate).getTime()) / (1000 * 60 * 60 * 24))} dias
-                                      </div>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                      <div className="flex items-center gap-3">
-                                        <div className="flex-1 h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden min-w-[60px]">
-                                          <div 
-                                            className="h-full bg-axia-primary rounded-full" 
-                                            style={{ width: `${activity.progress}%` }}
-                                          />
-                                        </div>
-                                        <span className="text-xs font-black text-axia-primary">{activity.progress}%</span>
                                       </div>
                                     </td>
                                     <td className="px-6 py-4">
@@ -4651,24 +4639,8 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Progresso (%)</label>
-                      <input 
-                        type="number" 
-                        min="0"
-                        max="100"
-                        value={editingActivity ? editingActivity.progress : newActivity.progress}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value) || 0;
-                          if (editingActivity) setEditingActivity({...editingActivity, progress: val});
-                          else setNewActivity({...newActivity, progress: val});
-                        }}
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Status</label>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Status</label>
                       <select 
                         value={editingActivity ? editingActivity.status : newActivity.status}
                         onChange={(e) => {
@@ -4695,9 +4667,8 @@ export default function App() {
                         <option value="delayed">Atrasada</option>
                       </select>
                     </div>
-                  </div>
 
-                  {((editingActivity && editingActivity.status === 'delayed') || (!editingActivity && newActivity.status === 'delayed')) && (
+                    {((editingActivity && editingActivity.status === 'delayed') || (!editingActivity && newActivity.status === 'delayed')) && (
                     <motion.div 
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
