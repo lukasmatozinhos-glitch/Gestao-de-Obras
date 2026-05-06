@@ -485,6 +485,7 @@ export default function App() {
       `${formatInputDate(a.startDate)} - ${formatInputDate(a.endDate)}`,
       a.status === 'completed' ? 'CONCLUÍDO' : 
       a.status === 'in-progress' ? 'EM ANDAMENTO' : 
+      a.status === 'scheduled' ? 'PROGRAMADO' :
       a.status === 'delayed' ? `ATRASADA (Nova Prev: ${formatInputDate(a.predictedEndDate || '')})` : 'PENDENTE'
     ]);
 
@@ -501,57 +502,93 @@ export default function App() {
     if (timelineRef.current) {
       try {
         const canvas = await html2canvas(timelineRef.current, {
-          scale: 2,
+          scale: 3,
           useCORS: true,
           logging: false,
           backgroundColor: '#FFFFFF',
           onclone: (clonedDoc) => {
-            const elements = clonedDoc.getElementsByTagName('*');
-            for (let i = 0; i < elements.length; i++) {
-              const el = elements[i] as HTMLElement;
+            const container = clonedDoc.getElementById('timeline-container');
+            if (container) {
+              container.style.width = '2000px'; 
+              container.style.padding = '20px 10px';
+              container.style.borderRadius = '0';
+              container.style.border = 'none';
+              container.style.backgroundColor = '#ffffff';
+              container.style.overflow = 'visible';
+            }
+
+            const elements = clonedDoc.querySelectorAll('*');
+            elements.forEach((node) => {
+              const el = node as HTMLElement;
               const style = window.getComputedStyle(el);
               
-              // Handle oklch colors specifically for common elements
-              if (style.color.includes('oklch')) {
+              const isOklch = (val: string) => val && val.includes('oklch');
+              
+              if (style.color && isOklch(style.color)) {
                 if (el.classList.contains('text-white')) el.style.color = '#ffffff';
+                else if (el.classList.contains('text-axia-primary')) el.style.color = '#0033FF';
                 else if (el.classList.contains('text-slate-400')) el.style.color = '#94a3b8';
-                else el.style.color = '#1e293b';
+                else if (el.classList.contains('text-slate-500')) el.style.color = '#64748b';
+                else if (el.classList.contains('text-purple-600')) el.style.color = '#9333ea';
+                else el.style.color = '#1e293b'; 
               }
               
-              if (style.backgroundColor.includes('oklch')) {
+              if (style.backgroundColor && isOklch(style.backgroundColor)) {
                 if (el.classList.contains('bg-axia-primary')) el.style.backgroundColor = '#0033FF';
                 else if (el.classList.contains('bg-green-500')) el.style.backgroundColor = '#22c55e';
                 else if (el.classList.contains('bg-red-500')) el.style.backgroundColor = '#ef4444';
+                else if (el.classList.contains('bg-purple-500')) el.style.backgroundColor = '#a855f7';
+                else if (el.classList.contains('bg-purple-50')) el.style.backgroundColor = '#faf5ff';
                 else if (el.classList.contains('bg-white')) el.style.backgroundColor = '#ffffff';
-                else el.style.backgroundColor = '#f8fafc';
+                else if (el.classList.contains('bg-slate-50')) el.style.backgroundColor = '#f8fafc';
+                else if (el.classList.contains('bg-slate-100')) el.style.backgroundColor = '#f1f5f9';
+                else el.style.backgroundColor = 'transparent';
+              }
+
+              if (style.borderColor && isOklch(style.borderColor)) {
+                if (el.classList.contains('border-purple-100')) el.style.borderColor = '#f3e8ff';
+                else el.style.borderColor = '#e2e8f0';
               }
 
               if (el.classList.contains('bg-hatched-red')) {
                 el.style.backgroundImage = 'repeating-linear-gradient(45deg, #ef4444, #ef4444 10px, #dc2626 10px, #dc2626 20px)';
+                el.style.backgroundColor = '#ef4444';
               }
-              
-              if (style.borderColor.includes('oklch')) {
-                if (el.classList.contains('border-red-500')) el.style.borderColor = '#ef4444';
-                else el.style.borderColor = '#e2e8f0';
-              }
-            }
+            });
           }
         });
-        const imgData = canvas.toDataURL('image/png');
-        const imgProps = doc.getImageProperties(imgData);
-        const pdfWidth = doc.internal.pageSize.getWidth() - 30;
-        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+        const imgData = canvas.toDataURL('image/png', 1.0);
         
-        // Ensure it fits on page or add new page
-        const finalY = (doc as any).lastAutoTable.finalY + 15;
-        if (finalY + pdfHeight > doc.internal.pageSize.getHeight()) {
-          doc.addPage();
-          doc.text('VISUALIZAÇÃO DO CRONOGRAMA', 15, 20);
-          doc.addImage(imgData, 'PNG', 15, 30, pdfWidth, pdfHeight);
-        } else {
-          doc.text('VISUALIZAÇÃO DO CRONOGRAMA', 15, finalY - 5);
-          doc.addImage(imgData, 'PNG', 15, finalY, pdfWidth, pdfHeight);
+        // Use landscape for the chart
+        doc.addPage('a4', 'l');
+        
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const margin = 0; 
+        
+        const imgProps = doc.getImageProperties(imgData);
+        const imgRatio = imgProps.width / imgProps.height;
+        
+        const maxWidth = pageWidth;
+        const maxHeight = pageHeight - 10; 
+        
+        let finalWidth = maxWidth;
+        let finalHeight = maxWidth / imgRatio;
+        
+        if (finalHeight > maxHeight) {
+          finalHeight = maxHeight;
+          finalWidth = maxHeight * imgRatio;
         }
+        
+        const xPos = (pageWidth - finalWidth) / 2;
+        const yPos = 8 + (maxHeight - finalHeight) / 2;
+
+        doc.setTextColor(0, 51, 255);
+        doc.setFontSize(10);
+        doc.text(`CRONOGRAMA VISUAL: ${project.name.toUpperCase()}`, pageWidth / 2, 6, { align: 'center' });
+        
+        doc.addImage(imgData, 'PNG', xPos, yPos, finalWidth, finalHeight, undefined, 'FAST');
       } catch (err) {
         console.error('Error capturing timeline:', err);
       }
@@ -559,6 +596,80 @@ export default function App() {
 
     doc.save(`cronograma_${project.name.toLowerCase().replace(/\s+/g, '_')}.pdf`);
     showNotification('Cronograma exportado com sucesso!');
+  };
+
+  const exportScheduleToPNG = async (projectId: string) => {
+    const project = projects.find(p => p.id === projectId);
+    if (!project || !timelineRef.current) return;
+
+    try {
+      const canvas = await html2canvas(timelineRef.current, {
+        scale: 3,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#FFFFFF',
+        onclone: (clonedDoc) => {
+          const container = clonedDoc.getElementById('timeline-container');
+          if (container) {
+            container.style.width = '2000px'; 
+            container.style.padding = '20px 10px';
+            container.style.borderRadius = '0';
+            container.style.border = 'none';
+            container.style.backgroundColor = '#ffffff';
+            container.style.overflow = 'visible';
+          }
+
+          const elements = clonedDoc.querySelectorAll('*');
+          elements.forEach((node) => {
+            const el = node as HTMLElement;
+            const style = window.getComputedStyle(el);
+            
+            const isOklch = (val: string) => val && val.includes('oklch');
+            
+            if (style.color && isOklch(style.color)) {
+              if (el.classList.contains('text-white')) el.style.color = '#ffffff';
+              else if (el.classList.contains('text-axia-primary')) el.style.color = '#0033FF';
+              else if (el.classList.contains('text-slate-400')) el.style.color = '#94a3b8';
+              else if (el.classList.contains('text-slate-500')) el.style.color = '#64748b';
+              else if (el.classList.contains('text-purple-600')) el.style.color = '#9333ea';
+              else el.style.color = '#1e293b'; 
+            }
+            
+            if (style.backgroundColor && isOklch(style.backgroundColor)) {
+              if (el.classList.contains('bg-axia-primary')) el.style.backgroundColor = '#0033FF';
+              else if (el.classList.contains('bg-green-500')) el.style.backgroundColor = '#22c55e';
+              else if (el.classList.contains('bg-red-500')) el.style.backgroundColor = '#ef4444';
+              else if (el.classList.contains('bg-purple-500')) el.style.backgroundColor = '#a855f7';
+              else if (el.classList.contains('bg-purple-50')) el.style.backgroundColor = '#faf5ff';
+              else if (el.classList.contains('bg-white')) el.style.backgroundColor = '#ffffff';
+              else if (el.classList.contains('bg-slate-50')) el.style.backgroundColor = '#f8fafc';
+              else if (el.classList.contains('bg-slate-100')) el.style.backgroundColor = '#f1f5f9';
+              else el.style.backgroundColor = 'transparent';
+            }
+
+            if (style.borderColor && isOklch(style.borderColor)) {
+              if (el.classList.contains('border-purple-100')) el.style.borderColor = '#f3e8ff';
+              else el.style.borderColor = '#e2e8f0';
+            }
+
+            if (el.classList.contains('bg-hatched-red')) {
+              el.style.backgroundImage = 'repeating-linear-gradient(45deg, #ef4444, #ef4444 10px, #dc2626 10px, #dc2626 20px)';
+              el.style.backgroundColor = '#ef4444';
+            }
+          });
+        }
+      });
+
+      const imgData = canvas.toDataURL('image/png', 1.0);
+      const link = document.createElement('a');
+      link.href = imgData;
+      link.download = `grafico_cronograma_${project.name.toLowerCase().replace(/\s+/g, '_')}.png`;
+      link.click();
+      showNotification('Gráfico exportado com sucesso!');
+    } catch (err) {
+      console.error('Error exporting PNG:', err);
+      showNotification('Erro ao exportar PNG');
+    }
   };
 
   const handlePhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -3445,8 +3556,16 @@ export default function App() {
                       disabled={!selectedScheduleProjectId}
                       className="bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 px-6 py-2 rounded-xl font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-all flex items-center gap-2 disabled:opacity-50"
                     >
-                      <Download size={18} />
-                      Exportar
+                      <Download size={18} className="text-red-500" />
+                      Exportar PDF
+                    </button>
+                    <button 
+                      onClick={() => selectedScheduleProjectId && exportScheduleToPNG(selectedScheduleProjectId)}
+                      disabled={!selectedScheduleProjectId}
+                      className="bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 px-6 py-2 rounded-xl font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-all flex items-center gap-2 disabled:opacity-50"
+                    >
+                      <Download size={18} className="text-blue-500" />
+                      Exportar PNG
                     </button>
                   </div>
                 </div>
@@ -3646,11 +3765,11 @@ export default function App() {
                                       setIsAddingActivity(true);
                                     }}
                                   >
-                                    <span className="text-[6px] font-black text-slate-500 dark:text-slate-400 whitespace-nowrap -translate-x-full pr-1">
+                                    <span className="absolute right-full mr-1 text-[6px] font-black text-slate-500 dark:text-slate-400 whitespace-nowrap">
                                       {formatInputDate(activity.startDate)}
                                     </span>
                                     {activity.status !== 'delayed' && (
-                                      <span className="text-[6px] font-black text-slate-500 dark:text-slate-400 whitespace-nowrap translate-x-full pl-1">
+                                      <span className="absolute left-full ml-1 text-[6px] font-black text-slate-500 dark:text-slate-400 whitespace-nowrap">
                                         {formatInputDate(activity.endDate)}
                                       </span>
                                     )}
@@ -3668,7 +3787,7 @@ export default function App() {
                                         setIsAddingActivity(true);
                                       }}
                                     >
-                                      <span className="text-[6px] font-black text-slate-500 dark:text-slate-400 whitespace-nowrap translate-x-full pl-1">
+                                      <span className="absolute left-full ml-1 text-[6px] font-black text-slate-500 dark:text-slate-400 whitespace-nowrap">
                                         {formatInputDate(activity.predictedEndDate || activity.endDate)}
                                       </span>
                                     </motion.div>
