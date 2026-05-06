@@ -46,6 +46,8 @@ import {
   Eye,
   Sun,
   Moon,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { jsPDF } from 'jspdf';
@@ -424,6 +426,31 @@ export default function App() {
       showNotification('Atividade removida.');
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `scheduleActivities/${id}`);
+    }
+  };
+
+  const handleMoveActivity = async (activity: ScheduleActivity, direction: 'up' | 'down') => {
+    const projectActivities = activities
+      .filter(a => a.projectId === activity.projectId)
+      .sort((a, b) => a.order - b.order);
+    
+    const currentIndex = projectActivities.findIndex(a => a.id === activity.id);
+    if (direction === 'up' && currentIndex > 0) {
+      const prevActivity = projectActivities[currentIndex - 1];
+      try {
+        await updateDoc(doc(db, 'scheduleActivities', activity.id), { order: prevActivity.order });
+        await updateDoc(doc(db, 'scheduleActivities', prevActivity.id), { order: activity.order });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `scheduleActivities/${activity.id}`);
+      }
+    } else if (direction === 'down' && currentIndex < projectActivities.length - 1) {
+      const nextActivity = projectActivities[currentIndex + 1];
+      try {
+        await updateDoc(doc(db, 'scheduleActivities', activity.id), { order: nextActivity.order });
+        await updateDoc(doc(db, 'scheduleActivities', nextActivity.id), { order: activity.order });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `scheduleActivities/${activity.id}`);
+      }
     }
   };
 
@@ -3452,6 +3479,7 @@ export default function App() {
                                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Responsável</th>
                                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Período</th>
                                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Status</th>
+                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Ordem</th>
                                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-right">Ações</th>
                               </tr>
                             </thead>
@@ -3488,7 +3516,7 @@ export default function App() {
                                         {Math.ceil((new Date(activity.endDate).getTime() - new Date(activity.startDate).getTime()) / (1000 * 60 * 60 * 24))} dias
                                       </div>
                                     </td>
-                                    <td className="px-6 py-4">
+                                     <td className="px-6 py-4">
                                       <span className={`px-2 py-1 rounded-md text-[10px] font-black uppercase border ${
                                         activity.status === 'completed' ? 'bg-green-50 text-green-600 border-green-100' :
                                         activity.status === 'in-progress' ? 'bg-blue-50 text-blue-600 border-blue-100' :
@@ -3499,6 +3527,24 @@ export default function App() {
                                          activity.status === 'in-progress' ? 'Em Andamento' : 
                                          activity.status === 'delayed' ? 'Atrasada' : 'Pendente'}
                                       </span>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <div className="flex items-center gap-1">
+                                        <button 
+                                          onClick={() => handleMoveActivity(activity, 'up')}
+                                          className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-axia-primary transition-colors"
+                                          title="Mover para cima"
+                                        >
+                                          <ChevronUp size={14} />
+                                        </button>
+                                        <button 
+                                          onClick={() => handleMoveActivity(activity, 'down')}
+                                          className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-axia-primary transition-colors"
+                                          title="Mover para baixo"
+                                        >
+                                          <ChevronDown size={14} />
+                                        </button>
+                                      </div>
                                     </td>
                                     <td className="px-6 py-4 text-right">
                                       <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
