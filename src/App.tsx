@@ -210,6 +210,7 @@ export default function App() {
     responsible: '',
     startDate: new Date().toISOString().split('T')[0],
     endDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    predictedEndDate: '',
     progress: 0,
     status: 'pending',
     category: '',
@@ -447,7 +448,9 @@ export default function App() {
       a.name.toUpperCase(),
       a.responsible,
       `${formatInputDate(a.startDate)} - ${formatInputDate(a.endDate)}`,
-      a.status === 'completed' ? 'Concluído' : a.status === 'in-progress' ? 'Em Andamento' : 'Pendente'
+      a.status === 'completed' ? 'CONCLUÍDO' : 
+      a.status === 'in-progress' ? 'EM ANDAMENTO' : 
+      a.status === 'delayed' ? `ATRASADA (Nova Prev: ${formatInputDate(a.predictedEndDate || '')})` : 'PENDENTE'
     ]);
 
     autoTable(doc, {
@@ -486,6 +489,10 @@ export default function App() {
                 else if (el.classList.contains('bg-red-500')) el.style.backgroundColor = '#ef4444';
                 else if (el.classList.contains('bg-white')) el.style.backgroundColor = '#ffffff';
                 else el.style.backgroundColor = '#f8fafc';
+              }
+
+              if (el.classList.contains('bg-hatched-red')) {
+                el.style.backgroundImage = 'repeating-linear-gradient(45deg, #ef4444, #ef4444 10px, #dc2626 10px, #dc2626 20px)';
               }
               
               if (style.borderColor.includes('oklch')) {
@@ -3458,6 +3465,11 @@ export default function App() {
                                       <div className="text-xs font-bold text-slate-600 dark:text-slate-300">
                                         {formatInputDate(activity.startDate)} - {formatInputDate(activity.endDate)}
                                       </div>
+                                      {activity.status === 'delayed' && activity.predictedEndDate && (
+                                        <div className="text-[10px] font-black text-red-500 uppercase mt-1">
+                                          Nova Previsão: {formatInputDate(activity.predictedEndDate)}
+                                        </div>
+                                      )}
                                       <div className="text-[10px] text-slate-400">
                                         {Math.ceil((new Date(activity.endDate).getTime() - new Date(activity.startDate).getTime()) / (1000 * 60 * 60 * 24))} dias
                                       </div>
@@ -3477,10 +3489,12 @@ export default function App() {
                                       <span className={`px-2 py-1 rounded-md text-[10px] font-black uppercase border ${
                                         activity.status === 'completed' ? 'bg-green-50 text-green-600 border-green-100' :
                                         activity.status === 'in-progress' ? 'bg-blue-50 text-blue-600 border-blue-100' :
+                                        activity.status === 'delayed' ? 'bg-red-50 text-red-600 border-red-100' :
                                         'bg-slate-50 text-slate-600 border-slate-100'
                                       }`}>
                                         {activity.status === 'completed' ? 'Concluído' : 
-                                         activity.status === 'in-progress' ? 'Em Andamento' : 'Pendente'}
+                                         activity.status === 'in-progress' ? 'Em Andamento' : 
+                                         activity.status === 'delayed' ? 'Atrasada' : 'Pendente'}
                                       </span>
                                     </td>
                                     <td className="px-6 py-4 text-right">
@@ -3550,30 +3564,63 @@ export default function App() {
                               const start = new Date(activity.startDate);
                               const end = new Date(activity.endDate);
                               const totalMonths = 12;
-                              // Simplified calculation for demo purposes - usually you'd normalize to project start/end
+                              
                               const startPos = (start.getMonth() + (start.getDate() / 31)) / totalMonths * 100;
                               const widthPos = ((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 365)) * 100;
+
+                              const predictedEnd = activity.status === 'delayed' && activity.predictedEndDate 
+                                ? new Date(activity.predictedEndDate) 
+                                : end;
+                              const predictedEndPos = (predictedEnd.getMonth() + (predictedEnd.getDate() / 31)) / totalMonths * 100;
+                              const delayedWidth = Math.max(((predictedEnd.getTime() - end.getTime()) / (1000 * 60 * 60 * 24 * 365)) * 100, 0);
 
                               return (
                                 <div key={activity.id} className="relative h-10 group">
                                   <div className="absolute left-0 -top-1 text-[10px] font-bold text-slate-400 group-hover:text-axia-primary transition-colors">
                                     {activity.name}
                                   </div>
+                                  
+                                  {/* Main Bar (Planned Period) */}
                                   <motion.div 
                                     initial={{ width: 0, opacity: 0 }}
-                                    animate={{ width: `${Math.max(widthPos, 5)}%`, opacity: 1 }}
-                                    className={`absolute h-4 rounded-full shadow-sm mt-3 flex items-center justify-between px-1 cursor-pointer transition-all hover:scale-[1.02] ${
-                                      activity.status === 'completed' ? 'bg-green-500' : 'bg-axia-primary'
+                                    animate={{ width: `${Math.max(widthPos, 2)}%`, opacity: 1 }}
+                                    className={`absolute h-4 rounded-l-full shadow-sm mt-3 flex items-center justify-between px-1 cursor-pointer transition-all hover:scale-[1.02] z-20 ${
+                                      activity.status === 'completed' ? 'bg-green-500 rounded-r-full' : 
+                                      activity.status === 'delayed' ? 'bg-axia-primary' : 'bg-axia-primary rounded-r-full'
                                     }`}
                                     style={{ left: `${startPos}%` }}
+                                    onClick={() => {
+                                      setEditingActivity(activity);
+                                      setIsAddingActivity(true);
+                                    }}
                                   >
                                     <span className="text-[6px] font-black text-white whitespace-nowrap -translate-x-full pr-1">
                                       {formatInputDate(activity.startDate)}
                                     </span>
-                                    <span className="text-[6px] font-black text-white whitespace-nowrap translate-x-full pl-1">
-                                      {formatInputDate(activity.endDate)}
-                                    </span>
+                                    {activity.status !== 'delayed' && (
+                                      <span className="text-[6px] font-black text-white whitespace-nowrap translate-x-full pl-1">
+                                        {formatInputDate(activity.endDate)}
+                                      </span>
+                                    )}
                                   </motion.div>
+
+                                  {/* Delayed Segment */}
+                                  {activity.status === 'delayed' && delayedWidth > 0 && (
+                                    <motion.div
+                                      initial={{ width: 0, opacity: 0 }}
+                                      animate={{ width: `${delayedWidth}%`, opacity: 1 }}
+                                      className="absolute h-4 bg-hatched-red rounded-r-full shadow-sm mt-3 flex items-center justify-end px-1 cursor-pointer transition-all hover:scale-[1.02] z-10"
+                                      style={{ left: `${startPos + widthPos}%` }}
+                                      onClick={() => {
+                                        setEditingActivity(activity);
+                                        setIsAddingActivity(true);
+                                      }}
+                                    >
+                                      <span className="text-[6px] font-black text-white whitespace-nowrap translate-x-full pl-1">
+                                        {formatInputDate(activity.predictedEndDate || activity.endDate)}
+                                      </span>
+                                    </motion.div>
+                                  )}
                                 </div>
                               );
                             })}
@@ -4611,17 +4658,51 @@ export default function App() {
                         value={editingActivity ? editingActivity.status : newActivity.status}
                         onChange={(e) => {
                           const val = e.target.value as any;
-                          if (editingActivity) setEditingActivity({...editingActivity, status: val});
-                          else setNewActivity({...newActivity, status: val});
+                          if (editingActivity) {
+                            const updates: any = { status: val };
+                            if (val === 'delayed' && !editingActivity.predictedEndDate) {
+                              updates.predictedEndDate = editingActivity.endDate;
+                            }
+                            setEditingActivity({...editingActivity, ...updates});
+                          } else {
+                            const updates: any = { status: val };
+                            if (val === 'delayed' && !newActivity.predictedEndDate) {
+                              updates.predictedEndDate = newActivity.endDate;
+                            }
+                            setNewActivity({...newActivity, ...updates});
+                          }
                         }}
                         className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
                       >
                         <option value="pending">Pendente</option>
                         <option value="in-progress">Em Andamento</option>
                         <option value="completed">Concluído</option>
+                        <option value="delayed">Atrasada</option>
                       </select>
                     </div>
                   </div>
+
+                  {((editingActivity && editingActivity.status === 'delayed') || (!editingActivity && newActivity.status === 'delayed')) && (
+                    <motion.div 
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      className="space-y-2 pb-2"
+                    >
+                      <label className="text-[10px] font-bold text-red-500 uppercase tracking-widest ml-1">Previsão de Término (Atraso)</label>
+                      <div className="relative">
+                        <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-red-400" size={16} />
+                        <input 
+                          type="date" 
+                          value={editingActivity ? (editingActivity.predictedEndDate || '') : newActivity.predictedEndDate}
+                          onChange={(e) => {
+                            if (editingActivity) setEditingActivity({...editingActivity, predictedEndDate: e.target.value});
+                            else setNewActivity({...newActivity, predictedEndDate: e.target.value});
+                          }}
+                          className="w-full bg-white dark:bg-slate-900 border border-red-200 dark:border-red-900/30 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-red-500/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                        />
+                      </div>
+                    </motion.div>
+                  )}
                 </div>
 
                 <div className="flex gap-4 mt-10">
@@ -4647,6 +4728,7 @@ export default function App() {
                           responsible: '',
                           startDate: new Date().toISOString().split('T')[0],
                           endDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                          predictedEndDate: '',
                           progress: 0,
                           status: 'pending',
                           category: '',

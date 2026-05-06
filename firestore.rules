@@ -99,12 +99,23 @@ service cloud.firestore {
              data.createdAt is string;
     }
 
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
     function isValidScheduleActivity(data) {
-      return data.id is string && data.projectId is string &&
-             data.name is string && data.responsible is string &&
-             data.startDate is string && data.endDate is string &&
-             data.progress is number && data.status in ['pending', 'in-progress', 'completed'] &&
-             data.order is number;
+      return data.id is string && data.id.size() > 0 &&
+             data.projectId is string && data.projectId.size() > 0 &&
+             data.name is string && data.name.size() > 0 &&
+             data.responsible is string &&
+             data.startDate is string &&
+             data.endDate is string &&
+             data.progress is number &&
+             data.status in ['pending', 'in-progress', 'completed', 'delayed'] &&
+             data.order is number &&
+             (!('predictedEndDate' in data) || data.predictedEndDate is string) &&
+             (!('category' in data) || data.category is string) &&
+             (!('dependencies' in data) || data.dependencies is list);
     }
 
     // ===============================================================
@@ -167,8 +178,11 @@ service cloud.firestore {
 
     match /scheduleActivities/{activityId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidScheduleActivity(request.resource.data);
-      allow update: if isAuthenticated() && isValidScheduleActivity(request.resource.data);
+      allow create: if isAuthenticated() && isValidId(activityId) && 
+                      isValidScheduleActivity(request.resource.data) &&
+                      request.resource.data.id == activityId;
+      allow update: if isAuthenticated() && isValidId(activityId) && 
+                      isValidScheduleActivity(request.resource.data);
       allow delete: if isAdmin();
     }
   }

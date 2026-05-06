@@ -16,8 +16,9 @@ export interface ScheduleActivity {
   responsible: string;
   startDate: string;
   endDate: string;
+  predictedEndDate?: string;
   progress: number;
-  status: 'pending' | 'in-progress' | 'completed';
+  status: 'pending' | 'in-progress' | 'completed' | 'delayed';
   dependencies?: string[];
   category?: string;
   order: number;
