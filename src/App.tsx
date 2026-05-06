@@ -374,6 +374,13 @@ export default function App() {
     }
   };
 
+  const formatInputDate = (dateStr: string) => {
+    if (!dateStr) return '-';
+    // split to avoid UTC timezone shifts
+    const [year, month, day] = dateStr.split('-');
+    return `${day}/${month}/${year}`;
+  };
+
   const handleAddActivity = async (activity: Omit<ScheduleActivity, 'id' | 'projectId'>) => {
     if (!selectedScheduleProjectId) {
       showNotification('Selecione um projeto primeiro.');
@@ -439,7 +446,7 @@ export default function App() {
     const tableData = projectActivities.map(a => [
       a.name.toUpperCase(),
       a.responsible,
-      `${new Date(a.startDate).toLocaleDateString('pt-BR')} - ${new Date(a.endDate).toLocaleDateString('pt-BR')}`,
+      `${formatInputDate(a.startDate)} - ${formatInputDate(a.endDate)}`,
       a.status === 'completed' ? 'Concluído' : a.status === 'in-progress' ? 'Em Andamento' : 'Pendente'
     ]);
 
@@ -3449,7 +3456,7 @@ export default function App() {
                                     </td>
                                     <td className="px-6 py-4">
                                       <div className="text-xs font-bold text-slate-600 dark:text-slate-300">
-                                        {new Date(activity.startDate).toLocaleDateString('pt-BR')} - {new Date(activity.endDate).toLocaleDateString('pt-BR')}
+                                        {formatInputDate(activity.startDate)} - {formatInputDate(activity.endDate)}
                                       </div>
                                       <div className="text-[10px] text-slate-400">
                                         {Math.ceil((new Date(activity.endDate).getTime() - new Date(activity.startDate).getTime()) / (1000 * 60 * 60 * 24))} dias
@@ -3555,11 +3562,18 @@ export default function App() {
                                   <motion.div 
                                     initial={{ width: 0, opacity: 0 }}
                                     animate={{ width: `${Math.max(widthPos, 5)}%`, opacity: 1 }}
-                                    className={`absolute h-4 rounded-full shadow-sm mt-3 flex items-center px-2 cursor-pointer transition-all hover:scale-[1.02] ${
+                                    className={`absolute h-4 rounded-full shadow-sm mt-3 flex items-center justify-between px-1 cursor-pointer transition-all hover:scale-[1.02] ${
                                       activity.status === 'completed' ? 'bg-green-500' : 'bg-axia-primary'
                                     }`}
                                     style={{ left: `${startPos}%` }}
-                                  />
+                                  >
+                                    <span className="text-[6px] font-black text-white whitespace-nowrap -translate-x-full pr-1">
+                                      {formatInputDate(activity.startDate)}
+                                    </span>
+                                    <span className="text-[6px] font-black text-white whitespace-nowrap translate-x-full pl-1">
+                                      {formatInputDate(activity.endDate)}
+                                    </span>
+                                  </motion.div>
                                 </div>
                               );
                             })}
