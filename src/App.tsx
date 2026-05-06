@@ -505,14 +505,15 @@ export default function App() {
           scale: 3,
           useCORS: true,
           logging: false,
+          width: 2800,
           backgroundColor: '#FFFFFF',
           onclone: (clonedDoc) => {
             const container = clonedDoc.getElementById('timeline-container');
-            if (container) {
-              container.style.width = '2000px'; 
-              container.style.padding = '20px 10px';
-              container.style.borderRadius = '0';
-              container.style.border = 'none';
+            const originalElement = timelineRef.current;
+            
+            if (container && originalElement) {
+              container.style.width = '2800px'; 
+              container.style.padding = '60px 40px';
               container.style.backgroundColor = '#ffffff';
               container.style.overflow = 'visible';
             }
@@ -522,31 +523,42 @@ export default function App() {
               const el = node as HTMLElement;
               const style = window.getComputedStyle(el);
               
-              const isOklch = (val: string) => val && val.includes('oklch');
-              
-              if (style.color && isOklch(style.color)) {
-                if (el.classList.contains('text-white')) el.style.color = '#ffffff';
-                else if (el.classList.contains('text-axia-primary')) el.style.color = '#0033FF';
-                else if (el.classList.contains('text-slate-400')) el.style.color = '#94a3b8';
-                else if (el.classList.contains('text-slate-500')) el.style.color = '#64748b';
-                else if (el.classList.contains('text-purple-600')) el.style.color = '#9333ea';
-                else el.style.color = '#1e293b'; 
-              }
-              
-              if (style.backgroundColor && isOklch(style.backgroundColor)) {
-                if (el.classList.contains('bg-axia-primary')) el.style.backgroundColor = '#0033FF';
-                else if (el.classList.contains('bg-green-500')) el.style.backgroundColor = '#22c55e';
-                else if (el.classList.contains('bg-red-500')) el.style.backgroundColor = '#ef4444';
-                else if (el.classList.contains('bg-purple-500')) el.style.backgroundColor = '#a855f7';
-                else if (el.classList.contains('bg-purple-50')) el.style.backgroundColor = '#faf5ff';
-                else if (el.classList.contains('bg-white')) el.style.backgroundColor = '#ffffff';
-                else if (el.classList.contains('bg-slate-50')) el.style.backgroundColor = '#f8fafc';
-                else if (el.classList.contains('bg-slate-100')) el.style.backgroundColor = '#f1f5f9';
-                else el.style.backgroundColor = 'transparent';
-              }
+            const isModernColor = (val: string) => val && (val.includes('oklch') || val.includes('oklab'));
+            
+            if (style.color && isModernColor(style.color)) {
+              if (el.classList.contains('text-white')) el.style.color = '#ffffff';
+              else if (el.classList.contains('text-axia-primary')) el.style.color = '#0033FF';
+              else if (el.classList.contains('text-slate-800')) el.style.color = '#1e293b';
+              else if (el.classList.contains('text-slate-900')) el.style.color = '#0f172a';
+              else if (el.classList.contains('text-slate-400')) el.style.color = '#94a3b8';
+              else if (el.classList.contains('text-slate-500')) el.style.color = '#64748b';
+              else if (el.classList.contains('text-purple-600')) el.style.color = '#9333ea';
+              else el.style.color = '#1e293b'; 
+            }
+            
+            if (style.backgroundColor && isModernColor(style.backgroundColor)) {
+              if (el.classList.contains('bg-axia-primary')) el.style.backgroundColor = '#0033FF';
+              else if (el.classList.contains('bg-green-500')) el.style.backgroundColor = '#22c55e';
+              else if (el.classList.contains('bg-red-500')) el.style.backgroundColor = '#ef4444';
+              else if (el.classList.contains('bg-purple-500')) el.style.backgroundColor = '#a855f7';
+              else if (el.classList.contains('bg-green-200')) el.style.backgroundColor = '#bbf7d0';
+              else if (el.classList.contains('bg-purple-200')) el.style.backgroundColor = '#e9d5ff';
+              else if (el.classList.contains('bg-red-200')) el.style.backgroundColor = '#fecaca';
+              else if (el.classList.contains('bg-blue-200')) el.style.backgroundColor = '#bfdbfe';
+              else if (el.classList.contains('bg-purple-50')) el.style.backgroundColor = '#faf5ff';
+              else if (el.classList.contains('bg-white')) el.style.backgroundColor = '#ffffff';
+              else if (el.classList.contains('bg-slate-50')) el.style.backgroundColor = '#f8fafc';
+              else if (el.classList.contains('bg-slate-100')) el.style.backgroundColor = '#f1f5f9';
+              else if (el.classList.contains('bg-slate-200')) el.style.backgroundColor = '#e2e8f0';
+              else if (el.classList.contains('bg-slate-300')) el.style.backgroundColor = '#cbd5e1';
+              else if (el.classList.contains('bg-slate-900')) el.style.backgroundColor = '#ffffff';
+              else el.style.backgroundColor = 'transparent';
+            }
 
-              if (style.borderColor && isOklch(style.borderColor)) {
-                if (el.classList.contains('border-purple-100')) el.style.borderColor = '#f3e8ff';
+            if (style.borderColor && isModernColor(style.borderColor)) {
+                if (el.classList.contains('border-red-500')) el.style.borderColor = '#ef4444';
+                else if (el.classList.contains('border-purple-100')) el.style.borderColor = '#f3e8ff';
+                else if (el.classList.contains('border-slate-100')) el.style.borderColor = '#f1f5f9';
                 else el.style.borderColor = '#e2e8f0';
               }
 
@@ -607,14 +619,15 @@ export default function App() {
         scale: 3,
         useCORS: true,
         logging: false,
+        width: 2800,
         backgroundColor: '#FFFFFF',
         onclone: (clonedDoc) => {
           const container = clonedDoc.getElementById('timeline-container');
-          if (container) {
-            container.style.width = '2000px'; 
-            container.style.padding = '20px 10px';
-            container.style.borderRadius = '0';
-            container.style.border = 'none';
+          const originalElement = timelineRef.current;
+          
+          if (container && originalElement) {
+            container.style.width = '2800px'; 
+            container.style.padding = '60px 40px';
             container.style.backgroundColor = '#ffffff';
             container.style.overflow = 'visible';
           }
@@ -624,31 +637,42 @@ export default function App() {
             const el = node as HTMLElement;
             const style = window.getComputedStyle(el);
             
-            const isOklch = (val: string) => val && val.includes('oklch');
+            const isModernColor = (val: string) => val && (val.includes('oklch') || val.includes('oklab'));
             
-            if (style.color && isOklch(style.color)) {
+            if (style.color && isModernColor(style.color)) {
               if (el.classList.contains('text-white')) el.style.color = '#ffffff';
               else if (el.classList.contains('text-axia-primary')) el.style.color = '#0033FF';
+              else if (el.classList.contains('text-slate-800')) el.style.color = '#1e293b';
+              else if (el.classList.contains('text-slate-900')) el.style.color = '#0f172a';
               else if (el.classList.contains('text-slate-400')) el.style.color = '#94a3b8';
               else if (el.classList.contains('text-slate-500')) el.style.color = '#64748b';
               else if (el.classList.contains('text-purple-600')) el.style.color = '#9333ea';
               else el.style.color = '#1e293b'; 
             }
             
-            if (style.backgroundColor && isOklch(style.backgroundColor)) {
+            if (style.backgroundColor && isModernColor(style.backgroundColor)) {
               if (el.classList.contains('bg-axia-primary')) el.style.backgroundColor = '#0033FF';
               else if (el.classList.contains('bg-green-500')) el.style.backgroundColor = '#22c55e';
               else if (el.classList.contains('bg-red-500')) el.style.backgroundColor = '#ef4444';
               else if (el.classList.contains('bg-purple-500')) el.style.backgroundColor = '#a855f7';
+              else if (el.classList.contains('bg-green-200')) el.style.backgroundColor = '#bbf7d0';
+              else if (el.classList.contains('bg-purple-200')) el.style.backgroundColor = '#e9d5ff';
+              else if (el.classList.contains('bg-red-200')) el.style.backgroundColor = '#fecaca';
+              else if (el.classList.contains('bg-blue-200')) el.style.backgroundColor = '#bfdbfe';
               else if (el.classList.contains('bg-purple-50')) el.style.backgroundColor = '#faf5ff';
               else if (el.classList.contains('bg-white')) el.style.backgroundColor = '#ffffff';
               else if (el.classList.contains('bg-slate-50')) el.style.backgroundColor = '#f8fafc';
               else if (el.classList.contains('bg-slate-100')) el.style.backgroundColor = '#f1f5f9';
+              else if (el.classList.contains('bg-slate-200')) el.style.backgroundColor = '#e2e8f0';
+              else if (el.classList.contains('bg-slate-300')) el.style.backgroundColor = '#cbd5e1';
+              else if (el.classList.contains('bg-slate-900')) el.style.backgroundColor = '#ffffff';
               else el.style.backgroundColor = 'transparent';
             }
 
-            if (style.borderColor && isOklch(style.borderColor)) {
-              if (el.classList.contains('border-purple-100')) el.style.borderColor = '#f3e8ff';
+            if (style.borderColor && isModernColor(style.borderColor)) {
+              if (el.classList.contains('border-red-500')) el.style.borderColor = '#ef4444';
+              else if (el.classList.contains('border-purple-100')) el.style.borderColor = '#f3e8ff';
+              else if (el.classList.contains('border-slate-100')) el.style.borderColor = '#f1f5f9';
               else el.style.borderColor = '#e2e8f0';
             }
 
@@ -3580,9 +3604,12 @@ export default function App() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                    {/* Activity Form / Header etc can go here if needed as sidebar, but user wants customization */}
-                    <div className="lg:col-span-12 space-y-6">
-                      <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 overflow-hidden shadow-sm">
+                    {(() => {
+                      const project = projects.find(p => p.id === selectedScheduleProjectId);
+                      if (!project) return null;
+                      return (
+                        <div className="lg:col-span-12 space-y-6">
+                          <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 overflow-hidden shadow-sm">
                         <div className="p-6 border-b border-slate-50 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50 flex items-center justify-between">
                           <h3 className="font-bold text-slate-800 dark:text-white">Lista de Atividades</h3>
                           <div className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-4">
@@ -3692,123 +3719,152 @@ export default function App() {
                       </div>
 
                       {/* Visual Timeline (Basic Gantt) */}
-                      <div ref={timelineRef} className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 p-8 shadow-sm">
+                    <div ref={timelineRef} id="timeline-container" className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 p-8 shadow-sm overflow-hidden">
                         <div className="flex items-center justify-between mb-8">
-                          <h3 className="text-xl font-black text-slate-800 dark:text-white tracking-tight">Timeline Visual</h3>
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-axia-primary/10 flex items-center justify-center text-axia-primary">
+                              <Calendar size={20} />
+                            </div>
+                            <div>
+                                <h3 className="text-xl font-black text-slate-800 dark:text-white tracking-tight">Cronograma em Barras</h3>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{project.name}</p>
+                            </div>
+                          </div>
                           <div className="flex items-center gap-4">
                             <div className="flex items-center gap-2">
                               <div className="w-3 h-3 rounded bg-axia-primary" />
-                              <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Execução</span>
+                              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Execução</span>
                             </div>
                             <div className="flex items-center gap-2">
                               <div className="w-3 h-3 rounded bg-green-500" />
-                              <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Concluído</span>
+                              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Concluído</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="w-3 h-3 rounded bg-purple-500" />
+                              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Programado</span>
                             </div>
                           </div>
                         </div>
 
-                        <div className="relative pt-12 pb-6 min-h-[300px]">
-                          {/* Today Line Indicator */}
-                          <div 
-                            className="absolute top-0 bottom-0 border-l border-dashed border-red-500 z-10 pointer-events-none"
-                            style={{ 
-                              left: `${(new Date().getMonth() + (new Date().getDate() / 31)) / 12 * 100}%` 
-                            }}
-                          >
-                            <div className="absolute -top-6 -left-1/2 bg-red-500 text-[8px] text-white px-1.5 py-0.5 rounded-full font-black whitespace-nowrap shadow-sm">
-                              HOJE
-                            </div>
-                          </div>
-
-                          {/* Calendar Header inside Timeline */}
-                          <div className="absolute top-0 right-0 left-0 h-10 flex border-b border-slate-100 dark:border-slate-800 overflow-hidden">
-                            {Array.from({ length: 12 }).map((_, i) => (
-                              <div key={i} className="flex-1 border-r border-slate-50 dark:border-slate-800/50 text-[10px] font-bold text-slate-400 items-end pb-2 flex justify-center uppercase tracking-tighter">
-                                {new Date(new Date().getFullYear(), i, 1).toLocaleDateString('pt-BR', { month: 'short' })}
+                        {/* Professional Gantt Layout */}
+                        <div className="relative border border-slate-100 dark:border-slate-800 rounded-xl overflow-hidden bg-slate-50/30 dark:bg-slate-800/20">
+                          <div className="flex">
+                            {/* Y-AXIS Labels */}
+                            <div className="w-[200px] flex-shrink-0 border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 z-20">
+                              <div className="h-10 border-b border-slate-200 dark:border-slate-700 flex items-center justify-center">
+                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Atividades</span>
                               </div>
-                            ))}
-                          </div>
-
-                          <div className="space-y-4 pt-4">
-                            {activities.filter(a => a.projectId === selectedScheduleProjectId).map((activity, idx) => {
-                              const start = new Date(activity.startDate);
-                              const end = new Date(activity.endDate);
-                              const totalMonths = 12;
-                              
-                              const startPos = (start.getMonth() + (start.getDate() / 31)) / totalMonths * 100;
-                              const widthPos = ((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 365)) * 100;
-
-                              const predictedEnd = activity.status === 'delayed' && activity.predictedEndDate 
-                                ? new Date(activity.predictedEndDate) 
-                                : end;
-                              const predictedEndPos = (predictedEnd.getMonth() + (predictedEnd.getDate() / 31)) / totalMonths * 100;
-                              const delayedWidth = Math.max(((predictedEnd.getTime() - end.getTime()) / (1000 * 60 * 60 * 24 * 365)) * 100, 0);
-
-                              return (
-                                <div key={activity.id} className="relative h-10 group">
-                                  <div className="absolute left-0 -top-1 text-[10px] font-bold text-slate-400 group-hover:text-axia-primary transition-colors">
+                              {activities.filter(a => a.projectId === selectedScheduleProjectId).map((activity) => (
+                                <div key={activity.id} className="h-12 border-b border-slate-100 dark:border-slate-800 flex items-center justify-end px-4">
+                                  <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 text-right leading-tight">
                                     {activity.name}
-                                  </div>
-                                  
-                                  {/* Main Bar (Planned Period) */}
-                                  <motion.div 
-                                    initial={{ width: 0, opacity: 0 }}
-                                    animate={{ width: `${Math.max(widthPos, 2)}%`, opacity: 1 }}
-                                    className={`absolute h-4 rounded-l-full shadow-sm mt-3 flex items-center justify-between px-1 cursor-pointer transition-all hover:scale-[1.02] z-20 ${
-                                      activity.status === 'completed' ? 'bg-green-500 rounded-r-full' : 
-                                      activity.status === 'scheduled' ? 'bg-purple-500 rounded-r-full' :
-                                      activity.status === 'delayed' ? 'bg-axia-primary' : 'bg-axia-primary rounded-r-full'
-                                    }`}
-                                    style={{ left: `${startPos}%` }}
-                                    onClick={() => {
-                                      setEditingActivity(activity);
-                                      setIsAddingActivity(true);
-                                    }}
-                                  >
-                                    <span className="absolute right-full mr-1 text-[6px] font-black text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                                      {formatInputDate(activity.startDate)}
-                                    </span>
-                                    {activity.status !== 'delayed' && (
-                                      <span className="absolute left-full ml-1 text-[6px] font-black text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                                        {formatInputDate(activity.endDate)}
-                                      </span>
-                                    )}
-                                  </motion.div>
-
-                                  {/* Delayed Segment */}
-                                  {activity.status === 'delayed' && delayedWidth > 0 && (
-                                    <motion.div
-                                      initial={{ width: 0, opacity: 0 }}
-                                      animate={{ width: `${delayedWidth}%`, opacity: 1 }}
-                                      className="absolute h-4 bg-hatched-red rounded-r-full shadow-sm mt-3 flex items-center justify-end px-1 cursor-pointer transition-all hover:scale-[1.02] z-10"
-                                      style={{ left: `${startPos + widthPos}%` }}
-                                      onClick={() => {
-                                        setEditingActivity(activity);
-                                        setIsAddingActivity(true);
-                                      }}
-                                    >
-                                      <span className="absolute left-full ml-1 text-[6px] font-black text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                                        {formatInputDate(activity.predictedEndDate || activity.endDate)}
-                                      </span>
-                                    </motion.div>
-                                  )}
+                                  </span>
                                 </div>
-                              );
-                            })}
-                            
-                            {activities.filter(a => a.projectId === selectedScheduleProjectId).length === 0 && (
-                              <div className="h-40 flex items-center justify-center border-2 border-dashed border-slate-50 dark:border-slate-800 rounded-3xl">
-                                <p className="text-slate-400 text-sm italic">Adicione atividades para visualizar na timeline.</p>
+                              ))}
+                              {/* Bottom Axis Label */}
+                              <div className="h-10 border-t border-slate-200 dark:border-slate-700 flex items-center justify-center bg-slate-50 dark:bg-slate-800/50">
+                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Data</span>
                               </div>
-                            )}
+                            </div>
+
+                            {/* TIMELINE AREA */}
+                            <div className="flex-grow overflow-hidden relative bg-white dark:bg-slate-900">
+                              {/* X-AXIS Grid (Months/Weeks) */}
+                              <div className="h-10 border-b border-slate-200 dark:border-slate-700 flex relative overflow-hidden">
+                                {Array.from({ length: 4 }).map((_, i) => (
+                                  <div key={i} className="flex-1 border-r border-slate-100 dark:border-slate-800 flex items-end justify-center pb-2">
+                                    <span className="text-[9px] font-black text-slate-400 uppercase">
+                                      {new Date(new Date().getFullYear(), new Date().getMonth() + i, 1).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* Rows and Bars */}
+                              <div className="relative">
+                                {/* Horizontal Grid Lines */}
+                                {activities.filter(a => a.projectId === selectedScheduleProjectId).map((activity) => (
+                                  <div key={`grid-${activity.id}`} className="h-12 border-b border-slate-50 dark:border-slate-800 w-full" />
+                                ))}
+
+                                {/* Vertical "Hoje" Line */}
+                                <div 
+                                  className="absolute top-0 bottom-0 border-l-2 border-dashed border-red-500 z-30 pointer-events-none"
+                                  style={{ left: '25%' }}
+                                >
+                                  <div className="absolute -top-7 -left-1/2 bg-red-500 text-white text-[8px] px-2 py-0.5 rounded-full font-black whitespace-nowrap shadow-sm">
+                                    HOJE ({new Date().toLocaleDateString('pt-BR')})
+                                  </div>
+                                </div>
+
+                                {/* Bars Overlay */}
+                                <div className="absolute top-0 left-0 right-0 bottom-0 pointer-events-none">
+                                  {activities.filter(a => a.projectId === selectedScheduleProjectId).map((activity) => {
+                                    const start = new Date(activity.startDate);
+                                    const end = new Date(activity.endDate);
+                                    
+                                    const today = new Date();
+                                    const windowStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+                                    const windowDuration = 120 * 24 * 60 * 60 * 1000; 
+                                    
+                                    const startOffset = start.getTime() - windowStart.getTime();
+                                    const duration = end.getTime() - start.getTime();
+                                    
+                                    const left = (startOffset / windowDuration) * 100;
+                                    const width = (duration / windowDuration) * 100;
+
+                                    if (left > 100 || (left + width) < 0) return null;
+
+                                    return (
+                                      <div key={`bar-${activity.id}`} className="h-12 flex items-center pointer-events-auto relative px-0">
+                                        <motion.div 
+                                          initial={{ width: 0, opacity: 0 }}
+                                          animate={{ width: `${Math.max(width, 2)}%`, opacity: 1 }}
+                                          className={`h-6 rounded shadow-sm relative flex items-center justify-between px-2 cursor-pointer transition-all hover:brightness-110 z-20 ${
+                                            activity.status === 'completed' ? 'bg-green-200 border border-green-300' : 
+                                            activity.status === 'scheduled' ? 'bg-purple-200 border border-purple-300' :
+                                            activity.status === 'delayed' ? 'bg-red-200 border border-red-300' : 'bg-blue-200 border border-blue-300'
+                                          }`}
+                                          style={{ left: `${left}%` }}
+                                          onClick={() => {
+                                            setEditingActivity(activity);
+                                            setIsAddingActivity(true);
+                                          }}
+                                        >
+                                          <span className="absolute -left-16 text-[8px] font-bold text-slate-500 dark:text-slate-400">
+                                            {formatInputDate(activity.startDate)}
+                                          </span>
+                                          <span className="absolute -right-16 text-[8px] font-bold text-slate-500 dark:text-slate-400">
+                                            {formatInputDate(activity.endDate)}
+                                          </span>
+                                        </motion.div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                              
+                              {/* Bottom X-AXIS Labels */}
+                              <div className="h-10 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 flex">
+                                {Array.from({ length: 4 }).map((_, i) => (
+                                  <div key={`bottom-${i}`} className="flex-1 border-r border-slate-100 dark:border-slate-800 flex items-center justify-center">
+                                    <span className="text-[8px] font-bold text-slate-400">
+                                      {new Date(new Date().getFullYear(), new Date().getMonth() + i, 1).toLocaleDateString('pt-BR')}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                )}
-              </motion.div>
-            )}
+                    );
+                  })()}
+                </div>
+              )}
+            </motion.div>
+          )}
 
             {activeTab === 'measurements' && (
               <motion.div 
