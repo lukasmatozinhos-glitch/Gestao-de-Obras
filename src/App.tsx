@@ -180,6 +180,13 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     path
   }
   console.error('Firestore Error: ', JSON.stringify(errInfo));
+  
+  // If it's a quota error, we don't want to crash the whole app with an uncaught exception
+  // as we already handle the UI feedback via global state/localStorage
+  if (errInfo.error.includes('Quota exceeded')) {
+    return;
+  }
+  
   throw new Error(JSON.stringify(errInfo));
 }
 
@@ -194,6 +201,12 @@ export default function App() {
   });
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [quotaExceeded, setQuotaExceeded] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('firestore_quota_extrapolated') === 'true';
+    }
+    return false;
+  });
   const [currentUser, setCurrentUser] = useState<UserProfile>(DEFAULT_USER);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [reports, setReports] = useState<WeeklyReport[]>([]);
@@ -744,12 +757,14 @@ export default function App() {
             setCurrentUser(userDoc.data() as UserProfile);
             setIsLoggedIn(true);
           } else {
-            // This case might happen if auth user exists but firestore doc doesn't
-            // We'll handle it by signing out or redirecting to profile completion
             console.warn('User authenticated but profile not found in Firestore');
             setIsLoggedIn(false);
           }
         } catch (error) {
+          if (error instanceof Error && error.message.includes('Quota exceeded')) {
+            localStorage.setItem('firestore_quota_extrapolated', 'true');
+            setQuotaExceeded(true);
+          }
           handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
         } finally {
           setIsAuthReady(true);
@@ -762,11 +777,15 @@ export default function App() {
 
     // Test connection
     const testConnection = async () => {
+      if (localStorage.getItem('firestore_quota_extrapolated')) return;
       try {
         await getDocFromServer(doc(db, 'test', 'connection'));
       } catch (error) {
         if(error instanceof Error && error.message.includes('the client is offline')) {
           console.error("Please check your Firebase configuration. ");
+        }
+        if(error instanceof Error && error.message.includes('Quota exceeded')) {
+          localStorage.setItem('firestore_quota_extrapolated', 'true');
         }
       }
     };
@@ -785,39 +804,93 @@ export default function App() {
 
     const unsubProjects = onSnapshot(projectsQuery, (snapshot) => {
       setProjects(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Project)));
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'projects'));
+    }, (error) => {
+      if (error.message.includes('Quota exceeded')) {
+        localStorage.setItem('firestore_quota_extrapolated', 'true');
+        setQuotaExceeded(true);
+      }
+      handleFirestoreError(error, OperationType.LIST, 'projects');
+    });
 
     const unsubReports = onSnapshot(collection(db, 'reports'), (snapshot) => {
       setReports(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WeeklyReport)));
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'reports'));
+    }, (error) => {
+      if (error.message.includes('Quota exceeded')) {
+        localStorage.setItem('firestore_quota_extrapolated', 'true');
+        setQuotaExceeded(true);
+      }
+      handleFirestoreError(error, OperationType.LIST, 'reports');
+    });
 
     const unsubMeasurements = onSnapshot(collection(db, 'measurements'), (snapshot) => {
       setMeasurements(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Measurement)));
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'measurements'));
+    }, (error) => {
+      if (error.message.includes('Quota exceeded')) {
+        localStorage.setItem('firestore_quota_extrapolated', 'true');
+        setQuotaExceeded(true);
+      }
+      handleFirestoreError(error, OperationType.LIST, 'measurements');
+    });
 
     const unsubAttachments = onSnapshot(collection(db, 'attachments'), (snapshot) => {
       setAttachments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Attachment)));
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'attachments'));
+    }, (error) => {
+      if (error.message.includes('Quota exceeded')) {
+        localStorage.setItem('firestore_quota_extrapolated', 'true');
+        setQuotaExceeded(true);
+      }
+      handleFirestoreError(error, OperationType.LIST, 'attachments');
+    });
 
     const unsubStatusUpdates = onSnapshot(query(collection(db, 'statusUpdates'), orderBy('date', 'desc')), (snapshot) => {
       setStatusUpdates(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StatusUpdate)));
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'statusUpdates'));
+    }, (error) => {
+      if (error.message.includes('Quota exceeded')) {
+        localStorage.setItem('firestore_quota_extrapolated', 'true');
+        setQuotaExceeded(true);
+      }
+      handleFirestoreError(error, OperationType.LIST, 'statusUpdates');
+    });
 
     const unsubPhotoReports = onSnapshot(collection(db, 'photoReports'), (snapshot) => {
       setPhotoReports(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PhotoReportItem)));
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'photoReports'));
+    }, (error) => {
+      if (error.message.includes('Quota exceeded')) {
+        localStorage.setItem('firestore_quota_extrapolated', 'true');
+        setQuotaExceeded(true);
+      }
+      handleFirestoreError(error, OperationType.LIST, 'photoReports');
+    });
 
     const unsubBulletins = onSnapshot(collection(db, 'measurementBulletins'), (snapshot) => {
       setMeasurementBulletins(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MeasurementBulletin)));
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'measurementBulletins'));
+    }, (error) => {
+      if (error.message.includes('Quota exceeded')) {
+        localStorage.setItem('firestore_quota_extrapolated', 'true');
+        setQuotaExceeded(true);
+      }
+      handleFirestoreError(error, OperationType.LIST, 'measurementBulletins');
+    });
 
     const unsubAddendums = onSnapshot(collection(db, 'projectAddendums'), (snapshot) => {
       setAddendums(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProjectAddendum)));
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'projectAddendums'));
+    }, (error) => {
+      if (error.message.includes('Quota exceeded')) {
+        localStorage.setItem('firestore_quota_extrapolated', 'true');
+        setQuotaExceeded(true);
+      }
+      handleFirestoreError(error, OperationType.LIST, 'projectAddendums');
+    });
 
     const unsubActivities = onSnapshot(query(collection(db, 'scheduleActivities'), orderBy('order', 'asc')), (snapshot) => {
       setActivities(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ScheduleActivity)));
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'scheduleActivities'));
+    }, (error) => {
+      if (error.message.includes('Quota exceeded')) {
+        localStorage.setItem('firestore_quota_extrapolated', 'true');
+        setQuotaExceeded(true);
+      }
+      handleFirestoreError(error, OperationType.LIST, 'scheduleActivities');
+    });
 
     return () => {
       unsubProjects();
@@ -2001,6 +2074,11 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-slate-50 dark:bg-slate-950 overflow-hidden transition-colors duration-300">
+      {quotaExceeded && (
+        <div className="fixed top-0 left-0 right-0 z-[200] bg-red-600 text-white px-4 py-2 text-center text-xs font-bold animate-pulse">
+          Limite de dados gratuito do Google atingido hoje. O sistema voltará ao normal em breve ou após o reset diário.
+        </div>
+      )}
       <input 
         type="file" 
         ref={fileInputRef} 
@@ -3032,6 +3110,7 @@ export default function App() {
                                               <span className="flex items-center gap-1.5 bg-slate-100 px-2 py-1 rounded-md">
                                                 <Receipt size={14} className="text-axia-primary" /> RC: {addendum.rcNumber}
                                               </span>
+ 
                                             )}
                                             <span className="flex items-center gap-1.5 bg-slate-100 px-2 py-1 rounded-md">
                                                 <Calendar size={14} className="text-axia-primary" /> {new Date(addendum.createdAt).toLocaleDateString('pt-BR')}
@@ -3771,13 +3850,20 @@ export default function App() {
                             <div className="flex-grow overflow-hidden relative bg-white dark:bg-slate-900">
                               {/* X-AXIS Grid (Months/Weeks) */}
                               <div className="h-10 border-b border-slate-200 dark:border-slate-700 flex relative overflow-hidden">
-                                {Array.from({ length: 4 }).map((_, i) => (
-                                  <div key={i} className="flex-1 border-r border-slate-100 dark:border-slate-800 flex items-end justify-center pb-2">
-                                    <span className="text-[9px] font-black text-slate-400 uppercase">
-                                      {new Date(new Date().getFullYear(), new Date().getMonth() + i, 1).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })}
-                                    </span>
-                                  </div>
-                                ))}
+                                {(() => {
+                                  const today = new Date();
+                                  const windowStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+                                  return Array.from({ length: 4 }).map((_, i) => {
+                                    const monthDate = new Date(windowStart.getFullYear(), windowStart.getMonth() + i, 1);
+                                    return (
+                                      <div key={i} className="flex-1 border-r border-slate-100 dark:border-slate-800 flex items-end justify-center pb-2">
+                                        <span className="text-[9px] font-black text-slate-400 uppercase">
+                                          {monthDate.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })}
+                                        </span>
+                                      </div>
+                                    );
+                                  });
+                                })()}
                               </div>
 
                               {/* Rows and Bars */}
@@ -3787,15 +3873,25 @@ export default function App() {
                                   <div key={`grid-${activity.id}`} className="h-12 border-b border-slate-50 dark:border-slate-800 w-full" />
                                 ))}
 
-                                {/* Vertical "Hoje" Line */}
-                                <div 
-                                  className="absolute top-0 bottom-0 border-l-2 border-dashed border-red-500 z-30 pointer-events-none"
-                                  style={{ left: '25%' }}
-                                >
-                                  <div className="absolute -top-7 -left-1/2 bg-red-500 text-white text-[8px] px-2 py-0.5 rounded-full font-black whitespace-nowrap shadow-sm">
-                                    HOJE ({new Date().toLocaleDateString('pt-BR')})
-                                  </div>
-                                </div>
+                                {/* Vertical "Hoje" Line - DYNAMIC POSITION */}
+                                {(() => {
+                                  const today = new Date();
+                                  const windowStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+                                  const windowDuration = 120 * 24 * 60 * 60 * 1000; 
+                                  const todayOffset = today.getTime() - windowStart.getTime();
+                                  const todayLeft = (todayOffset / windowDuration) * 100;
+                                  
+                                  return (
+                                    <div 
+                                      className="absolute top-0 bottom-0 border-l-2 border-dashed border-red-500 z-30 pointer-events-none"
+                                      style={{ left: `${todayLeft}%` }}
+                                    >
+                                      <div className="absolute -top-7 -left-1/2 bg-red-500 text-white text-[8px] px-2 py-0.5 rounded-full font-black whitespace-nowrap shadow-sm">
+                                        HOJE ({new Date().toLocaleDateString('pt-BR')})
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
 
                                 {/* Bars Overlay */}
                                 <div className="absolute top-0 left-0 right-0 bottom-0 pointer-events-none">
@@ -3817,19 +3913,19 @@ export default function App() {
 
                                     const hasDelay = activity.status === 'delayed' && activity.predictedEndDate;
                                     const predictedEnd = hasDelay ? new Date(activity.predictedEndDate!) : end;
-                                    const delayedDuration = Math.max(predictedEnd.getTime() - end.getTime(), 0);
+                                     const delayedDuration = Math.max(predictedEnd.getTime() - end.getTime(), 0);
                                     const delayedWidth = (delayedDuration / windowDuration) * 100;
-
-                                    return (
-                                      <div key={`bar-group-${activity.id}`} className="h-12 flex items-center pointer-events-auto relative px-0">
+ 
+                                     return (
+                                      <div key={`bar-group-${activity.id}`} className="h-12 relative px-0 pointer-events-none">
                                         {/* Main Bar */}
                                         <motion.div 
                                           initial={{ width: 0, opacity: 0 }}
                                           animate={{ width: `${Math.max(width, 2)}%`, opacity: 1 }}
-                                          className={`h-6 rounded-l shadow-sm relative flex items-center justify-between px-2 cursor-pointer transition-all hover:brightness-110 z-20 ${
-                                            activity.status === 'completed' ? 'bg-green-200 border border-green-300 rounded-r' : 
-                                            activity.status === 'scheduled' ? 'bg-purple-200 border border-purple-300 rounded-r' :
-                                            activity.status === 'delayed' ? 'bg-red-500 text-white border border-red-600' : 'bg-blue-200 border border-blue-300 rounded-r'
+                                          className={`absolute h-6 top-3 shadow-sm flex items-center justify-between px-2 cursor-pointer pointer-events-auto transition-all hover:brightness-110 z-20 ${
+                                            activity.status === 'completed' ? 'bg-green-200 border border-green-300 rounded' : 
+                                            activity.status === 'scheduled' ? 'bg-purple-200 border border-purple-300 rounded' :
+                                            'bg-blue-200 border border-blue-300 rounded-l ' + (!hasDelay ? 'rounded-r' : '')
                                           }`}
                                           style={{ left: `${left}%` }}
                                           onClick={() => {
@@ -3845,17 +3941,14 @@ export default function App() {
                                               {formatInputDate(activity.endDate)}
                                             </span>
                                           )}
-                                          {activity.status === 'delayed' && (
-                                            <span className="text-[7px] font-black uppercase tracking-tighter opacity-80">Atrasado</span>
-                                          )}
                                         </motion.div>
-
+ 
                                         {/* Delayed (Hatched) Segment */}
                                         {hasDelay && delayedWidth > 0 && (
                                           <motion.div
                                             initial={{ width: 0, opacity: 0 }}
                                             animate={{ width: `${delayedWidth}%`, opacity: 1 }}
-                                            className="h-6 bg-hatched-red border-t border-b border-r border-red-600 rounded-r shadow-sm relative z-10 cursor-pointer"
+                                            className="absolute h-6 top-3 bg-hatched-red border-t border-b border-r border-red-600 rounded-r shadow-sm z-10 cursor-pointer pointer-events-auto"
                                             style={{ left: `${left + width}%` }}
                                             onClick={() => {
                                               setEditingActivity(activity);
@@ -5086,6 +5179,12 @@ function LoginPage({ onLogin, onRegister }: {
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-4 font-sans transition-colors duration-300">
+      {/* Quota Banner duplicated here for visibility before login */}
+      {localStorage.getItem('firestore_quota_extrapolated') === 'true' && (
+        <div className="fixed top-0 left-0 right-0 z-[200] bg-red-600 text-white px-4 py-2 text-center text-xs font-bold animate-pulse">
+          Limite de dados gratuito do Google atingido hoje. O sistema voltará ao normal em breve ou após o reset diário.
+        </div>
+      )}
       <div className="w-full max-w-md">
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
