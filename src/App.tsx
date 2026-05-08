@@ -207,6 +207,7 @@ export default function App() {
     }
     return false;
   });
+  const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
   const [currentUser, setCurrentUser] = useState<UserProfile>(DEFAULT_USER);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [reports, setReports] = useState<WeeklyReport[]>([]);
@@ -3711,86 +3712,120 @@ export default function App() {
                             <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
                               {activities.filter(a => a.projectId === selectedScheduleProjectId).length === 0 ? (
                                 <tr>
-                                  <td colSpan={5} className="px-6 py-12 text-center text-slate-400 italic">Nenhuma atividade cadastrada.</td>
+                                  <td colSpan={6} className="px-6 py-12 text-center text-slate-400 italic">Nenhuma atividade cadastrada.</td>
                                 </tr>
                               ) : (
-                                activities.filter(a => a.projectId === selectedScheduleProjectId).map(activity => (
-                                  <tr key={activity.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
-                                    <td className="px-6 py-4">
-                                      <div className="font-bold text-slate-800 dark:text-slate-200">{activity.name}</div>
-                                      <div className="text-[10px] text-slate-400">{activity.category || 'Sem categoria'}</div>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                      <div className="flex items-center gap-2">
-                                        <div className="w-6 h-6 rounded-full bg-axia-primary/10 flex items-center justify-center text-axia-primary text-[10px] font-bold">
-                                          {activity.responsible.charAt(0)}
-                                        </div>
-                                        <span className="text-sm font-medium text-slate-600 dark:text-slate-400">{activity.responsible}</span>
-                                      </div>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                      <div className="text-xs font-bold text-slate-600 dark:text-slate-300">
-                                        {formatInputDate(activity.startDate)} - {formatInputDate(activity.endDate)}
-                                      </div>
-                                      {activity.status === 'delayed' && activity.predictedEndDate && (
-                                        <div className="text-[10px] font-black text-red-500 uppercase mt-1">
-                                          Nova Previsão: {formatInputDate(activity.predictedEndDate)}
-                                        </div>
-                                      )}
-                                      <div className="text-[10px] text-slate-400">
-                                        {Math.ceil((new Date(activity.endDate).getTime() - new Date(activity.startDate).getTime()) / (1000 * 60 * 60 * 24))} dias
-                                      </div>
-                                    </td>
-                                     <td className="px-6 py-4">
-                                      <span className={`px-2 py-1 rounded-md text-[10px] font-black uppercase border ${
-                                        activity.status === 'completed' ? 'bg-green-50 text-green-600 border-green-100' :
-                                        activity.status === 'in-progress' ? 'bg-blue-50 text-blue-600 border-blue-100' :
-                                        activity.status === 'delayed' ? 'bg-red-50 text-red-600 border-red-100' :
-                                        activity.status === 'scheduled' ? 'bg-purple-50 text-purple-600 border-purple-100' :
-                                        'bg-slate-50 text-slate-600 border-slate-100'
-                                      }`}>
-                                        {activity.status === 'completed' ? 'Concluído' : 
-                                         activity.status === 'in-progress' ? 'Em Andamento' : 
-                                         activity.status === 'delayed' ? 'Atrasada' : 
-                                         activity.status === 'scheduled' ? 'Programado' : 'Pendente'}
-                                      </span>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                      <div className="flex items-center gap-1">
-                                        <button 
-                                          onClick={() => handleMoveActivity(activity, 'up')}
-                                          className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-axia-primary transition-colors"
-                                          title="Mover para cima"
-                                        >
-                                          <ChevronUp size={14} />
-                                        </button>
-                                        <button 
-                                          onClick={() => handleMoveActivity(activity, 'down')}
-                                          className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-axia-primary transition-colors"
-                                          title="Mover para baixo"
-                                        >
-                                          <ChevronDown size={14} />
-                                        </button>
-                                      </div>
-                                    </td>
-                                    <td className="px-6 py-4 text-right">
-                                      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <button 
-                                          onClick={() => setEditingActivity(activity)}
-                                          className="p-1.5 text-slate-400 hover:text-axia-primary transition-colors"
-                                        >
-                                          <Pencil size={14} />
-                                        </button>
-                                        <button 
-                                          onClick={() => handleDeleteActivity(activity.id)}
-                                          className="p-1.5 text-slate-400 hover:text-red-500 transition-colors"
-                                        >
-                                          <Trash2 size={14} />
-                                        </button>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                ))
+                                (() => {
+                                  const filtered = activities.filter(a => a.projectId === selectedScheduleProjectId);
+                                  const grouped = filtered.reduce((acc, activity) => {
+                                    const cat = activity.category || 'Sem categoria';
+                                    if (!acc[cat]) acc[cat] = [];
+                                    acc[cat].push(activity);
+                                    return acc;
+                                  }, {} as Record<string, ScheduleActivity[]>);
+
+                                  return (Object.entries(grouped) as [string, ScheduleActivity[]][]).map(([category, items]) => (
+                                    <React.Fragment key={category}>
+                                      <tr 
+                                        className="bg-slate-50/50 dark:bg-slate-800/50 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                                        onClick={() => {
+                                          setCollapsedGroups(prev => 
+                                            prev.includes(category) 
+                                              ? prev.filter(c => c !== category) 
+                                              : [...prev, category]
+                                          );
+                                        }}
+                                      >
+                                        <td colSpan={6} className="px-6 py-3">
+                                          <div className="flex items-center gap-2">
+                                            <div className={`p-1 rounded bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 transition-all duration-200 ${collapsedGroups.includes(category) ? '' : 'rotate-180'}`}>
+                                              <ChevronDown size={14} />
+                                            </div>
+                                            <span className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">{category}</span>
+                                            <span className="text-[11px] text-slate-400 font-bold ml-1">({items.length} {items.length === 1 ? 'item' : 'itens'})</span>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                      {!collapsedGroups.includes(category) && items.map(activity => (
+                                        <tr key={activity.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
+                                          <td className="px-6 py-4">
+                                            <div className="font-bold text-slate-800 dark:text-slate-200">{activity.name}</div>
+                                            <div className="text-[10px] text-slate-400">{activity.category || 'Sem categoria'}</div>
+                                          </td>
+                                          <td className="px-6 py-4">
+                                            <div className="flex items-center gap-2">
+                                              <div className="w-6 h-6 rounded-full bg-axia-primary/10 flex items-center justify-center text-axia-primary text-[10px] font-bold">
+                                                {activity.responsible.charAt(0)}
+                                              </div>
+                                              <span className="text-sm font-medium text-slate-600 dark:text-slate-400">{activity.responsible}</span>
+                                            </div>
+                                          </td>
+                                          <td className="px-6 py-4">
+                                            <div className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                                              {formatInputDate(activity.startDate)} - {formatInputDate(activity.endDate)}
+                                            </div>
+                                            {activity.status === 'delayed' && activity.predictedEndDate && (
+                                              <div className="text-[10px] font-black text-red-500 uppercase mt-1">
+                                                Nova Previsão: {formatInputDate(activity.predictedEndDate)}
+                                              </div>
+                                            )}
+                                            <div className="text-[10px] text-slate-400">
+                                              {Math.ceil((new Date(activity.endDate).getTime() - new Date(activity.startDate).getTime()) / (1000 * 60 * 60 * 24))} dias
+                                            </div>
+                                          </td>
+                                           <td className="px-6 py-4">
+                                            <span className={`px-2 py-1 rounded-md text-[10px] font-black uppercase border ${
+                                              activity.status === 'completed' ? 'bg-green-50 text-green-600 border-green-100' :
+                                              activity.status === 'in-progress' ? 'bg-blue-50 text-blue-600 border-blue-100' :
+                                              activity.status === 'delayed' ? 'bg-red-50 text-red-600 border-red-100' :
+                                              activity.status === 'scheduled' ? 'bg-purple-50 text-purple-600 border-purple-100' :
+                                              'bg-slate-50 text-slate-600 border-slate-100'
+                                            }`}>
+                                              {activity.status === 'completed' ? 'Concluído' : 
+                                               activity.status === 'in-progress' ? 'Em Andamento' : 
+                                               activity.status === 'delayed' ? 'Atrasada' : 
+                                               activity.status === 'scheduled' ? 'Programado' : 'Pendente'}
+                                            </span>
+                                          </td>
+                                          <td className="px-6 py-4">
+                                            <div className="flex items-center gap-1">
+                                              <button 
+                                                onClick={() => handleMoveActivity(activity, 'up')}
+                                                className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-axia-primary transition-colors"
+                                                title="Mover para cima"
+                                              >
+                                                <ChevronUp size={14} />
+                                              </button>
+                                              <button 
+                                                onClick={() => handleMoveActivity(activity, 'down')}
+                                                className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-axia-primary transition-colors"
+                                                title="Mover para baixo"
+                                              >
+                                                <ChevronDown size={14} />
+                                              </button>
+                                            </div>
+                                          </td>
+                                          <td className="px-6 py-4 text-right">
+                                            <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                              <button 
+                                                onClick={() => setEditingActivity(activity)}
+                                                className="p-1.5 text-slate-400 hover:text-axia-primary transition-colors"
+                                              >
+                                                <Pencil size={14} />
+                                              </button>
+                                              <button 
+                                                onClick={() => handleDeleteActivity(activity.id)}
+                                                className="p-1.5 text-slate-400 hover:text-red-500 transition-colors"
+                                              >
+                                                <Trash2 size={14} />
+                                              </button>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </React.Fragment>
+                                  ));
+                                })()
                               )}
                             </tbody>
                           </table>
