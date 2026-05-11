@@ -159,6 +159,25 @@
         "order": { "type": "number" }
       },
       "required": ["id", "projectId", "name", "responsible", "startDate", "endDate", "progress", "status", "order"]
+    },
+    "PlanningActivity": {
+      "title": "PlanningActivity",
+      "description": "A monthly-based planning activity",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "name": { "type": "string" },
+        "startMonth": { "type": "number", "description": "0-indexed month (0=Jan, 11=Dec)" },
+        "startYear": { "type": "number" },
+        "endMonth": { "type": "number" },
+        "endYear": { "type": "number" },
+        "color": { "type": "string" },
+        "order": { "type": "number" },
+        "category": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "required": ["id", "projectId", "name", "startMonth", "startYear", "endMonth", "endYear", "color", "order"]
     }
   },
   "firestore": {
@@ -201,6 +220,10 @@
     "/scheduleActivities/{activityId}": {
       "schema": "ScheduleActivity",
       "description": "Schedule activity documents"
+    },
+    "/planningActivities/{activityId}": {
+      "schema": "PlanningActivity",
+      "description": "Planning activity documents"
     }
   }
 }

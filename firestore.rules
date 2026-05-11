@@ -118,6 +118,17 @@ service cloud.firestore {
              (!('dependencies' in data) || data.dependencies is list);
     }
 
+    function isValidPlanningActivity(data) {
+      return data.id is string && data.id.size() > 0 &&
+             data.projectId is string && data.projectId.size() > 0 &&
+             data.name is string && data.name.size() > 0 &&
+             data.startMonth is number && data.startYear is number &&
+             data.endMonth is number && data.endYear is number &&
+             data.color is string && data.order is number &&
+             (!('category' in data) || data.category is string) &&
+             (!('description' in data) || data.description is string);
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -183,6 +194,16 @@ service cloud.firestore {
                       request.resource.data.id == activityId;
       allow update: if isAuthenticated() && isValidId(activityId) && 
                       isValidScheduleActivity(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /planningActivities/{activityId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidId(activityId) && 
+                      isValidPlanningActivity(request.resource.data) &&
+                      request.resource.data.id == activityId;
+      allow update: if isAuthenticated() && isValidId(activityId) && 
+                      isValidPlanningActivity(request.resource.data);
       allow delete: if isAdmin();
     }
   }

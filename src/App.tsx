@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, Component } from 'react';
+import React, { useState, useEffect, useRef, useMemo, Component } from 'react';
 import { 
   LayoutDashboard, 
   HardHat, 
@@ -94,7 +94,12 @@ import {
 } from 'recharts';
 import { MOCK_PROJECTS, MOCK_RESOURCES, MOCK_REPORTS, MOCK_MEASUREMENTS, MOCK_ATTACHMENTS, MOCK_STATUS_UPDATES } from './constants';
 import html2canvas from 'html2canvas';
-import { Project, WeeklyReport, Measurement, UserProfile, Attachment, StatusUpdate, PhotoReportItem, MeasurementBulletin, ProjectAddendum, ScheduleActivity } from './types';
+import { Project, WeeklyReport, Measurement, UserProfile, Attachment, StatusUpdate, PhotoReportItem, MeasurementBulletin, ProjectAddendum, ScheduleActivity, PlanningActivity } from './types';
+
+const MONTHS = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+];
 
 const Logo = ({ size = 40, className = "" }: { size?: number, className?: string }) => (
   <svg 
@@ -219,10 +224,15 @@ export default function App() {
   const [measurementBulletins, setMeasurementBulletins] = useState<MeasurementBulletin[]>([]);
   const [addendums, setAddendums] = useState<ProjectAddendum[]>([]);
   const [activities, setActivities] = useState<ScheduleActivity[]>([]);
+  const [planningActivities, setPlanningActivities] = useState<PlanningActivity[]>([]);
   const [selectedScheduleProjectId, setSelectedScheduleProjectId] = useState<string>('');
+  const [selectedPlanningProjectId, setSelectedPlanningProjectId] = useState<string>('');
   const [isAddingActivity, setIsAddingActivity] = useState(false);
+  const [isAddingPlanningActivity, setIsAddingPlanningActivity] = useState(false);
   const [editingActivity, setEditingActivity] = useState<ScheduleActivity | null>(null);
+  const [editingPlanningActivity, setEditingPlanningActivity] = useState<PlanningActivity | null>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const planningRef = useRef<HTMLDivElement>(null);
   const [newActivity, setNewActivity] = useState<Omit<ScheduleActivity, 'id' | 'projectId'>>({
     name: '',
     responsible: '',
@@ -233,6 +243,17 @@ export default function App() {
     status: 'pending',
     category: '',
     order: activities.length
+  });
+  const [newPlanningActivity, setNewPlanningActivity] = useState<Omit<PlanningActivity, 'id' | 'projectId'>>({
+    name: '',
+    startMonth: new Date().getMonth(),
+    startYear: new Date().getFullYear(),
+    endMonth: (new Date().getMonth() + 1) % 12,
+    endYear: new Date().getMonth() === 11 ? new Date().getFullYear() + 1 : new Date().getFullYear(),
+    color: '#0033FF',
+    order: planningActivities.length,
+    category: '',
+    description: ''
   });
   const [newBulletin, setNewBulletin] = useState({
     projectId: '',
@@ -468,6 +489,303 @@ export default function App() {
     }
   };
 
+  const handleSavePlanningActivity = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPlanningProjectId) return;
+
+    try {
+      if (editingPlanningActivity) {
+        await updateDoc(doc(db, 'planningActivities', editingPlanningActivity.id), newPlanningActivity);
+        showNotification('Atividade do planejamento atualizada!');
+      } else {
+        const id = `plan-${Date.now()}`;
+        await setDoc(doc(db, 'planningActivities', id), {
+          ...newPlanningActivity,
+          id,
+          projectId: selectedPlanningProjectId,
+          order: planningActivities.filter(a => a.projectId === selectedPlanningProjectId).length
+        });
+        showNotification('Atividade adicionada ao planejamento!');
+      }
+      setIsAddingPlanningActivity(false);
+      setEditingPlanningActivity(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'planningActivities');
+    }
+  };
+
+  const handleDeletePlanningActivity = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'planningActivities', id));
+      showNotification('Atividade removida do planejamento.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `planningActivities/${id}`);
+    }
+  };
+
+  const handleMovePlanningActivity = async (activity: PlanningActivity, direction: 'up' | 'down') => {
+    const projectActivities = planningActivities
+      .filter(a => a.projectId === activity.projectId)
+      .sort((a, b) => a.order - b.order);
+    
+    const currentIndex = projectActivities.findIndex(a => a.id === activity.id);
+    if (direction === 'up' && currentIndex > 0) {
+      const prevActivity = projectActivities[currentIndex - 1];
+      try {
+        await updateDoc(doc(db, 'planningActivities', activity.id), { order: prevActivity.order });
+        await updateDoc(doc(db, 'planningActivities', prevActivity.id), { order: activity.order });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `planningActivities/${activity.id}`);
+      }
+    } else if (direction === 'down' && currentIndex < projectActivities.length - 1) {
+      const nextActivity = projectActivities[currentIndex + 1];
+      try {
+        await updateDoc(doc(db, 'planningActivities', activity.id), { order: nextActivity.order });
+        await updateDoc(doc(db, 'planningActivities', nextActivity.id), { order: activity.order });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `planningActivities/${activity.id}`);
+      }
+    }
+  };
+
+  const exportPlanningToPDF = async (projectId: string) => {
+    const project = projects.find(p => p.id === projectId);
+    if (!project) return;
+
+    const relevantActivities = planningActivities.filter(a => a.projectId === projectId);
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    
+    // Header
+    doc.setFillColor(0, 51, 255);
+    doc.rect(0, 0, 210, 40, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(22);
+    doc.setFont('helvetica', 'bold');
+    doc.text('PLANEJAMENTO DE OBRA', 15, 20);
+    doc.setFontSize(12);
+    doc.text(project.name.toUpperCase(), 15, 30);
+
+    // Project Info
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(10);
+    doc.text(`Cliente: ${project.client}`, 15, 50);
+    doc.text(`Período Contratual: ${project.startDate} a ${project.endDate}`, 15, 55);
+    doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, 15, 60);
+
+    // Table
+    const tableData = relevantActivities
+      .sort((a, b) => (a.order || 0) - (b.order || 0))
+      .map(a => [
+        a.name.toUpperCase(),
+        a.category || '-',
+        `${monthNames[a.startMonth]}/${a.startYear} - ${monthNames[a.endMonth]}/${a.endYear}`,
+        a.description || '-'
+      ]);
+
+    autoTable(doc, {
+      startY: 70,
+      head: [['ATIVIDADE', 'CATEGORIA', 'PERÍODO PREVISTO', 'OBSERVAÇÕES']],
+      body: tableData,
+      theme: 'striped',
+      headStyles: { fillColor: [0, 51, 255], textColor: [255, 255, 255] },
+      styles: { fontSize: 8 }
+    });
+
+    // Add Planning Visual if Ref exists
+    if (planningRef.current) {
+      try {
+        const canvas = await html2canvas(planningRef.current, {
+          scale: 3,
+          useCORS: true,
+          logging: false,
+          width: 2800,
+          backgroundColor: '#FFFFFF',
+          onclone: (clonedDoc) => {
+            const chartDiv = clonedDoc.getElementById('planning-chart');
+            if (chartDiv) {
+              chartDiv.style.width = '2800px'; 
+              chartDiv.style.padding = '80px 60px';
+              chartDiv.style.backgroundColor = '#ffffff';
+              chartDiv.style.borderRadius = '0';
+              chartDiv.style.border = 'none';
+              chartDiv.style.overflow = 'visible';
+            }
+
+            const elements = clonedDoc.querySelectorAll('*');
+            const isModernColor = (val: string) => val && (val.includes('oklch') || val.includes('oklab'));
+            
+            elements.forEach((node) => {
+              const el = node as HTMLElement;
+              const style = window.getComputedStyle(el);
+
+              // Scale fonts for high-res export
+              if (el.tagName === 'SPAN' || el.tagName === 'DIV') {
+                const fontSize = parseFloat(style.fontSize);
+                if (fontSize < 12) {
+                  el.style.fontSize = '14px';
+                }
+              }
+              
+              // Handle bars specifically
+              if (el.classList.contains('h-10')) {
+                el.style.height = '60px'; // Taller rows
+              }
+              if (el.classList.contains('h-6')) {
+                el.style.height = '40px'; // Taller bars
+                el.style.top = '10px';
+                
+                // Find the text inside the bar
+                const textSpan = el.querySelector('span');
+                if (textSpan) {
+                  textSpan.style.fontSize = '18px';
+                  textSpan.style.padding = '0 15px';
+                }
+              }
+
+              ['color', 'backgroundColor', 'borderColor', 'outlineColor'].forEach(prop => {
+                const val = (style as any)[prop];
+                if (val && isModernColor(val)) {
+                  if (prop === 'color') {
+                    if (el.classList.contains('text-white')) el.style.color = '#ffffff';
+                    else if (el.classList.contains('text-axia-primary')) el.style.color = '#0033FF';
+                    else el.style.color = '#1e293b';
+                  } else if (prop === 'backgroundColor') {
+                    if (el.classList.contains('bg-axia-primary')) el.style.backgroundColor = '#0033FF';
+                    else if (el.classList.contains('bg-white')) el.style.backgroundColor = '#ffffff';
+                    else el.style.backgroundColor = 'transparent';
+                  } else {
+                    (el.style as any)[prop] = '#e2e8f0';
+                  }
+                }
+              });
+
+              if (style.boxShadow && isModernColor(style.boxShadow)) el.style.boxShadow = 'none';
+
+              if (el.classList.contains('bg-hatched-red')) {
+                el.style.backgroundImage = 'repeating-linear-gradient(45deg, #ef4444, #ef4444 10px, #dc2626 10px, #dc2626 20px)';
+                el.style.backgroundColor = '#ef4444';
+              }
+            });
+          }
+        });
+
+        const imgData = canvas.toDataURL('image/png', 1.0);
+        doc.addPage('a4', 'l');
+        
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const imgProps = doc.getImageProperties(imgData);
+        const imgRatio = imgProps.width / imgProps.height;
+        
+        const maxWidth = pageWidth;
+        const maxHeight = pageHeight - 10; 
+        
+        let finalWidth = maxWidth;
+        let finalHeight = maxWidth / imgRatio;
+        
+        if (finalHeight > maxHeight) {
+          finalHeight = maxHeight;
+          finalWidth = maxHeight * imgRatio;
+        }
+        
+        const xPos = (pageWidth - finalWidth) / 2;
+        const yPos = 8 + (maxHeight - finalHeight) / 2;
+
+        doc.setTextColor(0, 51, 255);
+        doc.setFontSize(10);
+        doc.text(`CRONOGRAMA MENSAL (VISUAL): ${project.name.toUpperCase()}`, pageWidth / 2, 6, { align: 'center' });
+        
+        doc.addImage(imgData, 'PNG', xPos, yPos, finalWidth, finalHeight, undefined, 'FAST');
+      } catch (err) {
+        console.error('Error capturing planning chart:', err);
+      }
+    }
+
+    doc.save(`planejamento_${project.name.toLowerCase().replace(/\s+/g, '_')}.pdf`);
+    showNotification('Planejamento exportado com sucesso!');
+  };
+
+  const exportPlanningToPNG = async (projectId: string) => {
+    const element = planningRef.current;
+    if (!element) return;
+
+    try {
+      const canvas = await html2canvas(element, { 
+        scale: 3,
+        useCORS: true,
+        backgroundColor: '#FFFFFF',
+        onclone: (clonedDoc) => {
+          const chartDiv = clonedDoc.getElementById('planning-chart');
+          if (chartDiv) {
+            chartDiv.style.width = '2400px';
+            chartDiv.style.padding = '80px 60px';
+            chartDiv.style.backgroundColor = '#ffffff';
+          }
+
+          const elements = clonedDoc.querySelectorAll('*');
+          const isModernColor = (val: string) => val && (val.includes('oklch') || val.includes('oklab'));
+          
+          elements.forEach((node) => {
+            const el = node as HTMLElement;
+            const style = window.getComputedStyle(el);
+
+            // Scale fonts for high-res export
+            if (el.tagName === 'SPAN' || el.tagName === 'DIV') {
+              const fontSize = parseFloat(style.fontSize);
+              if (fontSize < 12) {
+                el.style.fontSize = '14px';
+              }
+            }
+            
+            // Handle bars specifically
+            if (el.classList.contains('h-10')) {
+              el.style.height = '60px'; // Taller rows
+            }
+            if (el.classList.contains('h-6')) {
+              el.style.height = '40px'; // Taller bars
+              el.style.top = '10px';
+              
+              // Find the text inside the bar
+              const textSpan = el.querySelector('span');
+              if (textSpan) {
+                textSpan.style.fontSize = '18px';
+                textSpan.style.padding = '0 15px';
+              }
+            }
+            
+            ['color', 'backgroundColor', 'borderColor', 'outlineColor'].forEach(prop => {
+              const val = (style as any)[prop];
+              if (val && isModernColor(val)) {
+                if (prop === 'color') {
+                  if (el.classList.contains('text-white')) el.style.color = '#ffffff';
+                  else if (el.classList.contains('text-axia-primary')) el.style.color = '#0033FF';
+                  else el.style.color = '#1e293b';
+                } else if (prop === 'backgroundColor') {
+                  if (el.classList.contains('bg-axia-primary')) el.style.backgroundColor = '#0033FF';
+                  else if (el.classList.contains('bg-white')) el.style.backgroundColor = '#ffffff';
+                  else el.style.backgroundColor = 'transparent';
+                } else {
+                  (el.style as any)[prop] = '#e2e8f0';
+                }
+              }
+            });
+
+            if (style.boxShadow && isModernColor(style.boxShadow)) el.style.boxShadow = 'none';
+          });
+        }
+      });
+      const link = document.createElement('a');
+      link.download = `Planejamento_${projects.find(p => p.id === projectId)?.name}.png`;
+      link.href = canvas.toDataURL('image/png', 1.0);
+      link.click();
+      showNotification('Imagem de planejamento gerada!');
+    } catch (error) {
+      console.error('Export error:', error);
+      showNotification('Erro ao gerar PNG.');
+    }
+  };
+
   const exportScheduleToPDF = async (projectId: string) => {
     const project = projects.find(p => p.id === projectId);
     if (!project) return;
@@ -533,48 +851,32 @@ export default function App() {
             }
 
             const elements = clonedDoc.querySelectorAll('*');
+            const isModernColor = (val: string) => val && (val.includes('oklch') || val.includes('oklab'));
+            
             elements.forEach((node) => {
               const el = node as HTMLElement;
               const style = window.getComputedStyle(el);
               
-            const isModernColor = (val: string) => val && (val.includes('oklch') || val.includes('oklab'));
-            
-            if (style.color && isModernColor(style.color)) {
-              if (el.classList.contains('text-white')) el.style.color = '#ffffff';
-              else if (el.classList.contains('text-axia-primary')) el.style.color = '#0033FF';
-              else if (el.classList.contains('text-slate-800')) el.style.color = '#1e293b';
-              else if (el.classList.contains('text-slate-900')) el.style.color = '#0f172a';
-              else if (el.classList.contains('text-slate-400')) el.style.color = '#94a3b8';
-              else if (el.classList.contains('text-slate-500')) el.style.color = '#64748b';
-              else if (el.classList.contains('text-purple-600')) el.style.color = '#9333ea';
-              else el.style.color = '#1e293b'; 
-            }
-            
-            if (style.backgroundColor && isModernColor(style.backgroundColor)) {
-              if (el.classList.contains('bg-axia-primary')) el.style.backgroundColor = '#0033FF';
-              else if (el.classList.contains('bg-green-500')) el.style.backgroundColor = '#22c55e';
-              else if (el.classList.contains('bg-red-500')) el.style.backgroundColor = '#ef4444';
-              else if (el.classList.contains('bg-purple-500')) el.style.backgroundColor = '#a855f7';
-              else if (el.classList.contains('bg-green-200')) el.style.backgroundColor = '#bbf7d0';
-              else if (el.classList.contains('bg-purple-200')) el.style.backgroundColor = '#e9d5ff';
-              else if (el.classList.contains('bg-red-200')) el.style.backgroundColor = '#fecaca';
-              else if (el.classList.contains('bg-blue-200')) el.style.backgroundColor = '#bfdbfe';
-              else if (el.classList.contains('bg-purple-50')) el.style.backgroundColor = '#faf5ff';
-              else if (el.classList.contains('bg-white')) el.style.backgroundColor = '#ffffff';
-              else if (el.classList.contains('bg-slate-50')) el.style.backgroundColor = '#f8fafc';
-              else if (el.classList.contains('bg-slate-100')) el.style.backgroundColor = '#f1f5f9';
-              else if (el.classList.contains('bg-slate-200')) el.style.backgroundColor = '#e2e8f0';
-              else if (el.classList.contains('bg-slate-300')) el.style.backgroundColor = '#cbd5e1';
-              else if (el.classList.contains('bg-slate-900')) el.style.backgroundColor = '#ffffff';
-              else el.style.backgroundColor = 'transparent';
-            }
+              ['color', 'backgroundColor', 'borderColor', 'outlineColor'].forEach(prop => {
+                const val = (style as any)[prop];
+                if (val && isModernColor(val)) {
+                  if (prop === 'color') {
+                    if (el.classList.contains('text-white')) el.style.color = '#ffffff';
+                    else if (el.classList.contains('text-axia-primary')) el.style.color = '#0033FF';
+                    else el.style.color = '#1e293b';
+                  } else if (prop === 'backgroundColor') {
+                    if (el.classList.contains('bg-axia-primary')) el.style.backgroundColor = '#0033FF';
+                    else if (el.classList.contains('bg-green-500')) el.style.backgroundColor = '#22c55e';
+                    else if (el.classList.contains('bg-red-500')) el.style.backgroundColor = '#ef4444';
+                    else if (el.classList.contains('bg-white')) el.style.backgroundColor = '#ffffff';
+                    else el.style.backgroundColor = 'transparent';
+                  } else {
+                    (el.style as any)[prop] = '#e2e8f0';
+                  }
+                }
+              });
 
-            if (style.borderColor && isModernColor(style.borderColor)) {
-                if (el.classList.contains('border-red-500')) el.style.borderColor = '#ef4444';
-                else if (el.classList.contains('border-purple-100')) el.style.borderColor = '#f3e8ff';
-                else if (el.classList.contains('border-slate-100')) el.style.borderColor = '#f1f5f9';
-                else el.style.borderColor = '#e2e8f0';
-              }
+              if (style.boxShadow && isModernColor(style.boxShadow)) el.style.boxShadow = 'none';
 
               if (el.classList.contains('bg-hatched-red')) {
                 el.style.backgroundImage = 'repeating-linear-gradient(45deg, #ef4444, #ef4444 10px, #dc2626 10px, #dc2626 20px)';
@@ -647,48 +949,32 @@ export default function App() {
           }
 
           const elements = clonedDoc.querySelectorAll('*');
+          const isModernColor = (val: string) => val && (val.includes('oklch') || val.includes('oklab'));
+          
           elements.forEach((node) => {
             const el = node as HTMLElement;
             const style = window.getComputedStyle(el);
             
-            const isModernColor = (val: string) => val && (val.includes('oklch') || val.includes('oklab'));
-            
-            if (style.color && isModernColor(style.color)) {
-              if (el.classList.contains('text-white')) el.style.color = '#ffffff';
-              else if (el.classList.contains('text-axia-primary')) el.style.color = '#0033FF';
-              else if (el.classList.contains('text-slate-800')) el.style.color = '#1e293b';
-              else if (el.classList.contains('text-slate-900')) el.style.color = '#0f172a';
-              else if (el.classList.contains('text-slate-400')) el.style.color = '#94a3b8';
-              else if (el.classList.contains('text-slate-500')) el.style.color = '#64748b';
-              else if (el.classList.contains('text-purple-600')) el.style.color = '#9333ea';
-              else el.style.color = '#1e293b'; 
-            }
-            
-            if (style.backgroundColor && isModernColor(style.backgroundColor)) {
-              if (el.classList.contains('bg-axia-primary')) el.style.backgroundColor = '#0033FF';
-              else if (el.classList.contains('bg-green-500')) el.style.backgroundColor = '#22c55e';
-              else if (el.classList.contains('bg-red-500')) el.style.backgroundColor = '#ef4444';
-              else if (el.classList.contains('bg-purple-500')) el.style.backgroundColor = '#a855f7';
-              else if (el.classList.contains('bg-green-200')) el.style.backgroundColor = '#bbf7d0';
-              else if (el.classList.contains('bg-purple-200')) el.style.backgroundColor = '#e9d5ff';
-              else if (el.classList.contains('bg-red-200')) el.style.backgroundColor = '#fecaca';
-              else if (el.classList.contains('bg-blue-200')) el.style.backgroundColor = '#bfdbfe';
-              else if (el.classList.contains('bg-purple-50')) el.style.backgroundColor = '#faf5ff';
-              else if (el.classList.contains('bg-white')) el.style.backgroundColor = '#ffffff';
-              else if (el.classList.contains('bg-slate-50')) el.style.backgroundColor = '#f8fafc';
-              else if (el.classList.contains('bg-slate-100')) el.style.backgroundColor = '#f1f5f9';
-              else if (el.classList.contains('bg-slate-200')) el.style.backgroundColor = '#e2e8f0';
-              else if (el.classList.contains('bg-slate-300')) el.style.backgroundColor = '#cbd5e1';
-              else if (el.classList.contains('bg-slate-900')) el.style.backgroundColor = '#ffffff';
-              else el.style.backgroundColor = 'transparent';
-            }
+            ['color', 'backgroundColor', 'borderColor', 'outlineColor'].forEach(prop => {
+              const val = (style as any)[prop];
+              if (val && isModernColor(val)) {
+                if (prop === 'color') {
+                  if (el.classList.contains('text-white')) el.style.color = '#ffffff';
+                  else if (el.classList.contains('text-axia-primary')) el.style.color = '#0033FF';
+                  else el.style.color = '#1e293b';
+                } else if (prop === 'backgroundColor') {
+                  if (el.classList.contains('bg-axia-primary')) el.style.backgroundColor = '#0033FF';
+                  else if (el.classList.contains('bg-green-500')) el.style.backgroundColor = '#22c55e';
+                  else if (el.classList.contains('bg-red-500')) el.style.backgroundColor = '#ef4444';
+                  else if (el.classList.contains('bg-white')) el.style.backgroundColor = '#ffffff';
+                  else el.style.backgroundColor = 'transparent';
+                } else {
+                  (el.style as any)[prop] = '#e2e8f0';
+                }
+              }
+            });
 
-            if (style.borderColor && isModernColor(style.borderColor)) {
-              if (el.classList.contains('border-red-500')) el.style.borderColor = '#ef4444';
-              else if (el.classList.contains('border-purple-100')) el.style.borderColor = '#f3e8ff';
-              else if (el.classList.contains('border-slate-100')) el.style.borderColor = '#f1f5f9';
-              else el.style.borderColor = '#e2e8f0';
-            }
+            if (style.boxShadow && isModernColor(style.boxShadow)) el.style.boxShadow = 'none';
 
             if (el.classList.contains('bg-hatched-red')) {
               el.style.backgroundImage = 'repeating-linear-gradient(45deg, #ef4444, #ef4444 10px, #dc2626 10px, #dc2626 20px)';
@@ -893,6 +1179,16 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'scheduleActivities');
     });
 
+    const unsubPlanning = onSnapshot(query(collection(db, 'planningActivities'), orderBy('order', 'asc')), (snapshot) => {
+      setPlanningActivities(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlanningActivity)));
+    }, (error) => {
+      if (error.message.includes('Quota exceeded')) {
+        localStorage.setItem('firestore_quota_extrapolated', 'true');
+        setQuotaExceeded(true);
+      }
+      handleFirestoreError(error, OperationType.LIST, 'planningActivities');
+    });
+
     return () => {
       unsubProjects();
       unsubReports();
@@ -903,6 +1199,7 @@ export default function App() {
       unsubBulletins();
       unsubAddendums();
       unsubActivities();
+      unsubPlanning();
     };
   }, [isLoggedIn, isAuthReady]);
 
@@ -979,22 +1276,49 @@ export default function App() {
     'finished': projects.filter(p => p.status === 'finished').length,
   };
 
-  const timelineData = projects
-    .filter(p => p.startDate && p.endDate)
-    .map(p => {
+  const { timelineData, timelineWindow } = useMemo(() => {
+    const validProjects = projects.filter(p => p.startDate && p.endDate);
+    if (validProjects.length === 0) return { timelineData: [], timelineWindow: null };
+
+    const startTimes = validProjects.map(p => {
+      const d = new Date(p.startDate);
+      return isNaN(d.getTime()) ? null : d.getTime();
+    }).filter((t): t is number => t !== null);
+    
+    const endTimes = validProjects.map(p => {
+      const d = new Date(p.endDate);
+      return isNaN(d.getTime()) ? null : d.getTime();
+    }).filter((t): t is number => t !== null);
+
+    if (startTimes.length === 0 || endTimes.length === 0) return { timelineData: [], timelineWindow: null };
+    
+    const minStart = Math.min(...startTimes) - (15 * 24 * 60 * 60 * 1000);
+    const maxEnd = Math.max(...endTimes) + (15 * 24 * 60 * 60 * 1000);
+    const totalDuration = maxEnd - minStart;
+
+    const data = validProjects.map(p => {
       const start = new Date(p.startDate);
       const end = new Date(p.endDate);
-      const duration = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+      const startTime = start.getTime();
+      const endTime = end.getTime();
+      const duration = endTime - startTime;
+      
       return {
         name: p.name,
         start: start.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
         end: end.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
-        duration: duration > 0 ? duration : 1,
-        fullStart: start.getTime(),
-        status: p.status
+        left: ((startTime - minStart) / totalDuration) * 100,
+        width: Math.max(2, (duration / totalDuration) * 100),
+        status: p.status,
+        startTime
       };
-    })
-    .sort((a, b) => a.fullStart - b.fullStart);
+    }).sort((a, b) => a.startTime - b.startTime);
+
+    return { 
+      timelineData: data, 
+      timelineWindow: { minStart, maxEnd, totalDuration } 
+    };
+  }, [projects]);
 
   const CHART_COLORS = ['#0F172A', '#F97316', '#10B981', '#64748B', '#8B5CF6', '#EC4899'];
 
@@ -1056,7 +1380,8 @@ export default function App() {
           location: newProject.location,
           executingCompany: newProject.executingCompany,
           image: `https://picsum.photos/seed/${newProject.name}/800/600`,
-          createdBy: currentUser.id
+          createdBy: currentUser.id,
+          creatorName: currentUser.name
         };
         await setDoc(doc(db, 'projects', projectId), project);
         showNotification('Novo projeto cadastrado com sucesso!');
@@ -2210,6 +2535,13 @@ export default function App() {
             collapsed={!isSidebarOpen}
           />
           <NavItem 
+            icon={<TrendingUp size={20} />} 
+            label="Planejamento" 
+            active={activeTab === 'planning'} 
+            onClick={() => setActiveTab('planning')}
+            collapsed={!isSidebarOpen}
+          />
+          <NavItem 
             icon={<Receipt size={20} />} 
             label="Medições" 
             active={activeTab === 'measurements'} 
@@ -2442,34 +2774,62 @@ export default function App() {
                 </div>
 
                 {/* Timeline / Schedule */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                  <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
+                <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+                  <h3 className="text-lg font-bold mb-6 flex items-center gap-2 dark:text-white">
                     <Calendar size={20} className="text-axia-primary" />
-                    Cronograma de Obras
+                    Cronograma Global de Obras
                   </h3>
-                  <div className="space-y-4">
-                    {timelineData.length > 0 ? (
-                      timelineData.map((item, index) => (
-                        <div key={index} className="space-y-1">
-                          <div className="flex justify-between text-xs font-bold text-slate-500 px-1">
-                            <span>{item.name}</span>
-                            <div className="flex gap-4">
-                              <span>Início: {item.start}</span>
-                              <span>Fim: {item.end}</span>
-                            </div>
-                          </div>
-                          <div className="h-4 w-full bg-slate-50 rounded-full overflow-hidden flex">
-                            <div 
-                              className={`h-full rounded-full transition-all duration-1000 ${
-                                item.status === 'finished' ? 'bg-axia-accent' : 
-                                item.status === 'paused' ? 'bg-axia-secondary' : 
-                                item.status === 'in-progress' ? 'bg-axia-primary' : 'bg-slate-300'
-                              }`}
-                              style={{ width: `${Math.min(100, (item.duration / 365) * 100 * 5)}%` }} // Scaled for visibility
-                            />
-                          </div>
+                  <div className="space-y-6">
+                    {timelineData.length > 0 && timelineWindow ? (
+                      <div className="relative pt-6">
+                        {/* Timeline Labels */}
+                        <div className="absolute top-0 left-0 right-0 flex justify-between px-1 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 dark:border-slate-800 pb-1">
+                          <span>{new Date(timelineWindow.minStart).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })}</span>
+                          <span>{new Date(timelineWindow.minStart + (timelineWindow.totalDuration / 2)).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })}</span>
+                          <span>{new Date(timelineWindow.maxEnd).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })}</span>
                         </div>
-                      ))
+                        
+                        <div className="space-y-4 pt-4">
+                          {timelineData.map((item, index) => (
+                            <div key={index} className="space-y-1.5 group">
+                              <div className="flex justify-between text-[10px] font-bold text-slate-500 dark:text-slate-400 px-1">
+                                <span className="group-hover:text-axia-primary transition-colors">{item.name}</span>
+                                <span className="opacity-0 group-hover:opacity-100 transition-opacity">
+                                  {item.start} - {item.end}
+                                </span>
+                              </div>
+                              <div className="h-3 w-full bg-slate-50 dark:bg-slate-800/50 rounded-full relative overflow-hidden">
+                                <motion.div 
+                                  initial={{ width: 0, opacity: 0 }}
+                                  animate={{ width: `${item.width}%`, left: `${item.left}%`, opacity: 1 }}
+                                  transition={{ duration: 1, delay: index * 0.1 }}
+                                  className={`absolute h-full rounded-full shadow-sm shadow-black/5 ${
+                                    item.status === 'finished' ? 'bg-axia-accent' : 
+                                    item.status === 'paused' ? 'bg-axia-secondary' : 
+                                    item.status === 'delayed' ? 'bg-red-500' :
+                                    'bg-axia-primary'
+                                  }`}
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        
+                        {/* Today Marker if within window */}
+                        {(() => {
+                          const today = new Date().getTime();
+                          if (today >= timelineWindow.minStart && today <= timelineWindow.maxEnd) {
+                            const left = ((today - timelineWindow.minStart) / timelineWindow.totalDuration) * 100;
+                            return (
+                              <div 
+                                className="absolute top-0 bottom-0 border-l border-dashed border-red-500/50 z-10 pointer-events-none"
+                                style={{ left: `${left}%` }}
+                              />
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
                     ) : (
                       <div className="py-12 text-center text-slate-400">
                         <Calendar size={48} className="mx-auto mb-4 opacity-20" />
@@ -2496,6 +2856,7 @@ export default function App() {
                         <thead>
                           <tr className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
                             <th className="px-6 py-4 font-semibold">Projeto</th>
+                            <th className="px-6 py-4 font-semibold text-center italic text-axia-primary">Incluído por</th>
                             <th className="px-6 py-4 font-semibold">Status</th>
                             <th className="px-6 py-4 font-semibold">Progresso</th>
                             <th className="px-6 py-4 font-semibold">Ações</th>
@@ -2511,6 +2872,9 @@ export default function App() {
                                     <MapPin size={12} /> {project.location}
                                   </p>
                                 </div>
+                              </td>
+                              <td className="px-6 py-4 text-center">
+                                <span className="text-xs font-medium text-slate-600 truncate max-w-[100px] inline-block">{project.creatorName || 'Sistema'}</span>
                               </td>
                               <td className="px-6 py-4">
                                 <span className={`px-3 py-1 rounded-full text-xs font-bold border ${getStatusColor(project.status)}`}>
@@ -2551,8 +2915,8 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-              </motion.div>
-            )}
+            </motion.div>
+          )}
 
             {activeTab === 'projects' && (
               <motion.div 
@@ -2593,6 +2957,11 @@ export default function App() {
                               {getStatusLabel(viewingProject.status)}
                             </span>
                             <h2 className="text-4xl font-display font-bold text-white">{viewingProject.name}</h2>
+                            <p className="text-white/80 text-sm mt-2 flex items-center gap-2">
+                              <User size={14} className="text-axia-accent" />
+                              <span className="font-bold">Incluído por:</span>
+                              <span>{viewingProject.creatorName || 'Sistema'}</span>
+                            </p>
                           </div>
                         </div>
                       </div>
@@ -2654,6 +3023,10 @@ export default function App() {
                                 <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
                                   <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Contrato</p>
                                   <p className="font-bold text-slate-900 text-base break-all">{viewingProject.contractNumber}</p>
+                                </div>
+                                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
+                                  <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Incluído por</p>
+                                  <p className="font-bold text-slate-900 text-base truncate">{viewingProject.creatorName || 'Sistema'}</p>
                                 </div>
                                 <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
                                   <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Início</p>
@@ -3486,6 +3859,15 @@ export default function App() {
                               className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-axia-primary/20"
                             />
                           </div>
+                          <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Incluído por (Automático)</label>
+                            <div className="w-full bg-slate-100 border border-slate-200 rounded-lg px-4 py-2.5 text-slate-500 flex items-center gap-2">
+                              <User size={16} className="text-slate-400" />
+                              <span className="font-medium text-sm">
+                                {editingProject ? (editingProject.creatorName || 'Sistema') : currentUser.name}
+                              </span>
+                            </div>
+                          </div>
                           <div className="flex items-end">
                             <button 
                               type="submit"
@@ -3549,6 +3931,11 @@ export default function App() {
                               <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                                 <Calendar size={14} className="text-axia-primary" />
                                 <span>{project.startDate} até {project.endDate}</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                                <User size={14} className="text-axia-primary" />
+                                <span className="font-bold shrink-0">Incluído por:</span>
+                                <span className="truncate">{project.creatorName || 'Sistema'}</span>
                               </div>
                               <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 col-span-2">
                                 <Briefcase size={14} className="text-axia-primary shrink-0" />
@@ -3624,13 +4011,307 @@ export default function App() {
               </motion.div>
             )}
 
+            {activeTab === 'planning' && (
+              <motion.div 
+                key="planning"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="space-y-6"
+              >
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">Planejamento de Obras</h2>
+                    <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">Cronograma Mensal de Atividades</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <select 
+                      value={selectedPlanningProjectId}
+                      onChange={(e) => setSelectedPlanningProjectId(e.target.value)}
+                      className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2 text-sm font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all shadow-sm"
+                    >
+                      <option value="">Selecione um Projeto</option>
+                      {projects.map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                    <button 
+                      onClick={() => {
+                        setIsAddingPlanningActivity(true);
+                        setEditingPlanningActivity(null);
+                        setNewPlanningActivity({
+                          name: '',
+                          startMonth: new Date().getMonth(),
+                          startYear: new Date().getFullYear(),
+                          endMonth: (new Date().getMonth() + 1) % 12,
+                          endYear: new Date().getMonth() === 11 ? new Date().getFullYear() + 1 : new Date().getFullYear(),
+                          color: '#0033FF',
+                          order: planningActivities.filter(a => a.projectId === selectedPlanningProjectId).length,
+                          category: '',
+                          description: ''
+                        });
+                      }}
+                      className="bg-axia-primary text-white px-6 py-2 rounded-xl font-bold text-sm hover:shadow-lg hover:shadow-axia-primary/25 transition-all flex items-center gap-2"
+                    >
+                      <Plus size={18} />
+                      Nova Atividade
+                    </button>
+                    <button 
+                      onClick={() => selectedPlanningProjectId && exportPlanningToPDF(selectedPlanningProjectId)}
+                      disabled={!selectedPlanningProjectId}
+                      className="bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 px-6 py-2 rounded-xl font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-all flex items-center gap-2 disabled:opacity-50"
+                    >
+                      <Download size={18} className="text-red-500" />
+                      PDF
+                    </button>
+                    <button 
+                      onClick={() => selectedPlanningProjectId && exportPlanningToPNG(selectedPlanningProjectId)}
+                      disabled={!selectedPlanningProjectId}
+                      className="bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 px-6 py-2 rounded-xl font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-all flex items-center gap-2 disabled:opacity-50"
+                    >
+                      <Download size={18} className="text-blue-500" />
+                      PNG
+                    </button>
+                  </div>
+                </div>
+
+                {!selectedPlanningProjectId ? (
+                  <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 p-12 text-center">
+                    <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-400">
+                      <TrendingUp size={32} />
+                    </div>
+                    <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">Selecione um projeto</h3>
+                    <p className="text-slate-500 dark:text-slate-400 text-sm max-w-sm mx-auto">Selecione um projeto acima para visualizar ou criar seu planejamento mensal.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {/* Month Gantt Chart */}
+                    <div ref={planningRef} id="planning-chart" className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 p-8 shadow-sm overflow-hidden">
+                      <div className="flex items-center justify-between mb-8">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-axia-primary/10 flex items-center justify-center text-axia-primary">
+                            <TrendingUp size={20} />
+                          </div>
+                          <div>
+                            <h3 className="text-xl font-black text-slate-800 dark:text-white tracking-tight">Cronograma de Planejamento</h3>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                              {projects.find(p => p.id === selectedPlanningProjectId)?.name}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="relative border border-slate-100 dark:border-slate-800 rounded-xl overflow-hidden bg-slate-50/30 dark:bg-slate-800/20 shadow-inner">
+                        <div className="flex">
+                          {/* Sidebar Labels */}
+                          <div className="w-[180px] flex-shrink-0 border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 z-20">
+                            <div className="h-12 border-b border-slate-200 dark:border-slate-700 flex items-center px-4">
+                              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Atividades</span>
+                            </div>
+                            {planningActivities.filter(a => a.projectId === selectedPlanningProjectId).map((activity) => (
+                              <div 
+                                key={activity.id} 
+                                className="h-10 border-b border-slate-100 dark:border-slate-800 flex items-center px-4 group cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800"
+                                onClick={() => {
+                                  setEditingPlanningActivity(activity);
+                                  setIsAddingPlanningActivity(true);
+                                }}
+                              >
+                                <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 truncate leading-tight group-hover:text-axia-primary transition-colors">
+                                  {activity.name}
+                                </span>
+                              </div>
+                            ))}
+                            <div className="h-10 bg-slate-50 dark:bg-slate-800/50" />
+                          </div>
+
+                          {/* Chart Grid */}
+                          <div className="flex-grow overflow-x-auto overflow-y-hidden">
+                            <div className="relative min-w-[800px]">
+                              {/* Header Months */}
+                              <div className="h-12 border-b border-slate-200 dark:border-slate-700 flex bg-slate-50/50 dark:bg-slate-800/50">
+                                {(() => {
+                                  const relevantActivities = planningActivities.filter(a => a.projectId === selectedPlanningProjectId);
+                                  let startYear = new Date().getFullYear();
+                                  let numMonths = 12;
+
+                                  if (relevantActivities.length > 0) {
+                                    const minYear = Math.min(...relevantActivities.map(a => a.startYear));
+                                    const maxYear = Math.max(...relevantActivities.map(a => a.endYear));
+                                    startYear = minYear;
+                                    numMonths = (maxYear - minYear + 1) * 12;
+                                  }
+
+                                  return Array.from({ length: numMonths }).map((_, i) => {
+                                    const currentMonth = i % 12;
+                                    const currentYear = startYear + Math.floor(i / 12);
+                                    const monthNamesShort = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+                                    return (
+                                      <div key={i} className="flex-1 min-w-[60px] border-r border-slate-100 dark:border-slate-800 flex flex-col items-center justify-center">
+                                        <span className="text-[9px] font-black text-slate-400 leading-none">
+                                          {monthNamesShort[currentMonth]}
+                                        </span>
+                                        <span className="text-[8px] text-slate-300 font-bold mt-0.5">
+                                          {currentYear}
+                                        </span>
+                                      </div>
+                                    );
+                                  });
+                                })()}
+                              </div>
+
+                              {/* Bars */}
+                              <div className="relative">
+                                {planningActivities.filter(a => a.projectId === selectedPlanningProjectId).map((activity, rowIndex) => {
+                                  const relevantActivities = planningActivities.filter(a => a.projectId === selectedPlanningProjectId);
+                                  const minYear = Math.min(...relevantActivities.map(a => a.startYear));
+                                  const numMonths = (Math.max(...relevantActivities.map(a => a.endYear)) - minYear + 1) * 12;
+
+                                  const startPos = (activity.startYear - minYear) * 12 + activity.startMonth;
+                                  const endPos = (activity.endYear - minYear) * 12 + activity.endMonth;
+                                  const duration = endPos - startPos + 1;
+
+                                  const left = (startPos / numMonths) * 100;
+                                  const width = (duration / numMonths) * 100;
+
+                                  return (
+                                    <div key={activity.id} className="h-10 border-b border-slate-50 dark:border-slate-800 relative group">
+                                      <motion.div 
+                                        initial={{ width: 0, opacity: 0 }}
+                                        animate={{ width: `${width}%`, opacity: 1 }}
+                                        className="absolute h-6 top-2 rounded-md shadow-sm cursor-pointer hover:brightness-110 active:scale-95 transition-all z-10 flex items-center justify-center overflow-hidden"
+                                        style={{ 
+                                          left: `${left}%`, 
+                                          backgroundColor: activity.color,
+                                          boxShadow: `0 4px 12px ${activity.color}33`
+                                        }}
+                                        onClick={() => {
+                                          setEditingPlanningActivity(activity);
+                                          setIsAddingPlanningActivity(true);
+                                        }}
+                                      >
+                                        <span className="text-[8px] font-black text-white px-2 truncate filter drop-shadow-md">
+                                          {activity.name}
+                                        </span>
+                                      </motion.div>
+                                    </div>
+                                  );
+                                })}
+                                {/* Vertical Grid Lines */}
+                                <div className="absolute inset-0 flex pointer-events-none">
+                                  {(() => {
+                                    const relevantActivities = planningActivities.filter(a => a.projectId === selectedPlanningProjectId);
+                                    if (relevantActivities.length === 0) return null;
+                                    const minYear = Math.min(...relevantActivities.map(a => a.startYear));
+                                    const maxYear = Math.max(...relevantActivities.map(a => a.endYear));
+                                    const numMonths = (maxYear - minYear + 1) * 12;
+                                    return Array.from({ length: numMonths }).map((_, i) => (
+                                      <div key={i} className="flex-1 border-r border-slate-100/30 dark:border-slate-800/20" />
+                                    ));
+                                  })()}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Table View */}
+                    <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 overflow-hidden shadow-sm">
+                      <div className="p-6 border-b border-slate-50 dark:border-slate-800 flex items-center justify-between">
+                        <h3 className="font-bold text-slate-800 dark:text-white">Gerenciar Atividades do Planejamento</h3>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="border-b border-slate-50 dark:border-slate-800">
+                              <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Atividade</th>
+                              <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Período</th>
+                              <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Cor</th>
+                              <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Ordem</th>
+                              <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-right">Ações</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                            {planningActivities.filter(a => a.projectId === selectedPlanningProjectId).length === 0 ? (
+                              <tr>
+                                <td colSpan={5} className="px-6 py-12 text-center text-slate-400 italic font-medium">Nenhuma atividade planejada.</td>
+                              </tr>
+                            ) : (
+                              planningActivities.filter(a => a.projectId === selectedPlanningProjectId).map((activity) => (
+                                <tr key={activity.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
+                                  <td className="px-6 py-4">
+                                    <div className="flex items-center gap-3">
+                                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: activity.color }} />
+                                      <span className="font-bold text-slate-800 dark:text-slate-200">{activity.name}</span>
+                                    </div>
+                                  </td>
+                                  <td className="px-6 py-4">
+                                    <span className="text-xs font-bold text-slate-600 dark:text-slate-400">
+                                      {MONTHS[activity.startMonth]} / {activity.startYear} - {MONTHS[activity.endMonth]} / {activity.endYear}
+                                    </span>
+                                  </td>
+                                  <td className="px-6 py-4">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-6 h-6 rounded border border-slate-200 dark:border-slate-700 shadow-sm" style={{ backgroundColor: activity.color }} />
+                                      <span className="text-[10px] font-mono text-slate-400">{activity.color}</span>
+                                    </div>
+                                  </td>
+                                  <td className="px-6 py-4">
+                                    <div className="flex items-center gap-1">
+                                      <button 
+                                        onClick={() => handleMovePlanningActivity(activity, 'up')}
+                                        className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400"
+                                      >
+                                        <ChevronUp size={14} />
+                                      </button>
+                                      <button 
+                                        onClick={() => handleMovePlanningActivity(activity, 'down')}
+                                        className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400"
+                                      >
+                                        <ChevronDown size={14} />
+                                      </button>
+                                    </div>
+                                  </td>
+                                  <td className="px-6 py-4 text-right">
+                                    <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <button 
+                                        onClick={() => {
+                                          setEditingPlanningActivity(activity);
+                                          setIsAddingPlanningActivity(true);
+                                        }}
+                                        className="p-1.5 text-slate-400 hover:text-axia-primary transition-colors"
+                                      >
+                                        <Pencil size={14} />
+                                      </button>
+                                      <button 
+                                        onClick={() => handleDeletePlanningActivity(activity.id)}
+                                        className="p-1.5 text-slate-400 hover:text-red-500 transition-colors"
+                                      >
+                                        <Trash2 size={14} />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            )}
+
             {activeTab === 'schedule' && (
               <motion.div 
                 key="schedule"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
-                className="space-y-6"
+                className="space-y-8"
               >
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div>
@@ -4016,12 +4697,12 @@ export default function App() {
                         </div>
                       </div>
                     </div>
-                    );
-                  })()}
-                </div>
-              )}
-            </motion.div>
-          )}
+                  )
+                })()}
+              </div>
+            )}
+          </motion.div>
+        )}
 
             {activeTab === 'measurements' && (
               <motion.div 
@@ -4899,6 +5580,154 @@ export default function App() {
                     <LogOut size={20} /> Sair da Conta
                   </button>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Planning Activity Modal */}
+        {isAddingPlanningActivity && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-xl rounded-[2.5rem] shadow-2xl border border-slate-100 dark:border-slate-800 overflow-hidden"
+            >
+              <div className="p-8">
+                <div className="flex items-center justify-between mb-8">
+                  <div>
+                    <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">
+                      {editingPlanningActivity ? 'Editar Planejamento' : 'Novo Planejamento'}
+                    </h3>
+                    <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wider">
+                      {editingPlanningActivity ? 'Atualizar atividade mensal' : 'Adicionar ao cronograma mensal'}
+                    </p>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setIsAddingPlanningActivity(false);
+                      setEditingPlanningActivity(null);
+                    }}
+                    className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-400 transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSavePlanningActivity} className="space-y-5">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Nome da Atividade</label>
+                    <input 
+                      type="text" 
+                      placeholder="Ex: Execução de Pavimento..."
+                      value={newPlanningActivity.name}
+                      onChange={(e) => setNewPlanningActivity({ ...newPlanningActivity, name: e.target.value })}
+                      required
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-medium text-slate-700 dark:text-slate-200"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Mês Início</label>
+                      <select 
+                        value={newPlanningActivity.startMonth}
+                        onChange={(e) => setNewPlanningActivity({ ...newPlanningActivity, startMonth: parseInt(e.target.value) })}
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
+                      >
+                        {MONTHS.map((m, i) => (
+                          <option key={i} value={i}>{m}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Ano Início</label>
+                      <input 
+                        type="number"
+                        value={newPlanningActivity.startYear}
+                        onChange={(e) => setNewPlanningActivity({ ...newPlanningActivity, startYear: parseInt(e.target.value) })}
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Mês Fim</label>
+                      <select 
+                        value={newPlanningActivity.endMonth}
+                        onChange={(e) => setNewPlanningActivity({ ...newPlanningActivity, endMonth: parseInt(e.target.value) })}
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
+                      >
+                        {MONTHS.map((m, i) => (
+                          <option key={i} value={i}>{m}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Ano Fim</label>
+                      <input 
+                        type="number"
+                        value={newPlanningActivity.endYear}
+                        onChange={(e) => setNewPlanningActivity({ ...newPlanningActivity, endYear: parseInt(e.target.value) })}
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Cor da Barra</label>
+                      <div className="flex items-center gap-3">
+                        <input 
+                          type="color" 
+                          value={newPlanningActivity.color}
+                          onChange={(e) => setNewPlanningActivity({ ...newPlanningActivity, color: e.target.value })}
+                          className="w-12 h-12 rounded-xl border-0 cursor-pointer overflow-hidden p-0"
+                        />
+                        <input 
+                          type="text" 
+                          value={newPlanningActivity.color}
+                          onChange={(e) => setNewPlanningActivity({ ...newPlanningActivity, color: e.target.value })}
+                          className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm font-mono"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Selecione uma Paleta</label>
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {['#0033FF', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#64748B'].map(c => (
+                          <button 
+                            key={c}
+                            type="button"
+                            onClick={() => setNewPlanningActivity({ ...newPlanningActivity, color: c })}
+                            className={`w-8 h-8 rounded-full border-2 transition-transform hover:scale-110 ${newPlanningActivity.color === c ? 'border-axia-primary' : 'border-transparent'}`}
+                            style={{ backgroundColor: c }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4 mt-10">
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setIsAddingPlanningActivity(false);
+                        setEditingPlanningActivity(null);
+                      }}
+                      className="flex-1 py-4 px-6 text-slate-500 font-bold rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
+                    >
+                      Cancelar
+                    </button>
+                    <button 
+                      type="submit"
+                      className="flex-[2] py-4 px-6 bg-axia-primary text-white font-bold rounded-2xl hover:shadow-xl hover:shadow-axia-primary/25 transition-all shadow-lg shadow-axia-primary/20"
+                    >
+                      {editingPlanningActivity ? 'Salvar Alterações' : 'Adicionar Atividade'}
+                    </button>
+                  </div>
+                </form>
               </div>
             </motion.div>
           </div>

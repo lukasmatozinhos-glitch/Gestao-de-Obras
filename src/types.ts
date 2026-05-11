@@ -48,6 +48,7 @@ export interface Project {
   executingCompany: string;
   image?: string;
   createdBy?: string;
+  creatorName?: string;
   photoReport?: PhotoReportItem[];
 }
 
@@ -122,4 +123,18 @@ export interface MeasurementBulletin {
   value: number;
   date: string;
   status: 'pending' | 'approved' | 'paid';
+}
+
+export interface PlanningActivity {
+  id: string;
+  projectId: string;
+  name: string;
+  startMonth: number;
+  startYear: number;
+  endMonth: number;
+  endYear: number;
+  color: string;
+  order: number;
+  category?: string;
+  description?: string;
 }

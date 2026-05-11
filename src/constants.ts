@@ -15,6 +15,7 @@ export const MOCK_PROJECTS: Project[] = [
     spent: 820000,
     location: 'Belo Horizonte, MG',
     executingCompany: 'Axia Energia Ltda',
+    creatorName: 'Eng. Ricardo Silva',
   },
   {
     id: '2',
@@ -30,6 +31,7 @@ export const MOCK_PROJECTS: Project[] = [
     spent: 450000,
     location: 'Curitiba, PR',
     executingCompany: 'ConstruTech Brasil',
+    creatorName: 'Eng. Ana Paula',
   },
   {
     id: '3',
@@ -45,6 +47,7 @@ export const MOCK_PROJECTS: Project[] = [
     spent: 280000,
     location: 'Uberlândia, MG',
     executingCompany: 'Manutenção Express',
+    creatorName: 'Carlos Mendonça',
   },
 ];
 
