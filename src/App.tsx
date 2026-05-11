@@ -629,17 +629,44 @@ export default function App() {
               
               // Handle bars specifically
               if (el.classList.contains('h-14')) {
-                el.style.height = '60px'; // Taller rows
+                el.style.height = '80px'; // Taller rows
+                el.style.display = 'flex';
+                el.style.alignItems = 'center';
               }
               if (el.classList.contains('h-8')) {
-                el.style.height = '40px'; // Taller bars
-                el.style.top = '10px';
+                el.style.height = '50px'; // Taller bars
+                el.style.top = '15px';
+                el.style.overflow = 'visible';
+                el.style.display = 'flex';
+                el.style.alignItems = 'center';
+                el.style.justifyContent = 'center';
                 
                 // Find the text inside the bar
                 const textSpan = el.querySelector('span');
                 if (textSpan) {
-                  textSpan.style.fontSize = '18px';
+                  textSpan.style.fontSize = '14px';
+                  textSpan.style.fontWeight = '900';
+                  textSpan.style.overflow = 'visible';
+                  textSpan.style.textOverflow = 'clip';
+                  textSpan.style.whiteSpace = 'nowrap';
+                  textSpan.style.width = 'auto';
+                  textSpan.style.maxWidth = 'none';
+                  textSpan.style.display = 'inline-block';
                   textSpan.style.padding = '0 15px';
+                }
+              }
+
+              // Adjust sidebar labels specifically to not truncate
+              if (el.classList.contains('w-[280px]')) {
+                el.style.width = '450px';
+              }
+              if (el.classList.contains('px-4') && el.querySelector('span.text-slate-600')) {
+                const nameSpan = el.querySelector('span.text-slate-600') as HTMLElement;
+                if (nameSpan) {
+                  nameSpan.style.fontSize = '14px';
+                  nameSpan.style.whiteSpace = 'normal';
+                  nameSpan.style.overflow = 'visible';
+                  el.style.paddingRight = '20px';
                 }
               }
 
@@ -740,17 +767,43 @@ export default function App() {
             
             // Handle bars specifically
             if (el.classList.contains('h-14')) {
-              el.style.height = '60px'; // Taller rows
+              el.style.height = '80px'; 
+              el.style.display = 'flex';
+              el.style.alignItems = 'center';
             }
             if (el.classList.contains('h-8')) {
-              el.style.height = '40px'; // Taller bars
-              el.style.top = '10px';
+              el.style.height = '50px'; 
+              el.style.top = '15px';
+              el.style.overflow = 'visible';
+              el.style.display = 'flex';
+              el.style.alignItems = 'center';
+              el.style.justifyContent = 'center';
               
-              // Find the text inside the bar
               const textSpan = el.querySelector('span');
               if (textSpan) {
-                textSpan.style.fontSize = '18px';
+                textSpan.style.fontSize = '14px';
+                textSpan.style.fontWeight = '900';
+                textSpan.style.overflow = 'visible';
+                textSpan.style.textOverflow = 'clip';
+                textSpan.style.whiteSpace = 'nowrap';
+                textSpan.style.width = 'auto';
+                textSpan.style.maxWidth = 'none';
+                textSpan.style.display = 'inline-block';
                 textSpan.style.padding = '0 15px';
+              }
+            }
+
+            // Adjust sidebar labels specifically to not truncate
+            if (el.classList.contains('w-[280px]')) {
+              el.style.width = '450px';
+            }
+            if (el.classList.contains('px-4') && el.querySelector('span.text-slate-600')) {
+              const nameSpan = el.querySelector('span.text-slate-600') as HTMLElement;
+              if (nameSpan) {
+                nameSpan.style.fontSize = '14px';
+                nameSpan.style.whiteSpace = 'normal';
+                nameSpan.style.overflow = 'visible';
+                el.style.paddingRight = '20px';
               }
             }
             
@@ -865,21 +918,48 @@ export default function App() {
                 }
               }
               
-              // Handle bars specifically
-              if (el.classList.contains('h-14')) {
-                el.style.height = '70px'; // Taller rows for export
+            // Handle bars specifically
+            if (el.classList.contains('h-14')) {
+              el.style.height = '80px'; // Even taller rows for export
+              el.style.display = 'flex';
+              el.style.alignItems = 'center';
+            }
+            if (el.classList.contains('h-8')) {
+              el.style.height = '50px'; // Taller bars
+              el.style.top = '15px';
+              el.style.overflow = 'visible'; // Allow text to show
+              el.style.display = 'flex';
+              el.style.alignItems = 'center';
+              el.style.justifyContent = 'center';
+              
+              // Handle the text span inside the bar
+              const textSpan = el.querySelector('span');
+              if (textSpan) {
+                textSpan.style.fontSize = '14px';
+                textSpan.style.fontWeight = '900';
+                textSpan.style.overflow = 'visible';
+                textSpan.style.textOverflow = 'clip';
+                textSpan.style.whiteSpace = 'nowrap';
+                textSpan.style.width = 'auto';
+                textSpan.style.maxWidth = 'none';
+                textSpan.style.display = 'inline-block';
+                textSpan.style.padding = '0 15px';
               }
-              if (el.classList.contains('h-8')) {
-                el.style.height = '46px'; // Taller bars for export
-                el.style.top = '12px';
-                
-                // Find the text inside the bar (if any) or dates nearby
-                const textSpan = el.querySelector('span');
-                if (textSpan) {
-                  textSpan.style.fontSize = '16px';
-                  textSpan.style.padding = '0 10px';
-                }
-              }
+            }
+            
+            // Adjust sidebar labels specifically to not truncate
+            if (el.classList.contains('w-[320px]')) {
+              el.style.width = '450px';
+            }
+            if (el.classList.contains('px-4') && el.querySelector('span.text-slate-600')) {
+               const nameSpan = el.querySelector('span.text-slate-600') as HTMLElement;
+               if (nameSpan) {
+                 nameSpan.style.fontSize = '14px';
+                 nameSpan.style.whiteSpace = 'normal';
+                 nameSpan.style.overflow = 'visible';
+                 el.style.paddingRight = '20px';
+               }
+            }
               
               ['color', 'backgroundColor', 'borderColor', 'outlineColor'].forEach(prop => {
                 const val = (style as any)[prop];
@@ -989,18 +1069,44 @@ export default function App() {
             
             // Handle bars specifically
             if (el.classList.contains('h-14')) {
-              el.style.height = '70px'; // Taller rows for export
+              el.style.height = '80px'; 
+              el.style.display = 'flex';
+              el.style.alignItems = 'center';
             }
             if (el.classList.contains('h-8')) {
-              el.style.height = '46px'; // Taller bars for export
-              el.style.top = '12px';
+              el.style.height = '50px'; 
+              el.style.top = '15px';
+              el.style.overflow = 'visible';
+              el.style.display = 'flex';
+              el.style.alignItems = 'center';
+              el.style.justifyContent = 'center';
               
-              // Find the text inside the bar (if any) or dates nearby
               const textSpan = el.querySelector('span');
               if (textSpan) {
-                textSpan.style.fontSize = '16px';
-                textSpan.style.padding = '0 10px';
+                textSpan.style.fontSize = '14px';
+                textSpan.style.fontWeight = '900';
+                textSpan.style.overflow = 'visible';
+                textSpan.style.textOverflow = 'clip';
+                textSpan.style.whiteSpace = 'nowrap';
+                textSpan.style.width = 'auto';
+                textSpan.style.maxWidth = 'none';
+                textSpan.style.display = 'inline-block';
+                textSpan.style.padding = '0 15px';
               }
+            }
+
+            // Adjust sidebar labels specifically to not truncate
+            if (el.classList.contains('w-[320px]')) {
+              el.style.width = '450px';
+            }
+            if (el.classList.contains('px-4') && el.querySelector('span.text-slate-600')) {
+               const nameSpan = el.querySelector('span.text-slate-600') as HTMLElement;
+               if (nameSpan) {
+                 nameSpan.style.fontSize = '14px';
+                 nameSpan.style.whiteSpace = 'normal';
+                 nameSpan.style.overflow = 'visible';
+                 el.style.paddingRight = '20px';
+               }
             }
             
             ['color', 'backgroundColor', 'borderColor', 'outlineColor'].forEach(prop => {
