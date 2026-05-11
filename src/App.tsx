@@ -628,10 +628,10 @@ export default function App() {
               }
               
               // Handle bars specifically
-              if (el.classList.contains('h-10')) {
+              if (el.classList.contains('h-14')) {
                 el.style.height = '60px'; // Taller rows
               }
-              if (el.classList.contains('h-6')) {
+              if (el.classList.contains('h-8')) {
                 el.style.height = '40px'; // Taller bars
                 el.style.top = '10px';
                 
@@ -739,10 +739,10 @@ export default function App() {
             }
             
             // Handle bars specifically
-            if (el.classList.contains('h-10')) {
+            if (el.classList.contains('h-14')) {
               el.style.height = '60px'; // Taller rows
             }
-            if (el.classList.contains('h-6')) {
+            if (el.classList.contains('h-8')) {
               el.style.height = '40px'; // Taller bars
               el.style.top = '10px';
               
@@ -856,6 +856,30 @@ export default function App() {
             elements.forEach((node) => {
               const el = node as HTMLElement;
               const style = window.getComputedStyle(el);
+
+              // Scale fonts for high-res export
+              if (el.tagName === 'SPAN' || el.tagName === 'DIV') {
+                const fontSize = parseFloat(style.fontSize);
+                if (fontSize < 12) {
+                  el.style.fontSize = '14px';
+                }
+              }
+              
+              // Handle bars specifically
+              if (el.classList.contains('h-14')) {
+                el.style.height = '70px'; // Taller rows for export
+              }
+              if (el.classList.contains('h-8')) {
+                el.style.height = '46px'; // Taller bars for export
+                el.style.top = '12px';
+                
+                // Find the text inside the bar (if any) or dates nearby
+                const textSpan = el.querySelector('span');
+                if (textSpan) {
+                  textSpan.style.fontSize = '16px';
+                  textSpan.style.padding = '0 10px';
+                }
+              }
               
               ['color', 'backgroundColor', 'borderColor', 'outlineColor'].forEach(prop => {
                 const val = (style as any)[prop];
@@ -954,6 +978,30 @@ export default function App() {
           elements.forEach((node) => {
             const el = node as HTMLElement;
             const style = window.getComputedStyle(el);
+
+            // Scale fonts for high-res export
+            if (el.tagName === 'SPAN' || el.tagName === 'DIV') {
+              const fontSize = parseFloat(style.fontSize);
+              if (fontSize < 12) {
+                el.style.fontSize = '14px';
+              }
+            }
+            
+            // Handle bars specifically
+            if (el.classList.contains('h-14')) {
+              el.style.height = '70px'; // Taller rows for export
+            }
+            if (el.classList.contains('h-8')) {
+              el.style.height = '46px'; // Taller bars for export
+              el.style.top = '12px';
+              
+              // Find the text inside the bar (if any) or dates nearby
+              const textSpan = el.querySelector('span');
+              if (textSpan) {
+                textSpan.style.fontSize = '16px';
+                textSpan.style.padding = '0 10px';
+              }
+            }
             
             ['color', 'backgroundColor', 'borderColor', 'outlineColor'].forEach(prop => {
               const val = (style as any)[prop];
@@ -4104,25 +4152,25 @@ export default function App() {
                       <div className="relative border border-slate-100 dark:border-slate-800 rounded-xl overflow-hidden bg-slate-50/30 dark:bg-slate-800/20 shadow-inner">
                         <div className="flex">
                           {/* Sidebar Labels */}
-                          <div className="w-[180px] flex-shrink-0 border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 z-20">
+                          <div className="w-[280px] flex-shrink-0 border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 z-20">
                             <div className="h-12 border-b border-slate-200 dark:border-slate-700 flex items-center px-4">
                               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Atividades</span>
                             </div>
                             {planningActivities.filter(a => a.projectId === selectedPlanningProjectId).map((activity) => (
                               <div 
                                 key={activity.id} 
-                                className="h-10 border-b border-slate-100 dark:border-slate-800 flex items-center px-4 group cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800"
+                                className="h-14 border-b border-slate-100 dark:border-slate-800 flex items-center px-4 group cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800"
                                 onClick={() => {
                                   setEditingPlanningActivity(activity);
                                   setIsAddingPlanningActivity(true);
                                 }}
                               >
-                                <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 truncate leading-tight group-hover:text-axia-primary transition-colors">
+                                <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 leading-tight group-hover:text-axia-primary transition-colors">
                                   {activity.name}
                                 </span>
                               </div>
                             ))}
-                            <div className="h-10 bg-slate-50 dark:bg-slate-800/50" />
+                            <div className="h-14 bg-slate-50 dark:bg-slate-800/50" />
                           </div>
 
                           {/* Chart Grid */}
@@ -4175,11 +4223,11 @@ export default function App() {
                                   const width = (duration / numMonths) * 100;
 
                                   return (
-                                    <div key={activity.id} className="h-10 border-b border-slate-50 dark:border-slate-800 relative group">
+                                    <div key={activity.id} className="h-14 border-b border-slate-50 dark:border-slate-800 relative group">
                                       <motion.div 
                                         initial={{ width: 0, opacity: 0 }}
                                         animate={{ width: `${width}%`, opacity: 1 }}
-                                        className="absolute h-6 top-2 rounded-md shadow-sm cursor-pointer hover:brightness-110 active:scale-95 transition-all z-10 flex items-center justify-center overflow-hidden"
+                                        className="absolute h-8 top-3 rounded-md shadow-sm cursor-pointer hover:brightness-110 active:scale-95 transition-all z-10 flex items-center justify-center overflow-hidden"
                                         style={{ 
                                           left: `${left}%`, 
                                           backgroundColor: activity.color,
@@ -4190,7 +4238,7 @@ export default function App() {
                                           setIsAddingPlanningActivity(true);
                                         }}
                                       >
-                                        <span className="text-[8px] font-black text-white px-2 truncate filter drop-shadow-md">
+                                        <span className="text-[10px] font-black text-white px-2 truncate filter drop-shadow-md">
                                           {activity.name}
                                         </span>
                                       </motion.div>
@@ -4545,19 +4593,19 @@ export default function App() {
                         <div className="relative border border-slate-100 dark:border-slate-800 rounded-xl overflow-hidden bg-slate-50/30 dark:bg-slate-800/20">
                           <div className="flex">
                             {/* Y-AXIS Labels */}
-                            <div className="w-[200px] flex-shrink-0 border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 z-20">
-                              <div className="h-10 border-b border-slate-200 dark:border-slate-700 flex items-center justify-center">
+                            <div className="w-[320px] flex-shrink-0 border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 z-20">
+                              <div className="h-12 border-b border-slate-200 dark:border-slate-700 flex items-center justify-center">
                                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Atividades</span>
                               </div>
                               {activities.filter(a => a.projectId === selectedScheduleProjectId).map((activity) => (
-                                <div key={activity.id} className="h-12 border-b border-slate-100 dark:border-slate-800 flex items-center justify-end px-4">
-                                  <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 text-right leading-tight">
+                                <div key={activity.id} className="h-14 border-b border-slate-100 dark:border-slate-800 flex items-center justify-end px-4">
+                                  <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 text-right leading-[1.1]">
                                     {activity.name}
                                   </span>
                                 </div>
                               ))}
                               {/* Bottom Axis Label */}
-                              <div className="h-10 border-t border-slate-200 dark:border-slate-700 flex items-center justify-center bg-slate-50 dark:bg-slate-800/50">
+                              <div className="h-12 border-t border-slate-200 dark:border-slate-700 flex items-center justify-center bg-slate-50 dark:bg-slate-800/50">
                                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Data</span>
                               </div>
                             </div>
@@ -4565,7 +4613,7 @@ export default function App() {
                             {/* TIMELINE AREA */}
                             <div className="flex-grow overflow-hidden relative bg-white dark:bg-slate-900">
                               {/* X-AXIS Grid (Months/Weeks) */}
-                              <div className="h-10 border-b border-slate-200 dark:border-slate-700 flex relative overflow-hidden">
+                              <div className="h-12 border-b border-slate-200 dark:border-slate-700 flex relative overflow-hidden">
                                 {(() => {
                                   const today = new Date();
                                   const windowStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
@@ -4586,7 +4634,7 @@ export default function App() {
                               <div className="relative">
                                 {/* Horizontal Grid Lines */}
                                 {activities.filter(a => a.projectId === selectedScheduleProjectId).map((activity) => (
-                                  <div key={`grid-${activity.id}`} className="h-12 border-b border-slate-50 dark:border-slate-800 w-full" />
+                                  <div key={`grid-${activity.id}`} className="h-14 border-b border-slate-50 dark:border-slate-800 w-full" />
                                 ))}
 
                                 {/* Vertical "Hoje" Line - DYNAMIC POSITION */}
@@ -4633,15 +4681,15 @@ export default function App() {
                                     const delayedWidth = (delayedDuration / windowDuration) * 100;
  
                                      return (
-                                      <div key={`bar-group-${activity.id}`} className="h-12 relative px-0 pointer-events-none">
+                                      <div key={`bar-group-${activity.id}`} className="h-14 relative px-0 pointer-events-none">
                                         {/* Main Bar */}
                                         <motion.div 
                                           initial={{ width: 0, opacity: 0 }}
                                           animate={{ width: `${Math.max(width, 2)}%`, opacity: 1 }}
-                                          className={`absolute h-6 top-3 shadow-sm flex items-center justify-between px-2 cursor-pointer pointer-events-auto transition-all hover:brightness-110 z-20 ${
-                                            activity.status === 'completed' ? 'bg-green-200 border border-green-300 rounded' : 
-                                            activity.status === 'scheduled' ? 'bg-purple-200 border border-purple-300 rounded' :
-                                            'bg-blue-200 border border-blue-300 rounded-l ' + (!hasDelay ? 'rounded-r' : '')
+                                          className={`absolute h-8 top-3 shadow-sm flex items-center justify-center px-3 cursor-pointer pointer-events-auto transition-all hover:brightness-110 z-20 ${
+                                            activity.status === 'completed' ? 'bg-green-500 text-white rounded' : 
+                                            activity.status === 'scheduled' ? 'bg-purple-500 text-white rounded' :
+                                            'bg-axia-primary text-white rounded-l ' + (!hasDelay ? 'rounded-r' : '')
                                           }`}
                                           style={{ left: `${left}%` }}
                                           onClick={() => {
@@ -4649,14 +4697,10 @@ export default function App() {
                                             setIsAddingActivity(true);
                                           }}
                                         >
-                                          <span className="absolute -left-16 text-[8px] font-bold text-slate-500 dark:text-slate-400">
-                                            {formatInputDate(activity.startDate)}
+                                          <span className="text-[10px] font-black uppercase truncate drop-shadow-sm filter">
+                                            {activity.name}
                                           </span>
-                                          {!hasDelay && (
-                                            <span className="absolute -right-16 text-[8px] font-bold text-slate-500 dark:text-slate-400">
-                                              {formatInputDate(activity.endDate)}
-                                            </span>
-                                          )}
+                                          {activity.status === 'completed' && <CheckCircle2 size={12} className="shrink-0 ml-1" />}
                                         </motion.div>
  
                                         {/* Delayed (Hatched) Segment */}
@@ -4664,7 +4708,7 @@ export default function App() {
                                           <motion.div
                                             initial={{ width: 0, opacity: 0 }}
                                             animate={{ width: `${delayedWidth}%`, opacity: 1 }}
-                                            className="absolute h-6 top-3 bg-hatched-red border-t border-b border-r border-red-600 rounded-r shadow-sm z-10 cursor-pointer pointer-events-auto"
+                                            className="absolute h-8 top-3 bg-hatched-red border-t border-b border-r border-red-600 rounded-r shadow-sm z-10 cursor-pointer pointer-events-auto"
                                             style={{ left: `${left + width}%` }}
                                             onClick={() => {
                                               setEditingActivity(activity);
