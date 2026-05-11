@@ -570,26 +570,23 @@ export default function App() {
     doc.setTextColor(0, 0, 0);
     doc.setFontSize(10);
     doc.text(`Cliente: ${project.client}`, 15, 50);
-    doc.text(`Período Contratual: ${project.startDate} a ${project.endDate}`, 15, 55);
-    doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, 15, 60);
+    doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, 15, 55);
 
     // Table
     const tableData = relevantActivities
       .sort((a, b) => (a.order || 0) - (b.order || 0))
       .map(a => [
         a.name.toUpperCase(),
-        a.category || '-',
-        `${monthNames[a.startMonth]}/${a.startYear} - ${monthNames[a.endMonth]}/${a.endYear}`,
-        a.description || '-'
+        `${monthNames[a.startMonth]}/${a.startYear} - ${monthNames[a.endMonth]}/${a.endYear}`
       ]);
 
     autoTable(doc, {
       startY: 70,
-      head: [['ATIVIDADE', 'CATEGORIA', 'PERÍODO PREVISTO', 'OBSERVAÇÕES']],
+      head: [['ATIVIDADE', 'PERÍODO PREVISTO']],
       body: tableData,
       theme: 'striped',
       headStyles: { fillColor: [0, 51, 255], textColor: [255, 255, 255] },
-      styles: { fontSize: 8 }
+      styles: { fontSize: 10 }
     });
 
     // Add Planning Visual if Ref exists
@@ -860,8 +857,7 @@ export default function App() {
     doc.setTextColor(0, 0, 0);
     doc.setFontSize(10);
     doc.text(`Cliente: ${project.client}`, 15, 50);
-    doc.text(`Período: ${project.startDate} a ${project.endDate}`, 15, 55);
-    doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, 15, 60);
+    doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, 15, 55);
 
     // Table (Without Progress column as requested)
     const tableData = projectActivities.map(a => [
