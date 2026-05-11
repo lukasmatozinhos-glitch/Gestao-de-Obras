@@ -215,6 +215,18 @@ export default function App() {
   const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
   const [currentUser, setCurrentUser] = useState<UserProfile>(DEFAULT_USER);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 1024);
+      if (window.innerWidth < 1024) setIsSidebarOpen(false);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
   const [reports, setReports] = useState<WeeklyReport[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
@@ -265,6 +277,7 @@ export default function App() {
     date: new Date().toISOString().split('T')[0]
   });
   const [registeredUsers, setRegisteredUsers] = useState<UserProfile[]>([]);
+  const [isUpdatingUser, setIsUpdatingUser] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [selectedProject, setSelectedProject] = useState('');
   const [selectedDate, setSelectedDate] = useState('');
@@ -296,7 +309,7 @@ export default function App() {
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [editingMeasurement, setEditingMeasurement] = useState<Measurement | null>(null);
   const [projectDetailTab, setProjectDetailTab] = useState<'details' | 'attachments' | 'history' | 'photos' | 'addendums'>('details');
-  const [settingsTab, setSettingsTab] = useState<'general' | 'appearance' | 'security'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'appearance' | 'security' | 'users'>('general');
   const [notification, setNotification] = useState<string | null>(null);
   const [imageEditingProjectId, setImageEditingProjectId] = useState<string | null>(null);
   const [showProfile, setShowProfile] = useState(false);
@@ -1339,6 +1352,16 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'planningActivities');
     });
 
+    const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+      setRegisteredUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as UserProfile)));
+    }, (error) => {
+      if (error.message.includes('Quota exceeded')) {
+        localStorage.setItem('firestore_quota_extrapolated', 'true');
+        setQuotaExceeded(true);
+      }
+      handleFirestoreError(error, OperationType.LIST, 'users');
+    });
+
     return () => {
       unsubProjects();
       unsubReports();
@@ -1350,6 +1373,7 @@ export default function App() {
       unsubAddendums();
       unsubActivities();
       unsubPlanning();
+      unsubUsers();
     };
   }, [isLoggedIn, isAuthReady]);
 
@@ -2393,6 +2417,18 @@ export default function App() {
     }
   };
 
+  const handleUpdateUserAccess = async (userId: string, newAccessLevel: string) => {
+    setIsUpdatingUser(userId);
+    try {
+      await updateDoc(doc(db, 'users', userId), { accessLevel: newAccessLevel });
+      showNotification('Nível de acesso atualizado com sucesso!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `users/${userId}`);
+    } finally {
+      setIsUpdatingUser(null);
+    }
+  };
+
   const handleAddStatusUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newStatusUpdate.projectId || !newStatusUpdate.message) {
@@ -2643,81 +2679,102 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Overlay for mobile sidebar */}
+      <AnimatePresence>
+        {isMobile && isSidebarOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setIsSidebarOpen(false)}
+            className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[25] lg:hidden"
+          />
+        )}
+      </AnimatePresence>
+
       {/* Sidebar */}
       <motion.aside 
         initial={false}
-        animate={{ width: isSidebarOpen ? 260 : 80 }}
-        className="bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col z-30 transition-colors duration-300"
+        animate={{ 
+          width: isSidebarOpen ? 260 : (isMobile ? 0 : 80),
+          x: isMobile && !isSidebarOpen ? -260 : 0
+        }}
+        className={`bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col z-30 transition-colors duration-300 fixed lg:relative h-full`}
       >
-        <div className="p-6 flex flex-col items-start gap-0">
-          {isSidebarOpen ? (
+        <div className="p-6 flex items-center justify-between">
+          {isSidebarOpen || isMobile ? (
             <div className="overflow-hidden whitespace-nowrap">
               <h1 className="text-2xl font-display font-black tracking-tighter text-axia-primary">AXIA</h1>
               <p className="text-[10px] uppercase tracking-[0.2em] text-axia-secondary font-bold -mt-1">ENERGIA</p>
             </div>
           ) : (
-            <div className="w-10 h-10 bg-axia-primary rounded-lg flex items-center justify-center flex-shrink-0 shadow-lg shadow-axia-primary/20">
+            <div className="w-10 h-10 bg-axia-primary rounded-lg flex items-center justify-center flex-shrink-0 shadow-lg shadow-axia-primary/20 mx-auto">
               <span className="text-white font-black text-xl">A</span>
             </div>
           )}
+          {isMobile && isSidebarOpen && (
+            <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden text-slate-400">
+              <X size={20} />
+            </button>
+          )}
         </div>
 
-        <nav className="flex-1 px-4 py-4 space-y-2">
+        <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto">
           <NavItem 
             icon={<LayoutDashboard size={20} />} 
             label="Dashboard" 
             active={activeTab === 'dashboard'} 
-            onClick={() => setActiveTab('dashboard')}
-            collapsed={!isSidebarOpen}
+            onClick={() => { setActiveTab('dashboard'); if(isMobile) setIsSidebarOpen(false); }}
+            collapsed={!isSidebarOpen && !isMobile}
           />
           <NavItem 
             icon={<HardHat size={20} />} 
             label="Projetos" 
             active={activeTab === 'projects'} 
-            onClick={() => setActiveTab('projects')}
-            collapsed={!isSidebarOpen}
+            onClick={() => { setActiveTab('projects'); if(isMobile) setIsSidebarOpen(false); }}
+            collapsed={!isSidebarOpen && !isMobile}
           />
           <NavItem 
             icon={<Calendar size={20} />} 
             label="Cronograma" 
             active={activeTab === 'schedule'} 
-            onClick={() => setActiveTab('schedule')}
-            collapsed={!isSidebarOpen}
+            onClick={() => { setActiveTab('schedule'); if(isMobile) setIsSidebarOpen(false); }}
+            collapsed={!isSidebarOpen && !isMobile}
           />
           <NavItem 
             icon={<TrendingUp size={20} />} 
             label="Planejamento" 
             active={activeTab === 'planning'} 
-            onClick={() => setActiveTab('planning')}
-            collapsed={!isSidebarOpen}
+            onClick={() => { setActiveTab('planning'); if(isMobile) setIsSidebarOpen(false); }}
+            collapsed={!isSidebarOpen && !isMobile}
           />
           <NavItem 
             icon={<Receipt size={20} />} 
             label="Medições" 
             active={activeTab === 'measurements'} 
-            onClick={() => setActiveTab('measurements')}
-            collapsed={!isSidebarOpen}
+            onClick={() => { setActiveTab('measurements'); if(isMobile) setIsSidebarOpen(false); }}
+            collapsed={!isSidebarOpen && !isMobile}
           />
           <NavItem 
             icon={<ClipboardList size={20} />} 
             label="Boletim de Medição" 
             active={activeTab === 'bulletin'} 
-            onClick={() => setActiveTab('bulletin')}
-            collapsed={!isSidebarOpen}
+            onClick={() => { setActiveTab('bulletin'); if(isMobile) setIsSidebarOpen(false); }}
+            collapsed={!isSidebarOpen && !isMobile}
           />
           <NavItem 
             icon={<BarChart3 size={20} />} 
             label="Relatórios" 
             active={activeTab === 'reports'} 
-            onClick={() => setActiveTab('reports')}
-            collapsed={!isSidebarOpen}
+            onClick={() => { setActiveTab('reports'); if(isMobile) setIsSidebarOpen(false); }}
+            collapsed={!isSidebarOpen && !isMobile}
           />
           <NavItem 
             icon={<History size={20} />} 
             label="Atualizações" 
             active={activeTab === 'updates'} 
-            onClick={() => setActiveTab('updates')}
-            collapsed={!isSidebarOpen}
+            onClick={() => { setActiveTab('updates'); if(isMobile) setIsSidebarOpen(false); }}
+            collapsed={!isSidebarOpen && !isMobile}
           />
         </nav>
 
@@ -2726,8 +2783,8 @@ export default function App() {
             icon={<Settings size={20} />} 
             label="Configurações" 
             active={activeTab === 'settings'} 
-            onClick={() => setActiveTab('settings')}
-            collapsed={!isSidebarOpen}
+            onClick={() => { setActiveTab('settings'); if(isMobile) setIsSidebarOpen(false); }}
+            collapsed={!isSidebarOpen && !isMobile}
           />
         </div>
       </motion.aside>
@@ -2735,7 +2792,7 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-950 transition-colors duration-300">
         {/* Header */}
-        <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-8 z-20 transition-colors duration-300">
+        <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 lg:px-8 z-20 transition-colors duration-300 sticky top-0">
           <div className="flex items-center gap-4">
             <button 
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -2743,6 +2800,10 @@ export default function App() {
             >
               <Menu size={20} />
             </button>
+            <div className="lg:hidden flex items-center gap-1.5">
+               <h1 className="text-xl font-display font-black tracking-tighter text-axia-primary">AXIA</h1>
+               <div className="w-1.5 h-1.5 bg-axia-secondary rounded-full animate-pulse" />
+            </div>
             <div className="relative hidden md:block">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
               <input 
@@ -2753,7 +2814,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 lg:gap-4">
             <button 
               onClick={() => setIsDarkMode(!isDarkMode)}
               className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-500 dark:text-slate-400 transition-colors"
@@ -2785,7 +2846,7 @@ export default function App() {
         </header>
 
         {/* Content Area */}
-        <div className="flex-1 overflow-y-auto p-8">
+        <div className="flex-1 overflow-y-auto px-4 py-6 lg:p-8 pb-24 lg:pb-8">
           <AnimatePresence mode="wait">
             {activeTab === 'dashboard' && (
               <motion.div 
@@ -3118,38 +3179,38 @@ export default function App() {
 
                       <div className="p-8 grid grid-cols-1 lg:grid-cols-3 gap-12">
                         <div className="lg:col-span-2 space-y-8">
-                          <div className="flex border-b border-slate-100 mb-6">
+                          <div className="flex border-b border-slate-100 dark:border-slate-800 mb-6 overflow-x-auto no-scrollbar scroll-smooth">
                             <button 
                               onClick={() => setProjectDetailTab('details')}
-                              className={`px-6 py-3 font-bold text-sm transition-all relative ${projectDetailTab === 'details' ? 'text-axia-primary' : 'text-slate-400 hover:text-slate-600'}`}
+                              className={`px-4 lg:px-6 py-3 font-bold text-xs lg:text-sm transition-all relative whitespace-nowrap ${projectDetailTab === 'details' ? 'text-axia-primary' : 'text-slate-400 hover:text-slate-600'}`}
                             >
-                              Detalhes do Projeto
+                              Detalhes
                               {projectDetailTab === 'details' && <motion.div layoutId="projectTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-axia-primary" />}
                             </button>
                             <button 
                               onClick={() => setProjectDetailTab('attachments')}
-                              className={`px-6 py-3 font-bold text-sm transition-all relative ${projectDetailTab === 'attachments' ? 'text-axia-primary' : 'text-slate-400 hover:text-slate-600'}`}
+                              className={`px-4 lg:px-6 py-3 font-bold text-xs lg:text-sm transition-all relative whitespace-nowrap ${projectDetailTab === 'attachments' ? 'text-axia-primary' : 'text-slate-400 hover:text-slate-600'}`}
                             >
-                              Anexos
+                              Documentos
                               {projectDetailTab === 'attachments' && <motion.div layoutId="projectTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-axia-primary" />}
                             </button>
                             <button 
                               onClick={() => setProjectDetailTab('history')}
-                              className={`px-6 py-3 font-bold text-sm transition-all relative ${projectDetailTab === 'history' ? 'text-axia-primary' : 'text-slate-400 hover:text-slate-600'}`}
+                              className={`px-4 lg:px-6 py-3 font-bold text-xs lg:text-sm transition-all relative whitespace-nowrap ${projectDetailTab === 'history' ? 'text-axia-primary' : 'text-slate-400 hover:text-slate-600'}`}
                             >
                               Histórico
                               {projectDetailTab === 'history' && <motion.div layoutId="projectTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-axia-primary" />}
                             </button>
                             <button 
                               onClick={() => setProjectDetailTab('photos')}
-                              className={`px-6 py-3 font-bold text-sm transition-all relative ${projectDetailTab === 'photos' ? 'text-axia-primary' : 'text-slate-400 hover:text-slate-600'}`}
+                              className={`px-4 lg:px-6 py-3 font-bold text-xs lg:text-sm transition-all relative whitespace-nowrap ${projectDetailTab === 'photos' ? 'text-axia-primary' : 'text-slate-400 hover:text-slate-600'}`}
                             >
                               Relatório Fotográfico
                               {projectDetailTab === 'photos' && <motion.div layoutId="projectTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-axia-primary" />}
                             </button>
                             <button 
                               onClick={() => setProjectDetailTab('addendums')}
-                              className={`px-6 py-3 font-bold text-sm transition-all relative ${projectDetailTab === 'addendums' ? 'text-axia-primary' : 'text-slate-400 hover:text-slate-600'}`}
+                              className={`px-4 lg:px-6 py-3 font-bold text-xs lg:text-sm transition-all relative whitespace-nowrap ${projectDetailTab === 'addendums' ? 'text-axia-primary' : 'text-slate-400 hover:text-slate-600'}`}
                             >
                               Aditivos
                               {projectDetailTab === 'addendums' && <motion.div layoutId="projectTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-axia-primary" />}
@@ -3165,35 +3226,31 @@ export default function App() {
                                 <p className="text-slate-600 leading-relaxed">{viewingProject.description}</p>
                               </section>
 
-                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
-                                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
-                                  <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Cliente</p>
-                                  <p className="font-bold text-slate-900 text-base break-words">{viewingProject.client}</p>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 lg:gap-6">
+                                <div className="p-4 lg:p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm transition-all hover:bg-slate-100/50">
+                                  <p className="text-[10px] lg:text-[11px] font-bold text-slate-400 uppercase mb-1 tracking-wider text-center lg:text-left">Cliente</p>
+                                  <p className="font-bold text-slate-900 text-sm lg:text-base break-words text-center lg:text-left">{viewingProject.client}</p>
                                 </div>
-                                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
-                                  <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Contrato</p>
-                                  <p className="font-bold text-slate-900 text-base break-all">{viewingProject.contractNumber}</p>
+                                <div className="p-4 lg:p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm transition-all hover:bg-slate-100/50">
+                                  <p className="text-[10px] lg:text-[11px] font-bold text-slate-400 uppercase mb-1 tracking-wider text-center lg:text-left">Contrato</p>
+                                  <p className="font-bold text-slate-900 text-sm lg:text-base break-all text-center lg:text-left">{viewingProject.contractNumber}</p>
                                 </div>
-                                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
-                                  <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Incluído por</p>
-                                  <p className="font-bold text-slate-900 text-base truncate">{viewingProject.creatorName || 'Sistema'}</p>
+                                <div className="p-4 lg:p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm transition-all hover:bg-slate-100/50">
+                                  <p className="text-[10px] lg:text-[11px] font-bold text-slate-400 uppercase mb-1 tracking-wider text-center lg:text-left">Responsável</p>
+                                  <p className="font-bold text-slate-900 text-sm lg:text-base truncate text-center lg:text-left">{viewingProject.creatorName || 'Sistema'}</p>
                                 </div>
-                                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
-                                  <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Início</p>
-                                  <p className="font-bold text-slate-900 text-base">{viewingProject.startDate}</p>
+                                <div className="p-4 lg:p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm transition-all hover:bg-slate-100/50">
+                                  <p className="text-[10px] lg:text-[11px] font-bold text-slate-400 uppercase mb-1 tracking-wider text-center lg:text-left">Duração</p>
+                                  <p className="font-bold text-slate-900 text-sm lg:text-base text-center lg:text-left">{viewingProject.startDate} ➔ {viewingProject.endDate}</p>
                                 </div>
-                                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
-                                  <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Término</p>
-                                  <p className="font-bold text-slate-900 text-base">{viewingProject.endDate}</p>
+                                <div className="p-4 lg:p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm col-span-1 sm:col-span-2 transition-all hover:bg-slate-100/50">
+                                  <p className="text-[10px] lg:text-[11px] font-bold text-slate-400 uppercase mb-1 tracking-wider">Empresa Executora</p>
+                                  <p className="font-bold text-slate-900 text-sm lg:text-base break-words">{viewingProject.executingCompany}</p>
                                 </div>
-                                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm col-span-2">
-                                  <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Empresa Executora</p>
-                                  <p className="font-bold text-slate-900 text-base break-words">{viewingProject.executingCompany}</p>
-                                </div>
-                                <div className="p-5 bg-axia-primary/10 rounded-2xl border border-axia-primary/20 shadow-sm col-span-2">
-                                  <p className="text-[11px] font-bold text-axia-primary uppercase mb-1.5 tracking-wider">Localidade</p>
-                                  <p className="font-bold text-slate-900 text-base flex items-center gap-2">
-                                    <MapPin size={18} className="text-axia-primary" />
+                                <div className="p-4 lg:p-5 bg-axia-primary/5 rounded-2xl border border-axia-primary/10 shadow-sm col-span-1 sm:col-span-2 transition-all hover:bg-axia-primary/10">
+                                  <p className="text-[10px] lg:text-[11px] font-bold text-axia-primary uppercase mb-1 tracking-wider">Localidade</p>
+                                  <p className="font-bold text-slate-900 text-sm lg:text-base flex items-center gap-2">
+                                    <MapPin size={16} className="text-axia-primary" />
                                     {viewingProject.location}
                                   </p>
                                 </div>
@@ -3834,17 +3891,17 @@ export default function App() {
                   </div>
                 ) : (
                   <>
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                       <div>
-                        <h2 className="text-3xl font-display font-bold text-slate-900">Gestão de Obras</h2>
-                        <p className="text-slate-500">Visualize e gerencie todos os contratos e execuções da Axia Energia.</p>
+                        <h2 className="text-2xl lg:text-3xl font-display font-bold text-slate-900 dark:text-white">Gestão de Obras</h2>
+                        <p className="text-sm lg:text-base text-slate-500 dark:text-slate-400">Visualize e gerencie todos os contratos e execuções da Axia Energia.</p>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex flex-wrap items-center gap-2 lg:gap-3">
                         <button 
                           onClick={generateGeneralReport}
-                          className="bg-axia-secondary text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2 hover:bg-axia-secondary/90 transition-colors shadow-lg shadow-axia-secondary/20"
+                          className="flex-1 lg:flex-none bg-axia-secondary text-white px-4 py-2 rounded-xl font-semibold flex items-center justify-center gap-2 hover:bg-axia-secondary/90 transition-colors shadow-lg shadow-axia-secondary/20 text-sm"
                         >
-                          <FileDown size={20} />
+                          <FileDown size={18} />
                           Emitir Relatório
                         </button>
                         <button 
@@ -3866,9 +3923,9 @@ export default function App() {
                             }
                             setShowAddProject(!showAddProject);
                           }}
-                          className="bg-axia-primary text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2 hover:bg-axia-primary/90 transition-colors shadow-lg shadow-axia-primary/20"
+                          className="flex-1 lg:flex-none bg-axia-primary text-white px-4 py-2 rounded-xl font-semibold flex items-center justify-center gap-2 hover:bg-axia-primary/90 transition-colors shadow-lg shadow-axia-primary/20 text-sm"
                         >
-                          {showAddProject ? <X size={20} /> : <Plus size={20} />}
+                          {showAddProject ? <X size={18} /> : <Plus size={18} />}
                           {showAddProject ? 'Cancelar' : 'Nova Obra'}
                         </button>
                       </div>
@@ -4030,15 +4087,15 @@ export default function App() {
                       </motion.div>
                     )}
 
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-4 lg:gap-8">
                       {projects.map((project) => (
                         <motion.div 
                           layout
                           key={project.id}
-                          className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col md:flex-row"
+                          className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col sm:flex-row h-full"
                         >
                           <div 
-                            className="md:w-1/3 bg-slate-100 dark:bg-slate-800 relative min-h-[200px] cursor-pointer group/img overflow-hidden"
+                            className="w-full sm:w-1/3 bg-slate-100 dark:bg-slate-800 relative h-48 sm:h-auto min-h-[160px] cursor-pointer group/img overflow-hidden shrink-0"
                             onClick={() => handleImageClick(project.id)}
                           >
                             <img 
@@ -4051,76 +4108,71 @@ export default function App() {
                               <Camera size={32} />
                               <span className="text-[10px] font-bold uppercase tracking-widest">Alterar Foto</span>
                             </div>
-                            <div className="absolute top-4 left-4">
-                              <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border shadow-sm ${getStatusColor(project.status)}`}>
+                            <div className="absolute top-3 left-3">
+                              <span className={`px-2 py-0.5 rounded-lg text-[9px] font-bold uppercase tracking-wider border shadow-sm ${getStatusColor(project.status)}`}>
                                 {getStatusLabel(project.status)}
                               </span>
                             </div>
                           </div>
-                          <div className="md:w-2/3 p-6 flex flex-col">
-                            <div className="flex justify-between items-start mb-2">
-                              <div>
-                                <p className="text-[10px] font-bold text-axia-secondary uppercase tracking-widest mb-1 break-all">Contrato: {project.contractNumber}</p>
-                                <h3 className="text-xl font-bold text-slate-900 dark:text-white leading-tight">{project.name}</h3>
+                          <div className="w-full sm:w-2/3 p-4 lg:p-6 flex flex-col min-w-0">
+                            <div className="flex flex-col xl:flex-row justify-between items-start gap-2 mb-3">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[9px] font-bold text-axia-secondary uppercase tracking-widest mb-0.5 break-all">Contrato: {project.contractNumber}</p>
+                                <h3 className="text-lg lg:text-xl font-bold text-slate-900 dark:text-white leading-tight truncate">{project.name}</h3>
                               </div>
-                              <div className="text-right">
-                                <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">Valor do Contrato</p>
-                                <p className="text-lg font-bold text-axia-accent">
+                              <div className="xl:text-right shrink-0">
+                                <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase">Valor</p>
+                                <p className="text-base lg:text-lg font-bold text-axia-accent">
                                   {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget)}
                                 </p>
                               </div>
                             </div>
 
-                            <p className="text-sm text-slate-600 dark:text-slate-400 mb-6 line-clamp-2">{project.description}</p>
+                            <p className="text-xs lg:text-sm text-slate-600 dark:text-slate-400 mb-4 line-clamp-2 min-h-[2.5rem]">{project.description}</p>
 
-                            <div className="grid grid-cols-2 gap-4 mb-6">
-                              <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                                <MapPin size={14} className="text-axia-primary" />
-                                <span>{project.location}</span>
+                            <div className="grid grid-cols-2 gap-2 lg:gap-4 mb-4">
+                              <div className="flex items-center gap-1.5 text-[10px] lg:text-xs text-slate-500 dark:text-slate-400">
+                                <MapPin size={12} className="text-axia-primary shrink-0" />
+                                <span className="truncate">{project.location}</span>
                               </div>
-                              <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                                <Calendar size={14} className="text-axia-primary" />
-                                <span>{project.startDate} até {project.endDate}</span>
+                              <div className="flex items-center gap-1.5 text-[10px] lg:text-xs text-slate-500 dark:text-slate-400">
+                                <Calendar size={12} className="text-axia-primary shrink-0" />
+                                <span className="truncate">{project.startDate} a {project.endDate}</span>
                               </div>
-                              <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                                <User size={14} className="text-axia-primary" />
-                                <span className="font-bold shrink-0">Incluído por:</span>
+                              <div className="flex items-center gap-1.5 text-[10px] lg:text-xs text-slate-500 dark:text-slate-400 col-span-2">
+                                <User size={12} className="text-axia-primary shrink-0" />
+                                <span className="font-bold shrink-0">Resp.:</span>
                                 <span className="truncate">{project.creatorName || 'Sistema'}</span>
-                              </div>
-                              <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 col-span-2">
-                                <Briefcase size={14} className="text-axia-primary shrink-0" />
-                                <span className="font-bold shrink-0">Executora:</span>
-                                <span className="break-words">{project.executingCompany}</span>
                               </div>
                             </div>
 
-                            <div className="mb-6 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-800">
-                              <div className="flex items-center justify-between mb-2">
-                                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Progresso Financeiro</span>
-                                <span className="text-[10px] font-bold text-axia-accent">
-                                  {Math.round((project.spent / project.budget) * 100)}% Medido
+                            <div className="mb-4 p-2.5 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-800">
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase">Financ.</span>
+                                <span className="text-[9px] font-bold text-axia-accent">
+                                  {Math.round((project.spent / project.budget) * 100)}%
                                 </span>
                               </div>
-                              <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden mb-2">
+                              <div className="h-1 w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden mb-1.5">
                                 <motion.div 
                                   initial={{ width: 0 }}
                                   animate={{ width: `${(project.spent / project.budget) * 100}%` }}
                                   className="h-full bg-axia-accent rounded-full"
                                 />
                               </div>
-                              <div className="flex justify-between text-[10px] font-bold">
-                                <div className="text-slate-400 dark:text-slate-500">Saldo: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget - project.spent)}</div>
-                                <div className="text-axia-primary">Medido: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.spent)}</div>
+                              <div className="flex justify-between text-[9px] font-bold gap-2">
+                                <div className="text-slate-400 dark:text-slate-500 truncate italic">Saldo: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget - project.spent)}</div>
+                                <div className="text-axia-primary shrink-0">Medido: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.spent)}</div>
                               </div>
                             </div>
 
-                            <div className="mt-auto pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                              <div className="flex-1 mr-8">
+                            <div className="mt-auto pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-4">
+                              <div className="flex-1">
                                 <div className="flex items-center justify-between mb-1">
-                                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Progresso da Obra</span>
-                                  <span className="text-xs font-bold text-axia-primary">{project.progress}%</span>
+                                  <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase">Progresso Fis.</span>
+                                  <span className="text-[10px] font-bold text-axia-primary">{project.progress}%</span>
                                 </div>
-                                <div className="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                                   <motion.div 
                                     initial={{ width: 0 }}
                                     animate={{ width: `${project.progress}%` }}
@@ -4128,27 +4180,27 @@ export default function App() {
                                   />
                                 </div>
                               </div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-1 xl:gap-2">
                                 <button 
                                   onClick={() => startEditing(project)}
-                                  className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-400 hover:text-axia-primary transition-colors"
+                                  className="p-1.5 lg:p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-400 hover:text-axia-primary transition-colors"
                                   title="Editar Obra"
                                 >
-                                  <Pencil size={18} />
+                                  <Pencil size={16} />
                                 </button>
                                 <button 
                                   onClick={() => setProjectToDelete(project)}
-                                  className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-400 hover:text-red-500 transition-colors"
+                                  className="p-1.5 lg:p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-400 hover:text-red-500 transition-colors"
                                   title="Excluir Obra"
                                 >
-                                  <Trash2 size={18} />
+                                  <Trash2 size={16} />
                                 </button>
                                 <button 
                                   onClick={() => setViewingProject(project)}
-                                  className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-axia-primary transition-colors"
+                                  className="p-1.5 lg:p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-axia-primary transition-colors"
                                   title="Ver Detalhes"
                                 >
-                                  <ChevronRight size={20} />
+                                  <ChevronRight size={18} />
                                 </button>
                               </div>
                             </div>
@@ -5504,6 +5556,14 @@ export default function App() {
                       >
                         Segurança
                       </button>
+                      {(currentUser.accessLevel === 'Gestor' || currentUser.accessLevel === 'Administrador de Sistema') && (
+                        <button 
+                          onClick={() => setSettingsTab('users')}
+                          className={`w-full text-left px-4 py-2 rounded-lg font-bold transition-all ${settingsTab === 'users' ? 'bg-axia-primary/10 text-axia-primary' : 'text-slate-500 hover:bg-slate-100'}`}
+                        >
+                          Usuários
+                        </button>
+                      )}
                     </nav>
                   </div>
 
@@ -5610,6 +5670,42 @@ export default function App() {
                             </div>
                           </section>
                         )}
+
+                        {settingsTab === 'users' && (currentUser.accessLevel === 'Gestor' || currentUser.accessLevel === 'Administrador de Sistema') && (
+                          <section className="space-y-6">
+                            <h3 className="text-lg font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-800 pb-2">Controle de Usuários</h3>
+                            <div className="space-y-4">
+                              {registeredUsers.length === 0 ? (
+                                <p className="text-center text-slate-500 py-8">Carregando usuários...</p>
+                              ) : (
+                                registeredUsers.map((user) => (
+                                  <div key={user.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800 gap-4">
+                                    <div className="flex items-center gap-3">
+                                      <img src={user.avatar || 'https://picsum.photos/seed/user/200/200'} alt={user.name} className="w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700" referrerPolicy="no-referrer" />
+                                      <div>
+                                        <p className="font-bold text-slate-700 dark:text-slate-200 text-sm">{user.name}</p>
+                                        <p className="text-xs text-slate-500">{user.email}</p>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <select
+                                        value={user.accessLevel}
+                                        onChange={(e) => handleUpdateUserAccess(user.id, e.target.value)}
+                                        disabled={isUpdatingUser === user.id || user.id === currentUser.id}
+                                        className="w-full sm:w-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all cursor-pointer disabled:opacity-50"
+                                      >
+                                        <option value="Usuário Padrão">Usuário Padrão</option>
+                                        <option value="Colaborador">Colaborador</option>
+                                        <option value="Gestor">Gestor</option>
+                                        <option value="Administrador de Sistema">Administrador de Sistema</option>
+                                      </select>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </section>
+                        )}
                       </div>
 
                       <div className="pt-4">
@@ -5627,6 +5723,47 @@ export default function App() {
           </AnimatePresence>
         </div>
       </main>
+
+      {/* Mobile Bottom Navigation */}
+      {isMobile && (
+        <div className="fixed bottom-0 left-0 right-0 h-16 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center justify-around z-50 px-2 lg:hidden shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
+          <button 
+            onClick={() => setActiveTab('dashboard')}
+            className={`flex flex-col items-center gap-1 flex-1 transition-all ${activeTab === 'dashboard' ? 'text-axia-primary scale-110' : 'text-slate-400'}`}
+          >
+            <LayoutDashboard size={20} />
+            <span className="text-[10px] font-bold">Início</span>
+          </button>
+          <button 
+            onClick={() => setActiveTab('projects')}
+            className={`flex flex-col items-center gap-1 flex-1 transition-all ${activeTab === 'projects' ? 'text-axia-primary scale-110' : 'text-slate-400'}`}
+          >
+            <HardHat size={20} />
+            <span className="text-[10px] font-bold">Obras</span>
+          </button>
+          <button 
+            onClick={() => setActiveTab('schedule')}
+            className={`flex flex-col items-center gap-1 flex-1 transition-all ${activeTab === 'schedule' ? 'text-axia-primary scale-110' : 'text-slate-400'}`}
+          >
+            <Calendar size={20} />
+            <span className="text-[10px] font-bold">Agenda</span>
+          </button>
+          <button 
+            onClick={() => setActiveTab('measurements')}
+            className={`flex flex-col items-center gap-1 flex-1 transition-all ${activeTab === 'measurements' ? 'text-axia-primary scale-110' : 'text-slate-400'}`}
+          >
+            <Receipt size={20} />
+            <span className="text-[10px] font-bold">Medir</span>
+          </button>
+          <button 
+            onClick={() => setShowProfile(true)}
+            className="flex flex-col items-center gap-1 flex-1 text-slate-400"
+          >
+            <User size={20} />
+            <span className="text-[10px] font-bold">Perfil</span>
+          </button>
+        </div>
+      )}
 
       {/* User Profile Modal */}
       <AnimatePresence>
