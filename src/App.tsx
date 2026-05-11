@@ -1599,8 +1599,8 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file || !viewingProject) return;
 
-    if (file.size > 10 * 1024 * 1024) {
-      showNotification('O arquivo é muito grande. Limite de 10MB.');
+    if (file.size > 0.8 * 1024 * 1024) {
+      showNotification('O arquivo é muito grande. O limite para anexos diretos no banco de dados é de 800KB para garantir o funcionamento.');
       return;
     }
 
@@ -3364,18 +3364,30 @@ export default function App() {
                                             {attachment.size && <span>• {attachment.size}</span>}
                                           </div>
                                         </div>
-                                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <div className="flex items-center gap-2 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
+                                          {attachment.type === 'image' && (
+                                            <button 
+                                              onClick={() => setSelectedPhotoUrl(attachment.url)}
+                                              className="p-2 bg-slate-50 dark:bg-slate-800 rounded-lg text-axia-primary hover:bg-axia-primary/10 transition-colors"
+                                              title="Visualizar"
+                                            >
+                                              <Eye size={18} />
+                                            </button>
+                                          )}
                                           <a 
                                             href={attachment.url} 
+                                            download={attachment.name}
                                             target="_blank" 
                                             rel="noreferrer"
-                                            className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-axia-primary transition-colors"
+                                            className="p-2 bg-slate-50 dark:bg-slate-800 rounded-lg text-slate-400 hover:text-axia-primary transition-colors flex items-center justify-center"
+                                            title="Download"
                                           >
                                             <Download size={18} />
                                           </a>
                                           <button 
                                             onClick={() => handleDeleteAttachment(attachment.id)}
-                                            className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-500 transition-colors"
+                                            className="p-2 bg-slate-50 dark:bg-slate-800 rounded-lg text-slate-400 hover:text-red-500 transition-colors"
+                                            title="Excluir"
                                           >
                                             <Trash2 size={18} />
                                           </button>
