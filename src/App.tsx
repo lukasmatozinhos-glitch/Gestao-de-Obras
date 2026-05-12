@@ -47,7 +47,8 @@ import { GripVertical, LayoutDashboard,
   Moon,
   ChevronUp,
   ChevronDown,
-  DownloadCloud
+  DownloadCloud,
+  EyeOff
 } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
 import { jsPDF } from 'jspdf';
@@ -217,6 +218,7 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [showHiddenActivities, setShowHiddenActivities] = useState(false);
 
   useEffect(() => {
     const checkMobile = () => {
@@ -478,6 +480,17 @@ export default function App() {
     }
   };
 
+  const handleToggleActivityVisibility = async (activity: ScheduleActivity) => {
+    try {
+      await updateDoc(doc(db, 'scheduleActivities', activity.id), { 
+        isHidden: !activity.isHidden 
+      });
+      showNotification(activity.isHidden ? 'Atividade agora está visível.' : 'Atividade ocultada.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `scheduleActivities/${activity.id}`);
+    }
+  };
+
   const handleMoveActivity = async (activity: ScheduleActivity, direction: 'up' | 'down') => {
     const projectActivities = activities
       .filter(a => a.projectId === activity.projectId)
@@ -505,9 +518,9 @@ export default function App() {
 
   const currentProjectPlanningActivities = useMemo(() => {
     return planningActivities
-      .filter(a => a.projectId === selectedPlanningProjectId)
+      .filter(a => a.projectId === selectedPlanningProjectId && (showHiddenActivities || !a.isHidden))
       .sort((a, b) => (a.order || 0) - (b.order || 0));
-  }, [planningActivities, selectedPlanningProjectId]);
+  }, [planningActivities, selectedPlanningProjectId, showHiddenActivities]);
 
   const planningTimelineData = useMemo(() => {
     if (!selectedPlanningProjectId) return null;
@@ -516,38 +529,111 @@ export default function App() {
     const today = new Date();
     const todayAbs = today.getFullYear() * 12 + today.getMonth();
 
-    let startAbs: number;
+    // Start anchor should be consistent: either the first activity or today, whichever is earlier.
+    // We add 1 month padding at the start for visual breathing room.
+    let baseMinAbs = todayAbs;
+    if (relevantActivities.length > 0) {
+      baseMinAbs = Math.min(todayAbs, ...relevantActivities.map(a => a.startYear * 12 + a.startMonth));
+    }
+    
+    const startAbs = baseMinAbs - 1;
     let endAbs: number;
 
-    if (relevantActivities.length > 0) {
-      const actMinAbs = Math.min(...relevantActivities.map(a => a.startYear * 12 + a.startMonth));
-      const actMaxAbs = Math.max(...relevantActivities.map(a => a.endYear * 12 + a.endMonth));
-
-      if (planningViewMonths === 'auto') {
-        // Add 1 month padding on each side for better visual balance
-        startAbs = Math.min(todayAbs, actMinAbs) - 1;
-        endAbs = Math.max(todayAbs, actMaxAbs) + 1;
-      } else {
-        startAbs = Math.min(todayAbs, actMinAbs);
-        endAbs = startAbs + (planningViewMonths as number) - 1;
+    if (planningViewMonths === 'auto') {
+      let baseMaxAbs = todayAbs;
+      if (relevantActivities.length > 0) {
+        baseMaxAbs = Math.max(todayAbs, ...relevantActivities.map(a => a.endYear * 12 + a.endMonth));
       }
+      endAbs = baseMaxAbs + 1; // 1 month padding at the end
     } else {
-      startAbs = todayAbs - 1;
-      endAbs = todayAbs + (planningViewMonths === 'auto' ? 10 : (planningViewMonths as number) - 1);
+      endAbs = startAbs + (planningViewMonths as number) - 1;
     }
 
     const numMonths = endAbs - startAbs + 1;
     const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
     const exactTodayAbs = todayAbs + (today.getDate() - 1) / daysInMonth;
     
+    // Group months by year for the header
+    const years: { year: number; monthsCount: number }[] = [];
+    for (let i = 0; i < numMonths; i++) {
+      const absMonth = startAbs + i;
+      const year = Math.floor(absMonth / 12);
+      const lastYear = years[years.length - 1];
+      if (lastYear && lastYear.year === year) {
+        lastYear.monthsCount++;
+      } else {
+        years.push({ year, monthsCount: 1 });
+      }
+    }
+    
     return {
       startAbs,
       endAbs,
       numMonths,
       todayAbs,
-      exactTodayAbs
+      exactTodayAbs,
+      years
     };
   }, [selectedPlanningProjectId, planningActivities, planningViewMonths]);
+
+  const scheduleTimelineData = useMemo(() => {
+    if (!selectedScheduleProjectId) return null;
+    
+    // Filter activities based on visibility settings
+    const relevantActivities = activities.filter(a => 
+      a.projectId === selectedScheduleProjectId && 
+      (showHiddenActivities || !a.isHidden)
+    );
+    const today = new Date();
+    const todayAbs = today.getFullYear() * 12 + today.getMonth();
+
+    let baseMinAbs = todayAbs;
+    if (relevantActivities.length > 0) {
+      const startDates = relevantActivities.map(a => {
+        const d = new Date(a.startDate);
+        return d.getFullYear() * 12 + d.getMonth();
+      });
+      baseMinAbs = Math.min(todayAbs, ...startDates);
+    }
+    
+    const startAbs = baseMinAbs - 1;
+    let baseMaxAbs = todayAbs;
+    if (relevantActivities.length > 0) {
+      const endDates = relevantActivities.map(a => {
+        const d = new Date(a.endDate);
+        return d.getFullYear() * 12 + d.getMonth();
+      });
+      baseMaxAbs = Math.max(todayAbs, ...endDates);
+    }
+    const endAbs = baseMaxAbs + 1;
+
+    const numMonths = endAbs - startAbs + 1;
+    const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+    const exactTodayAbs = todayAbs + (today.getDate() - 1) / daysInMonth;
+    
+    const years: { year: number; monthsCount: number }[] = [];
+    for (let i = 0; i < numMonths; i++) {
+      const absMonth = startAbs + i;
+      const year = Math.floor(absMonth / 12);
+      const lastYear = years[years.length - 1];
+      if (lastYear && lastYear.year === year) {
+        lastYear.monthsCount++;
+      } else {
+        years.push({ year, monthsCount: 1 });
+      }
+    }
+    
+    return {
+      startAbs,
+      endAbs,
+      numMonths,
+      todayAbs,
+      exactTodayAbs,
+      years
+    };
+  }, [selectedScheduleProjectId, activities]);
+
+  const MONTH_WIDTH = 100;
 
   const handleReorderPlanningActivities = async (newOrder: PlanningActivity[]) => {
     // We only update the order field in Firestore. 
@@ -596,6 +682,17 @@ export default function App() {
       showNotification('Atividade removida do planejamento.');
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `planningActivities/${id}`);
+    }
+  };
+
+  const handleTogglePlanningActivityVisibility = async (activity: PlanningActivity) => {
+    try {
+      await updateDoc(doc(db, 'planningActivities', activity.id), { 
+        isHidden: !activity.isHidden 
+      });
+      showNotification(activity.isHidden ? 'Atividade agora está visível.' : 'Atividade ocultada.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `planningActivities/${activity.id}`);
     }
   };
 
@@ -667,16 +764,19 @@ export default function App() {
     // Add Planning Visual if Ref exists
     if (planningRef.current) {
       try {
+        const numMonths = planningTimelineData?.numMonths || 12;
+        const exportWidth = 450 + (numMonths * MONTH_WIDTH) + 120;
+
         const canvas = await html2canvas(planningRef.current, {
           scale: 3,
           useCORS: true,
           logging: false,
-          width: 2800,
+          width: exportWidth,
           backgroundColor: '#FFFFFF',
           onclone: (clonedDoc) => {
             const chartDiv = clonedDoc.getElementById('planning-chart');
             if (chartDiv) {
-              chartDiv.style.width = '2800px'; 
+              chartDiv.style.width = `${exportWidth}px`; 
               chartDiv.style.padding = '80px 60px';
               chartDiv.style.backgroundColor = '#ffffff';
               chartDiv.style.borderRadius = '0';
@@ -688,35 +788,32 @@ export default function App() {
             }
 
             const elements = clonedDoc.querySelectorAll('*');
-            const isModernColor = (val: string) => val && (val.includes('oklch') || val.includes('oklab'));
+            const isModernColor = (val: any) => val && typeof val === 'string' && (val.includes('oklch') || val.includes('oklab'));
             
             elements.forEach((node) => {
               const el = node as HTMLElement;
               const style = window.getComputedStyle(el);
 
               // Scale fonts for high-res export
-              if (el.tagName === 'SPAN' || el.tagName === 'DIV') {
+              if (el.tagName === 'SPAN' || el.tagName === 'DIV' || el.tagName === 'P') {
                 const fontSize = parseFloat(style.fontSize);
-                if (fontSize < 12) {
-                  el.style.fontSize = '14px';
-                }
+                if (fontSize < 12) el.style.fontSize = '14px';
               }
               
               // Handle bars specifically
               if (el.classList.contains('h-14')) {
-                el.style.height = '80px'; // Taller rows
+                el.style.height = '80px'; 
                 el.style.display = 'flex';
                 el.style.alignItems = 'center';
               }
               if (el.classList.contains('h-8')) {
-                el.style.height = '50px'; // Taller bars
+                el.style.height = '50px'; 
                 el.style.top = '15px';
                 el.style.overflow = 'visible';
                 el.style.display = 'flex';
                 el.style.alignItems = 'center';
                 el.style.justifyContent = 'center';
                 
-                // Find the text inside the bar
                 const textSpan = el.querySelector('span');
                 if (textSpan) {
                   textSpan.style.fontSize = '14px';
@@ -731,38 +828,32 @@ export default function App() {
                 }
               }
 
-              // Adjust sidebar labels specifically to not truncate
               if (el.classList.contains('w-[280px]')) {
                 el.style.width = '450px';
               }
-              if (el.classList.contains('px-4') && el.querySelector('span.text-slate-600')) {
-                const nameSpan = el.querySelector('span.text-slate-600') as HTMLElement;
-                if (nameSpan) {
-                  nameSpan.style.fontSize = '14px';
-                  nameSpan.style.whiteSpace = 'normal';
-                  nameSpan.style.overflow = 'visible';
-                  el.style.paddingRight = '20px';
-                }
-              }
 
-              ['color', 'backgroundColor', 'borderColor', 'outlineColor'].forEach(prop => {
-                const val = (style as any)[prop];
-                if (val && isModernColor(val)) {
-                  if (prop === 'color') {
-                    if (el.classList.contains('text-white')) el.style.color = '#ffffff';
-                    else if (el.classList.contains('text-axia-primary')) el.style.color = '#0033FF';
-                    else el.style.color = '#1e293b';
-                  } else if (prop === 'backgroundColor') {
-                    if (el.classList.contains('bg-axia-primary')) el.style.backgroundColor = '#0033FF';
-                    else if (el.classList.contains('bg-white')) el.style.backgroundColor = '#ffffff';
-                    else el.style.backgroundColor = 'transparent';
+              // Thoroughly strip modern colors
+              for (let k = 0; k < style.length; k++) {
+                const prop = style[k];
+                const value = style.getPropertyValue(prop);
+                if (isModernColor(value)) {
+                  if (prop.includes('color')) {
+                    if (prop === 'color') {
+                      el.style.color = el.classList.contains('text-white') ? '#ffffff' : '#1e293b';
+                    } else if (prop === 'background-color') {
+                      el.style.backgroundColor = el.classList.contains('bg-white') ? '#ffffff' : 'transparent';
+                    } else {
+                      el.style.setProperty(prop, 'transparent', 'important');
+                    }
+                  } else if (prop === 'box-shadow') {
+                    el.style.boxShadow = 'none';
+                  } else if (prop.includes('outline') || prop.includes('border')) {
+                    el.style.setProperty(prop, 'none', 'important');
                   } else {
-                    (el.style as any)[prop] = '#e2e8f0';
+                    el.style.setProperty(prop, 'none', 'important');
                   }
                 }
-              });
-
-              if (style.boxShadow && isModernColor(style.boxShadow)) el.style.boxShadow = 'none';
+              }
 
               if (el.classList.contains('bg-hatched-red')) {
                 el.style.backgroundImage = 'repeating-linear-gradient(45deg, #ef4444, #ef4444 10px, #dc2626 10px, #dc2626 20px)';
@@ -813,31 +904,36 @@ export default function App() {
     if (!element) return;
 
     try {
+      const numMonths = planningTimelineData?.numMonths || 12;
+      const exportWidth = 450 + (numMonths * MONTH_WIDTH) + 120;
+
       const canvas = await html2canvas(element, { 
         scale: 3,
         useCORS: true,
+        width: exportWidth,
         backgroundColor: '#FFFFFF',
         onclone: (clonedDoc) => {
           const chartDiv = clonedDoc.getElementById('planning-chart');
           if (chartDiv) {
-            chartDiv.style.width = '2400px';
+            chartDiv.style.width = `${exportWidth}px`;
             chartDiv.style.padding = '80px 60px';
             chartDiv.style.backgroundColor = '#ffffff';
+            chartDiv.style.borderRadius = '0';
+            chartDiv.style.border = 'none';
+            chartDiv.style.overflow = 'visible';
           }
 
           const elements = clonedDoc.querySelectorAll('*');
-          const isModernColor = (val: string) => val && (val.includes('oklch') || val.includes('oklab'));
+          const isModernColor = (val: any) => val && typeof val === 'string' && (val.includes('oklch') || val.includes('oklab'));
           
           elements.forEach((node) => {
             const el = node as HTMLElement;
             const style = window.getComputedStyle(el);
 
             // Scale fonts for high-res export
-            if (el.tagName === 'SPAN' || el.tagName === 'DIV') {
+            if (el.tagName === 'SPAN' || el.tagName === 'DIV' || el.tagName === 'P') {
               const fontSize = parseFloat(style.fontSize);
-              if (fontSize < 12) {
-                el.style.fontSize = '14px';
-              }
+              if (fontSize < 12) el.style.fontSize = '14px';
             }
             
             // Handle bars specifically
@@ -868,38 +964,37 @@ export default function App() {
               }
             }
 
-            // Adjust sidebar labels specifically to not truncate
             if (el.classList.contains('w-[280px]')) {
               el.style.width = '450px';
             }
-            if (el.classList.contains('px-4') && el.querySelector('span.text-slate-600')) {
-              const nameSpan = el.querySelector('span.text-slate-600') as HTMLElement;
-              if (nameSpan) {
-                nameSpan.style.fontSize = '14px';
-                nameSpan.style.whiteSpace = 'normal';
-                nameSpan.style.overflow = 'visible';
-                el.style.paddingRight = '20px';
-              }
-            }
-            
-            ['color', 'backgroundColor', 'borderColor', 'outlineColor'].forEach(prop => {
-              const val = (style as any)[prop];
-              if (val && isModernColor(val)) {
-                if (prop === 'color') {
-                  if (el.classList.contains('text-white')) el.style.color = '#ffffff';
-                  else if (el.classList.contains('text-axia-primary')) el.style.color = '#0033FF';
-                  else el.style.color = '#1e293b';
-                } else if (prop === 'backgroundColor') {
-                  if (el.classList.contains('bg-axia-primary')) el.style.backgroundColor = '#0033FF';
-                  else if (el.classList.contains('bg-white')) el.style.backgroundColor = '#ffffff';
-                  else el.style.backgroundColor = 'transparent';
+
+            // Thoroughly strip modern colors
+            for (let k = 0; k < style.length; k++) {
+              const prop = style[k];
+              const value = style.getPropertyValue(prop);
+              if (isModernColor(value)) {
+                if (prop.includes('color')) {
+                  if (prop === 'color') {
+                    el.style.color = el.classList.contains('text-white') ? '#ffffff' : '#1e293b';
+                  } else if (prop === 'background-color') {
+                    el.style.backgroundColor = el.classList.contains('bg-white') ? '#ffffff' : 'transparent';
+                  } else {
+                    el.style.setProperty(prop, 'transparent', 'important');
+                  }
+                } else if (prop === 'box-shadow') {
+                  el.style.boxShadow = 'none';
+                } else if (prop.includes('outline') || prop.includes('border')) {
+                  el.style.setProperty(prop, 'none', 'important');
                 } else {
-                  (el.style as any)[prop] = '#e2e8f0';
+                  el.style.setProperty(prop, 'none', 'important');
                 }
               }
-            });
+            }
 
-            if (style.boxShadow && isModernColor(style.boxShadow)) el.style.boxShadow = 'none';
+            if (el.classList.contains('bg-hatched-red')) {
+              el.style.backgroundImage = 'repeating-linear-gradient(45deg, #ef4444, #ef4444 10px, #dc2626 10px, #dc2626 20px)';
+              el.style.backgroundColor = '#ef4444';
+            }
           });
         }
       });
@@ -918,7 +1013,7 @@ export default function App() {
     const project = projects.find(p => p.id === projectId);
     if (!project) return;
 
-    const projectActivities = activities.filter(a => a.projectId === projectId);
+    const projectActivities = activities.filter(a => a.projectId === projectId && !a.isHidden);
     const doc = new jsPDF('p', 'mm', 'a4');
     
     // Header
@@ -960,101 +1055,87 @@ export default function App() {
     // Add Timeline Visual if Ref exists
     if (timelineRef.current) {
       try {
+        const numMonths = 12; // Execution is fixed to roughly 1 year or window
+        const exportWidth = 450 + (numMonths * MONTH_WIDTH) + 120;
+
         const canvas = await html2canvas(timelineRef.current, {
           scale: 3,
           useCORS: true,
           logging: false,
-          width: 2800,
+          width: exportWidth,
           backgroundColor: '#FFFFFF',
           onclone: (clonedDoc) => {
             const container = clonedDoc.getElementById('timeline-container');
-            const originalElement = timelineRef.current;
-            
-            if (container && originalElement) {
-              container.style.width = '2800px'; 
-              container.style.padding = '60px 40px';
+            if (container) {
+              container.style.width = `${exportWidth}px`; 
+              container.style.padding = '80px 60px';
               container.style.backgroundColor = '#ffffff';
+              container.style.borderRadius = '0';
+              container.style.border = 'none';
               container.style.overflow = 'visible';
             }
 
             const elements = clonedDoc.querySelectorAll('*');
-            const isModernColor = (val: string) => val && (val.includes('oklch') || val.includes('oklab'));
+            const isModernColor = (val: any) => val && typeof val === 'string' && (val.includes('oklch') || val.includes('oklab'));
             
             elements.forEach((node) => {
               const el = node as HTMLElement;
               const style = window.getComputedStyle(el);
 
-              // Scale fonts for high-res export
-              if (el.tagName === 'SPAN' || el.tagName === 'DIV') {
+              // Scale fonts
+              if (el.tagName === 'SPAN' || el.tagName === 'DIV' || el.tagName === 'P') {
                 const fontSize = parseFloat(style.fontSize);
-                if (fontSize < 12) {
-                  el.style.fontSize = '14px';
+                if (fontSize < 12) el.style.fontSize = '14px';
+              }
+              
+              if (el.classList.contains('h-14')) {
+                el.style.height = '80px'; 
+                el.style.display = 'flex';
+                el.style.alignItems = 'center';
+              }
+              if (el.classList.contains('h-8')) {
+                el.style.height = '50px'; 
+                el.style.top = '15px';
+                el.style.overflow = 'visible';
+                el.style.display = 'flex';
+                el.style.alignItems = 'center';
+                el.style.justifyContent = 'center';
+                
+                const textSpan = el.querySelector('span');
+                if (textSpan) {
+                  textSpan.style.fontSize = '14px';
+                  textSpan.style.fontWeight = '900';
+                  textSpan.style.whiteSpace = 'nowrap';
+                  textSpan.style.padding = '0 15px';
                 }
               }
-              
-            // Handle bars specifically
-            if (el.classList.contains('h-14')) {
-              el.style.height = '80px'; // Even taller rows for export
-              el.style.display = 'flex';
-              el.style.alignItems = 'center';
-            }
-            if (el.classList.contains('h-8')) {
-              el.style.height = '50px'; // Taller bars
-              el.style.top = '15px';
-              el.style.overflow = 'visible'; // Allow text to show
-              el.style.display = 'flex';
-              el.style.alignItems = 'center';
-              el.style.justifyContent = 'center';
-              
-              // Handle the text span inside the bar
-              const textSpan = el.querySelector('span');
-              if (textSpan) {
-                textSpan.style.fontSize = '14px';
-                textSpan.style.fontWeight = '900';
-                textSpan.style.overflow = 'visible';
-                textSpan.style.textOverflow = 'clip';
-                textSpan.style.whiteSpace = 'nowrap';
-                textSpan.style.width = 'auto';
-                textSpan.style.maxWidth = 'none';
-                textSpan.style.display = 'inline-block';
-                textSpan.style.padding = '0 15px';
+
+              if (el.classList.contains('w-[320px]')) {
+                el.style.width = '450px';
               }
-            }
-            
-            // Adjust sidebar labels specifically to not truncate
-            if (el.classList.contains('w-[320px]')) {
-              el.style.width = '450px';
-            }
-            if (el.classList.contains('px-4') && el.querySelector('span.text-slate-600')) {
-               const nameSpan = el.querySelector('span.text-slate-600') as HTMLElement;
-               if (nameSpan) {
-                 nameSpan.style.fontSize = '14px';
-                 nameSpan.style.whiteSpace = 'normal';
-                 nameSpan.style.overflow = 'visible';
-                 el.style.paddingRight = '20px';
-               }
-            }
-              
-              ['color', 'backgroundColor', 'borderColor', 'outlineColor'].forEach(prop => {
-                const val = (style as any)[prop];
-                if (val && isModernColor(val)) {
-                  if (prop === 'color') {
-                    if (el.classList.contains('text-white')) el.style.color = '#ffffff';
-                    else if (el.classList.contains('text-axia-primary')) el.style.color = '#0033FF';
-                    else el.style.color = '#1e293b';
-                  } else if (prop === 'backgroundColor') {
-                    if (el.classList.contains('bg-axia-primary')) el.style.backgroundColor = '#0033FF';
-                    else if (el.classList.contains('bg-green-500')) el.style.backgroundColor = '#22c55e';
-                    else if (el.classList.contains('bg-red-500')) el.style.backgroundColor = '#ef4444';
-                    else if (el.classList.contains('bg-white')) el.style.backgroundColor = '#ffffff';
-                    else el.style.backgroundColor = 'transparent';
+
+              // Strip modern colors
+              for (let k = 0; k < style.length; k++) {
+                const prop = style[k];
+                const value = style.getPropertyValue(prop);
+                if (isModernColor(value)) {
+                  if (prop.includes('color')) {
+                    if (prop === 'color') {
+                      el.style.color = el.classList.contains('text-white') ? '#ffffff' : '#1e293b';
+                    } else if (prop === 'background-color') {
+                      el.style.backgroundColor = el.classList.contains('bg-white') ? '#ffffff' : 'transparent';
+                    } else {
+                      el.style.setProperty(prop, 'transparent', 'important');
+                    }
+                  } else if (prop === 'box-shadow') {
+                    el.style.boxShadow = 'none';
+                  } else if (prop.includes('outline') || prop.includes('border')) {
+                    el.style.setProperty(prop, 'none', 'important');
                   } else {
-                    (el.style as any)[prop] = '#e2e8f0';
+                    el.style.setProperty(prop, 'none', 'important');
                   }
                 }
-              });
-
-              if (style.boxShadow && isModernColor(style.boxShadow)) el.style.boxShadow = 'none';
+              }
 
               if (el.classList.contains('bg-hatched-red')) {
                 el.style.backgroundImage = 'repeating-linear-gradient(45deg, #ef4444, #ef4444 10px, #dc2626 10px, #dc2626 20px)';
@@ -1109,39 +1190,39 @@ export default function App() {
     if (!project || !timelineRef.current) return;
 
     try {
+      const numMonths = 12;
+      const exportWidth = 450 + (numMonths * MONTH_WIDTH) + 120;
+
       const canvas = await html2canvas(timelineRef.current, {
         scale: 3,
         useCORS: true,
         logging: false,
-        width: 2800,
+        width: exportWidth,
         backgroundColor: '#FFFFFF',
         onclone: (clonedDoc) => {
           const container = clonedDoc.getElementById('timeline-container');
-          const originalElement = timelineRef.current;
-          
-          if (container && originalElement) {
-            container.style.width = '2800px'; 
-            container.style.padding = '60px 40px';
+          if (container) {
+            container.style.width = `${exportWidth}px`; 
+            container.style.padding = '80px 60px';
             container.style.backgroundColor = '#ffffff';
+            container.style.borderRadius = '0';
+            container.style.border = 'none';
             container.style.overflow = 'visible';
           }
 
           const elements = clonedDoc.querySelectorAll('*');
-          const isModernColor = (val: string) => val && (val.includes('oklch') || val.includes('oklab'));
+          const isModernColor = (val: any) => val && typeof val === 'string' && (val.includes('oklch') || val.includes('oklab'));
           
           elements.forEach((node) => {
             const el = node as HTMLElement;
             const style = window.getComputedStyle(el);
 
-            // Scale fonts for high-res export
-            if (el.tagName === 'SPAN' || el.tagName === 'DIV') {
+            // Scale fonts
+            if (el.tagName === 'SPAN' || el.tagName === 'DIV' || el.tagName === 'P') {
               const fontSize = parseFloat(style.fontSize);
-              if (fontSize < 12) {
-                el.style.fontSize = '14px';
-              }
+              if (fontSize < 12) el.style.fontSize = '14px';
             }
             
-            // Handle bars specifically
             if (el.classList.contains('h-14')) {
               el.style.height = '80px'; 
               el.style.display = 'flex';
@@ -1159,50 +1240,37 @@ export default function App() {
               if (textSpan) {
                 textSpan.style.fontSize = '14px';
                 textSpan.style.fontWeight = '900';
-                textSpan.style.overflow = 'visible';
-                textSpan.style.textOverflow = 'clip';
                 textSpan.style.whiteSpace = 'nowrap';
-                textSpan.style.width = 'auto';
-                textSpan.style.maxWidth = 'none';
-                textSpan.style.display = 'inline-block';
                 textSpan.style.padding = '0 15px';
               }
             }
 
-            // Adjust sidebar labels specifically to not truncate
             if (el.classList.contains('w-[320px]')) {
               el.style.width = '450px';
             }
-            if (el.classList.contains('px-4') && el.querySelector('span.text-slate-600')) {
-               const nameSpan = el.querySelector('span.text-slate-600') as HTMLElement;
-               if (nameSpan) {
-                 nameSpan.style.fontSize = '14px';
-                 nameSpan.style.whiteSpace = 'normal';
-                 nameSpan.style.overflow = 'visible';
-                 el.style.paddingRight = '20px';
-               }
-            }
-            
-            ['color', 'backgroundColor', 'borderColor', 'outlineColor'].forEach(prop => {
-              const val = (style as any)[prop];
-              if (val && isModernColor(val)) {
-                if (prop === 'color') {
-                  if (el.classList.contains('text-white')) el.style.color = '#ffffff';
-                  else if (el.classList.contains('text-axia-primary')) el.style.color = '#0033FF';
-                  else el.style.color = '#1e293b';
-                } else if (prop === 'backgroundColor') {
-                  if (el.classList.contains('bg-axia-primary')) el.style.backgroundColor = '#0033FF';
-                  else if (el.classList.contains('bg-green-500')) el.style.backgroundColor = '#22c55e';
-                  else if (el.classList.contains('bg-red-500')) el.style.backgroundColor = '#ef4444';
-                  else if (el.classList.contains('bg-white')) el.style.backgroundColor = '#ffffff';
-                  else el.style.backgroundColor = 'transparent';
+
+            // Strip modern colors
+            for (let k = 0; k < style.length; k++) {
+              const prop = style[k];
+              const value = style.getPropertyValue(prop);
+              if (isModernColor(value)) {
+                if (prop.includes('color')) {
+                  if (prop === 'color') {
+                    el.style.color = el.classList.contains('text-white') ? '#ffffff' : '#1e293b';
+                  } else if (prop === 'background-color') {
+                    el.style.backgroundColor = el.classList.contains('bg-white') ? '#ffffff' : 'transparent';
+                  } else {
+                    el.style.setProperty(prop, 'transparent', 'important');
+                  }
+                } else if (prop === 'box-shadow') {
+                  el.style.boxShadow = 'none';
+                } else if (prop.includes('outline') || prop.includes('border')) {
+                  el.style.setProperty(prop, 'none', 'important');
                 } else {
-                  (el.style as any)[prop] = '#e2e8f0';
+                  el.style.setProperty(prop, 'none', 'important');
                 }
               }
-            });
-
-            if (style.boxShadow && isModernColor(style.boxShadow)) el.style.boxShadow = 'none';
+            }
 
             if (el.classList.contains('bg-hatched-red')) {
               el.style.backgroundImage = 'repeating-linear-gradient(45deg, #ef4444, #ef4444 10px, #dc2626 10px, #dc2626 20px)';
@@ -4331,11 +4399,12 @@ export default function App() {
                       onChange={(e) => setSelectedPlanningProjectId(e.target.value)}
                       className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2 text-sm font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all shadow-sm"
                     >
-                      <option value="">Selecione um Projeto</option>
+                      <option value="">Projeto...</option>
                       {projects.map(p => (
                         <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
                     </select>
+
                     <button 
                       onClick={() => {
                         setIsAddingPlanningActivity(true);
@@ -4372,6 +4441,17 @@ export default function App() {
                     >
                       <Download size={18} className="text-blue-500" />
                       PNG
+                    </button>
+                    <button 
+                      onClick={() => setShowHiddenActivities(!showHiddenActivities)}
+                      className={`px-4 py-2 rounded-xl font-bold text-sm transition-all flex items-center gap-2 border ${
+                        showHiddenActivities 
+                          ? 'bg-amber-50 text-amber-600 border-amber-200' 
+                          : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800'
+                      }`}
+                      title={showHiddenActivities ? "Ocultar atividades planejadas invisíveis" : "Mostrar atividades planejadas invisíveis"}
+                    >
+                      {showHiddenActivities ? <Eye size={18} /> : <EyeOff size={18} />}
                     </button>
                   </div>
                 </div>
@@ -4423,8 +4503,9 @@ export default function App() {
                         <div className="flex">
                           {/* Sidebar Labels */}
                           <div className="w-[280px] flex-shrink-0 border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 z-20">
-                            <div className="h-12 border-b border-slate-200 dark:border-slate-700 flex items-center px-4">
-                              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Atividades</span>
+                            <div className="h-16 border-b border-slate-200 dark:border-slate-700 flex flex-col justify-center px-6 bg-slate-50/50 dark:bg-slate-800/20">
+                              <span className="text-[10px] font-black text-slate-800 dark:text-slate-200 uppercase tracking-widest italic">Atividades do Projeto</span>
+                              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Detalhamento Mensal</span>
                             </div>
                             {currentProjectPlanningActivities.map((activity) => (
                               <div 
@@ -4455,53 +4536,84 @@ export default function App() {
                                     </span>
                                   )}
                                 </div>
+                                <div className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleTogglePlanningActivityVisibility(activity);
+                                    }}
+                                    className={`p-1.5 transition-colors ${activity.isHidden ? 'text-amber-500 hover:text-amber-600' : 'text-slate-400 hover:text-axia-primary'}`}
+                                    title={activity.isHidden ? "Mostrar atividade" : "Ocultar atividade"}
+                                  >
+                                    {activity.isHidden ? <Eye size={14} /> : <EyeOff size={14} />}
+                                  </button>
+                                </div>
                               </div>
                             ))}
                             <div className="h-14 bg-slate-50 dark:bg-slate-800/50" />
                           </div>
 
                           {/* Chart Grid */}
-                          <div className="flex-grow overflow-x-auto overflow-y-hidden">
-                            <div className="relative min-w-[800px]">
-                              {/* Header Months */}
-                              <div className="h-12 border-b border-slate-200 dark:border-slate-700 flex bg-slate-50/50 dark:bg-slate-800/50 relative">
-                                {planningTimelineData && Array.from({ length: planningTimelineData.numMonths }).map((_, i) => {
-                                  const absMonth = planningTimelineData.startAbs + i;
-                                  const currentMonth = absMonth % 12;
-                                  const currentYear = Math.floor(absMonth / 12);
-                                  const monthNamesShort = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
-                                  
-                                  return (
-                                    <div key={i} className="flex-1 min-w-[60px] border-r border-slate-100 dark:border-slate-800 flex flex-col items-center justify-center">
-                                      <span className="text-[9px] font-black text-slate-400 leading-none uppercase">
-                                        {monthNamesShort[currentMonth]}
-                                      </span>
-                                      <span className="text-[8px] text-slate-300 font-bold mt-0.5">
-                                        {currentYear}
-                                      </span>
+                          <div className="flex-grow overflow-x-auto overflow-y-hidden border-l border-slate-200 dark:border-slate-700 custom-scrollbar">
+                            <div className="relative" style={{ width: planningTimelineData ? planningTimelineData.numMonths * MONTH_WIDTH : '100%' }}>
+                              {/* Header Year/Months */}
+                              <div className="bg-slate-50/80 dark:bg-slate-800/80 sticky top-0 z-30">
+                                {/* Year Row */}
+                                <div className="h-6 flex border-b border-slate-200 dark:border-slate-700">
+                                  {planningTimelineData?.years.map((y, i) => (
+                                    <div 
+                                      key={`year-${y.year}-${i}`} 
+                                      className="flex items-center justify-center border-r border-slate-200 dark:border-slate-700 text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-100/50 dark:bg-slate-900/50"
+                                      style={{ width: y.monthsCount * MONTH_WIDTH }}
+                                    >
+                                      {y.year}
                                     </div>
-                                  );
-                                })}
+                                  ))}
+                                </div>
+                                {/* Month Row */}
+                                <div className="h-10 flex border-b border-slate-200 dark:border-slate-700">
+                                  {planningTimelineData && Array.from({ length: planningTimelineData.numMonths }).map((_, i) => {
+                                    const absMonth = planningTimelineData.startAbs + i;
+                                    const currentMonth = absMonth % 12;
+                                    const monthNamesShort = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+                                    return (
+                                      <div 
+                                        key={`month-header-${absMonth}`} 
+                                        className="flex items-center justify-center border-r border-slate-100 dark:border-slate-800 text-[9px] font-bold text-slate-400"
+                                        style={{ width: MONTH_WIDTH, minWidth: MONTH_WIDTH }}
+                                      >
+                                        {monthNamesShort[currentMonth]}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
                               </div>
 
                               {/* Bars Area */}
-                              <div className="relative overflow-hidden">
+                              <div className="relative min-h-[400px]">
                                  {/* Vertical Grid Lines */}
                                  <div className="absolute inset-0 flex pointer-events-none">
                                   {planningTimelineData && Array.from({ length: planningTimelineData.numMonths }).map((_, i) => (
-                                    <div key={i} className="flex-1 border-r border-slate-100/30 dark:border-slate-800/20 h-full" />
+                                    <div 
+                                      key={`grid-${i}`} 
+                                      className="border-r border-slate-100 dark:border-slate-800/50 h-full" 
+                                      style={{ width: MONTH_WIDTH, minWidth: MONTH_WIDTH }}
+                                    />
                                   ))}
                                 </div>
 
                                 {/* Today Marker Line */}
                                 {planningTimelineData && planningTimelineData.exactTodayAbs >= planningTimelineData.startAbs && planningTimelineData.exactTodayAbs <= (planningTimelineData.endAbs + 1) && (
                                   <div 
-                                    className="absolute top-0 bottom-0 w-px border-l-2 border-dashed border-red-500/30 z-20 pointer-events-none"
+                                    className="absolute top-0 bottom-0 w-px border-l-2 border-dashed border-red-500/40 z-20 pointer-events-none"
                                     style={{ 
-                                      left: `${((planningTimelineData.exactTodayAbs - planningTimelineData.startAbs) / planningTimelineData.numMonths) * 100}%`,
+                                      left: (planningTimelineData.exactTodayAbs - planningTimelineData.startAbs) * MONTH_WIDTH,
                                     }}
                                   >
-                                    <div className="absolute top-0 -left-[14px] px-1.5 py-0.5 bg-red-500 text-white text-[7px] font-black rounded uppercase tracking-tighter shadow-sm z-30">HOJE</div>
+                                    <div className="absolute top-2 -left-[18px] px-1.5 py-0.5 bg-red-500 text-white text-[7px] font-black rounded-sm uppercase tracking-tighter shadow-md z-30 flex items-center gap-1">
+                                      <div className="w-1 h-1 bg-white rounded-full animate-pulse" />
+                                      HOJE
+                                    </div>
                                   </div>
                                 )}
 
@@ -4510,34 +4622,37 @@ export default function App() {
                                   
                                   const absStart = activity.startYear * 12 + activity.startMonth;
                                   const absEnd = activity.endYear * 12 + activity.endMonth;
-                                  const left = ((absStart - planningTimelineData.startAbs) / planningTimelineData.numMonths) * 100;
+                                  const left = (absStart - planningTimelineData.startAbs) * MONTH_WIDTH;
                                   const duration = absEnd - absStart + 1;
-                                  const width = (duration / planningTimelineData.numMonths) * 100;
+                                  const width = duration * MONTH_WIDTH;
 
                                   return (
-                                    <div key={activity.id} className="h-14 border-b border-slate-50 dark:border-slate-800 relative group">
+                                    <div key={activity.id} className="h-14 border-b border-slate-50 dark:border-slate-800/50 relative group">
                                       <motion.div 
-                                        initial={{ width: 0, opacity: 0 }}
-                                        animate={{ width: `${width}%`, opacity: 1 }}
-                                        className="absolute h-8 top-3 rounded-md shadow-sm cursor-pointer hover:brightness-110 active:scale-95 transition-all z-10 flex items-center justify-center overflow-hidden"
+                                        initial={{ opacity: 0, x: -20 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        className="absolute h-8 top-3 rounded-lg shadow-sm cursor-pointer hover:brightness-110 active:scale-[0.98] transition-all z-10 flex items-center gap-2 px-3 group/bar overflow-hidden"
                                         style={{ 
-                                          left: `${left}%`, 
+                                          left,
+                                          width,
                                           backgroundColor: activity.color,
-                                          boxShadow: `0 4px 12px ${activity.color}33`
+                                          boxShadow: `0 4px 14px ${activity.color}44`
                                         }}
                                         onClick={() => {
                                           setEditingPlanningActivity(activity);
                                           setIsAddingPlanningActivity(true);
                                         }}
                                       >
-                                        <span className="text-[10px] font-black text-white px-2 truncate filter drop-shadow-md">
+                                        <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent opacity-0 group-hover/bar:opacity-100 transition-opacity pointer-events-none" />
+                                        <span className="text-[10px] font-black text-white truncate drop-shadow-[0_1px_2px_rgba(0,0,0,0.3)]">
                                           {activity.name}
                                         </span>
                                       </motion.div>
                                     </div>
                                   );
                                 })}
-                                <div className="h-14 border-b border-slate-50 dark:border-slate-800 relative group" />
+                                {/* Buffer Row */}
+                                <div className="h-14 border-b border-slate-50 dark:border-slate-800/50" />
                               </div>
                             </div>
                           </div>
@@ -4711,6 +4826,18 @@ export default function App() {
                       <Download size={18} className="text-blue-500" />
                       Exportar PNG
                     </button>
+                    <button 
+                      onClick={() => setShowHiddenActivities(!showHiddenActivities)}
+                      className={`px-4 py-2 rounded-xl font-bold text-sm transition-all flex items-center gap-2 border ${
+                        showHiddenActivities 
+                          ? 'bg-amber-50 text-amber-600 border-amber-200' 
+                          : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800'
+                      }`}
+                      title={showHiddenActivities ? "Ocultar atividades marcadas como invisíveis" : "Mostrar atividades marcadas como invisíveis"}
+                    >
+                      {showHiddenActivities ? <Eye size={18} /> : <EyeOff size={18} />}
+                      {showHiddenActivities ? 'Ver Ocultas' : 'Escondidas'}
+                    </button>
                   </div>
                 </div>
 
@@ -4786,83 +4913,97 @@ export default function App() {
                                           </div>
                                         </td>
                                       </tr>
-                                      {!collapsedGroups.includes(category) && items.map(activity => (
-                                        <tr key={activity.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
-                                          <td className="px-6 py-4">
-                                            <div className="font-bold text-slate-800 dark:text-slate-200">{activity.name}</div>
-                                            <div className="text-[10px] text-slate-400">{activity.category || 'Sem categoria'}</div>
-                                          </td>
-                                          <td className="px-6 py-4">
-                                            <div className="flex items-center gap-2">
-                                              <div className="w-6 h-6 rounded-full bg-axia-primary/10 flex items-center justify-center text-axia-primary text-[10px] font-bold">
-                                                {activity.responsible.charAt(0)}
+                                      {!collapsedGroups.includes(category) && items.map(activity => {
+                                        if (activity.isHidden && !showHiddenActivities) return null;
+                                        
+                                        return (
+                                          <tr key={activity.id} className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group ${activity.isHidden ? 'bg-slate-50/50 dark:bg-slate-900/50 italic opacity-60' : ''}`}>
+                                            <td className="px-6 py-4">
+                                              <div className={`font-bold ${activity.isHidden ? 'text-slate-400' : 'text-slate-800 dark:text-white'}`}>
+                                                {activity.name} {activity.isHidden && '(Oculta)'}
                                               </div>
-                                              <span className="text-sm font-medium text-slate-600 dark:text-slate-400">{activity.responsible}</span>
-                                            </div>
-                                          </td>
-                                          <td className="px-6 py-4">
-                                            <div className="text-xs font-bold text-slate-600 dark:text-slate-300">
-                                              {formatInputDate(activity.startDate)} - {formatInputDate(activity.endDate)}
-                                            </div>
-                                            {activity.status === 'delayed' && activity.predictedEndDate && (
-                                              <div className="text-[10px] font-black text-red-500 uppercase mt-1">
-                                                Nova Previsão: {formatInputDate(activity.predictedEndDate)}
+                                              <div className="text-[10px] text-slate-400">{activity.category || 'Sem categoria'}</div>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                              <div className="flex items-center gap-2">
+                                                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${activity.isHidden ? 'bg-slate-100 text-slate-400' : 'bg-axia-primary/10 text-axia-primary'}`}>
+                                                  {activity.responsible.charAt(0)}
+                                                </div>
+                                                <span className={`text-sm font-medium ${activity.isHidden ? 'text-slate-400' : 'text-slate-600 dark:text-slate-400'}`}>{activity.responsible}</span>
                                               </div>
-                                            )}
-                                            <div className="text-[10px] text-slate-400">
-                                              {Math.ceil((new Date(activity.endDate).getTime() - new Date(activity.startDate).getTime()) / (1000 * 60 * 60 * 24))} dias
-                                            </div>
-                                          </td>
-                                           <td className="px-6 py-4">
-                                            <span className={`px-2 py-1 rounded-md text-[10px] font-black uppercase border ${
-                                              activity.status === 'completed' ? 'bg-green-50 text-green-600 border-green-100' :
-                                              activity.status === 'in-progress' ? 'bg-blue-50 text-blue-600 border-blue-100' :
-                                              activity.status === 'delayed' ? 'bg-red-50 text-red-600 border-red-100' :
-                                              activity.status === 'scheduled' ? 'bg-purple-50 text-purple-600 border-purple-100' :
-                                              'bg-slate-50 text-slate-600 border-slate-100'
-                                            }`}>
-                                              {activity.status === 'completed' ? 'Concluído' : 
-                                               activity.status === 'in-progress' ? 'Em Andamento' : 
-                                               activity.status === 'delayed' ? 'Atrasada' : 
-                                               activity.status === 'scheduled' ? 'Programado' : 'Pendente'}
-                                            </span>
-                                          </td>
-                                          <td className="px-6 py-4">
-                                            <div className="flex items-center gap-1">
-                                              <button 
-                                                onClick={() => handleMoveActivity(activity, 'up')}
-                                                className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-axia-primary transition-colors"
-                                                title="Mover para cima"
-                                              >
-                                                <ChevronUp size={14} />
-                                              </button>
-                                              <button 
-                                                onClick={() => handleMoveActivity(activity, 'down')}
-                                                className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-axia-primary transition-colors"
-                                                title="Mover para baixo"
-                                              >
-                                                <ChevronDown size={14} />
-                                              </button>
-                                            </div>
-                                          </td>
-                                          <td className="px-6 py-4 text-right">
-                                            <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                              <button 
-                                                onClick={() => setEditingActivity(activity)}
-                                                className="p-1.5 text-slate-400 hover:text-axia-primary transition-colors"
-                                              >
-                                                <Pencil size={14} />
-                                              </button>
-                                              <button 
-                                                onClick={() => handleDeleteActivity(activity.id)}
-                                                className="p-1.5 text-slate-400 hover:text-red-500 transition-colors"
-                                              >
-                                                <Trash2 size={14} />
-                                              </button>
-                                            </div>
-                                          </td>
-                                        </tr>
-                                      ))}
+                                            </td>
+                                            <td className="px-6 py-4">
+                                              <div className={`text-xs font-bold ${activity.isHidden ? 'text-slate-400' : 'text-slate-600 dark:text-slate-300'}`}>
+                                                {formatInputDate(activity.startDate)} - {formatInputDate(activity.endDate)}
+                                              </div>
+                                              {activity.status === 'delayed' && activity.predictedEndDate && (
+                                                <div className="text-[10px] font-black text-red-500 uppercase mt-1">
+                                                  Nova Previsão: {formatInputDate(activity.predictedEndDate)}
+                                                </div>
+                                              )}
+                                              <div className="text-[10px] text-slate-400">
+                                                {Math.ceil((new Date(activity.endDate).getTime() - new Date(activity.startDate).getTime()) / (1000 * 60 * 60 * 24))} dias
+                                              </div>
+                                            </td>
+                                             <td className="px-6 py-4">
+                                              <span className={`px-2 py-1 rounded-md text-[10px] font-black uppercase border ${
+                                                activity.isHidden ? 'bg-slate-50 text-slate-400 border-slate-100 grayscale' :
+                                                activity.status === 'completed' ? 'bg-green-50 text-green-600 border-green-100' :
+                                                activity.status === 'in-progress' ? 'bg-blue-50 text-blue-600 border-blue-100' :
+                                                activity.status === 'delayed' ? 'bg-red-50 text-red-600 border-red-100' :
+                                                activity.status === 'scheduled' ? 'bg-purple-50 text-purple-600 border-purple-100' :
+                                                'bg-slate-50 text-slate-600 border-slate-100'
+                                              }`}>
+                                                {activity.status === 'completed' ? 'Concluído' : 
+                                                 activity.status === 'in-progress' ? 'Em Andamento' : 
+                                                 activity.status === 'delayed' ? 'Atrasada' : 
+                                                 activity.status === 'scheduled' ? 'Programado' : 'Pendente'}
+                                              </span>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                              <div className="flex items-center gap-1">
+                                                <button 
+                                                  onClick={() => handleMoveActivity(activity, 'up')}
+                                                  className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-axia-primary transition-colors"
+                                                  title="Mover para cima"
+                                                >
+                                                  <ChevronUp size={14} />
+                                                </button>
+                                                <button 
+                                                  onClick={() => handleMoveActivity(activity, 'down')}
+                                                  className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-axia-primary transition-colors"
+                                                  title="Mover para baixo"
+                                                >
+                                                  <ChevronDown size={14} />
+                                                </button>
+                                              </div>
+                                            </td>
+                                            <td className="px-6 py-4 text-right">
+                                              <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button 
+                                                  onClick={() => handleToggleActivityVisibility(activity)}
+                                                  className={`p-1.5 transition-colors ${activity.isHidden ? 'text-amber-500 hover:text-amber-600' : 'text-slate-400 hover:text-axia-primary'}`}
+                                                  title={activity.isHidden ? "Mostrar na timeline" : "Ocultar da timeline"}
+                                                >
+                                                  {activity.isHidden ? <Eye size={14} /> : <EyeOff size={14} />}
+                                                </button>
+                                                <button 
+                                                  onClick={() => setEditingActivity(activity)}
+                                                  className="p-1.5 text-slate-400 hover:text-axia-primary transition-colors"
+                                                >
+                                                  <Pencil size={14} />
+                                                </button>
+                                                <button 
+                                                  onClick={() => handleDeleteActivity(activity.id)}
+                                                  className="p-1.5 text-slate-400 hover:text-red-500 transition-colors"
+                                                >
+                                                  <Trash2 size={14} />
+                                                </button>
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
                                     </React.Fragment>
                                   ));
                                 })()
@@ -4876,188 +5017,178 @@ export default function App() {
                     <div ref={timelineRef} id="timeline-container" className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 p-8 shadow-sm overflow-hidden">
                         <div className="flex items-center justify-between mb-8">
                           <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-axia-primary/10 flex items-center justify-center text-axia-primary">
-                              <Calendar size={20} />
-                            </div>
-                            <div>
-                                <h3 className="text-xl font-black text-slate-800 dark:text-white tracking-tight">Cronograma em Barras</h3>
-                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{project.name}</p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-4">
-                            <div className="flex items-center gap-2">
-                              <div className="w-3 h-3 rounded bg-axia-primary" />
-                              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Execução</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <div className="w-3 h-3 rounded bg-green-500" />
-                              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Concluído</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <div className="w-3 h-3 rounded bg-purple-500" />
-                              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Programado</span>
-                            </div>
-                          </div>
+                                          <h3 className="text-xl font-black text-slate-800 dark:text-white tracking-tight">Cronograma em Barras</h3>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{project.name}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded bg-axia-primary" />
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Execução</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded bg-green-500" />
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Concluído</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded bg-purple-500" />
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Programado</span>
+                    </div>
+                  </div>
+
+                {/* Professional Gantt Layout */}
+                <div className="relative border border-slate-100 dark:border-slate-800 rounded-xl overflow-hidden bg-slate-50/30 dark:bg-slate-800/20">
+                  <div className="flex custom-scrollbar overflow-x-auto">
+                    {/* Y-AXIS Labels - FIXED POSITION */}
+                    <div className="w-[320px] flex-shrink-0 border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 sticky left-0 z-20">
+                      <div className="h-12 border-b border-slate-200 dark:border-slate-700 flex items-center justify-center">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Atividades</span>
+                      </div>
+                      {activities.filter(a => a.projectId === selectedScheduleProjectId && (showHiddenActivities || !a.isHidden)).map((activity) => (
+                        <div key={activity.id} className="h-14 border-b border-slate-100 dark:border-slate-800 flex items-center justify-end px-4">
+                          <span className={`text-[10px] font-bold text-right leading-[1.1] ${activity.isHidden ? 'text-slate-300 italic' : 'text-slate-600 dark:text-slate-400'}`}>
+                            {activity.name} {activity.isHidden && '(Oculta)'}
+                          </span>
                         </div>
+                      ))}
+                      {/* Bottom Axis Label */}
+                      <div className="h-12 border-t border-slate-200 dark:border-slate-700 flex items-center justify-center bg-slate-50 dark:bg-slate-800/50">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Data</span>
+                      </div>
+                    </div>
 
-                        {/* Professional Gantt Layout */}
-                        <div className="relative border border-slate-100 dark:border-slate-800 rounded-xl overflow-hidden bg-slate-50/30 dark:bg-slate-800/20">
-                          <div className="flex">
-                            {/* Y-AXIS Labels */}
-                            <div className="w-[320px] flex-shrink-0 border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 z-20">
-                              <div className="h-12 border-b border-slate-200 dark:border-slate-700 flex items-center justify-center">
-                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Atividades</span>
-                              </div>
-                              {activities.filter(a => a.projectId === selectedScheduleProjectId).map((activity) => (
-                                <div key={activity.id} className="h-14 border-b border-slate-100 dark:border-slate-800 flex items-center justify-end px-4">
-                                  <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 text-right leading-[1.1]">
-                                    {activity.name}
-                                  </span>
-                                </div>
-                              ))}
-                              {/* Bottom Axis Label */}
-                              <div className="h-12 border-t border-slate-200 dark:border-slate-700 flex items-center justify-center bg-slate-50 dark:bg-slate-800/50">
-                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Data</span>
-                              </div>
+                    {/* TIMELINE AREA - SCROLLABLE */}
+                    <div className="flex-grow relative bg-white dark:bg-slate-900" style={{ minWidth: scheduleTimelineData ? scheduleTimelineData.numMonths * MONTH_WIDTH : '100%' }}>
+                      {/* X-AXIS Grid (Years/Months) */}
+                      <div className="h-12 border-b border-slate-200 dark:border-slate-700 flex relative overflow-hidden">
+                        {scheduleTimelineData?.years.map((y, i) => (
+                          <div 
+                            key={`year-${y.year}`}
+                            className={`absolute top-0 bottom-0 border-r border-slate-200 dark:border-slate-700 flex items-start pt-1 justify-center ${i % 2 === 0 ? 'bg-slate-50/10' : 'bg-slate-100/10'}`}
+                            style={{ 
+                              left: scheduleTimelineData.years.slice(0, i).reduce((acc, curr) => acc + curr.monthsCount * MONTH_WIDTH, 0),
+                              width: y.monthsCount * MONTH_WIDTH
+                            }}
+                          >
+                            <span className="text-[9px] font-black text-slate-300 dark:text-slate-600 uppercase tracking-tighter">
+                              {y.year}
+                            </span>
+                          </div>
+                        ))}
+                        {scheduleTimelineData && Array.from({ length: scheduleTimelineData.numMonths }).map((_, i) => {
+                           const monthDate = new Date(Math.floor((scheduleTimelineData.startAbs + i) / 12), (scheduleTimelineData.startAbs + i) % 12, 1);
+                           return (
+                            <div 
+                              key={i} 
+                              className="absolute border-r border-slate-100 dark:border-slate-800 flex items-end justify-center pb-2 h-full"
+                              style={{ 
+                                left: i * MONTH_WIDTH,
+                                width: MONTH_WIDTH
+                              }}
+                            >
+                              <span className="text-[9px] font-black text-slate-400 uppercase">
+                                {monthDate.toLocaleDateString('pt-BR', { month: 'short' })}
+                              </span>
                             </div>
+                           );
+                        })}
+                      </div>
 
-                            {/* TIMELINE AREA */}
-                            <div className="flex-grow overflow-hidden relative bg-white dark:bg-slate-900">
-                              {/* X-AXIS Grid (Months/Weeks) */}
-                              <div className="h-12 border-b border-slate-200 dark:border-slate-700 flex relative overflow-hidden">
-                                {(() => {
-                                  const today = new Date();
-                                  const windowStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-                                  return Array.from({ length: 4 }).map((_, i) => {
-                                    const monthDate = new Date(windowStart.getFullYear(), windowStart.getMonth() + i, 1);
-                                    return (
-                                      <div key={i} className="flex-1 border-r border-slate-100 dark:border-slate-800 flex items-end justify-center pb-2">
-                                        <span className="text-[9px] font-black text-slate-400 uppercase">
-                                          {monthDate.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })}
-                                        </span>
-                                      </div>
-                                    );
-                                  });
-                                })()}
-                              </div>
+                      {/* Rows and Bars */}
+                      <div className="relative">
+                        {/* Horizontal Grid Lines */}
+                        {activities.filter(a => a.projectId === selectedScheduleProjectId && (showHiddenActivities || !a.isHidden)).map((activity) => (
+                          <div key={`grid-${activity.id}`} className={`h-14 border-b border-slate-50 dark:border-slate-800 w-full ${activity.isHidden ? 'bg-slate-50/30' : ''}`} />
+                        ))}
 
-                              {/* Rows and Bars */}
-                              <div className="relative">
-                                {/* Horizontal Grid Lines */}
-                                {activities.filter(a => a.projectId === selectedScheduleProjectId).map((activity) => (
-                                  <div key={`grid-${activity.id}`} className="h-14 border-b border-slate-50 dark:border-slate-800 w-full" />
-                                ))}
-
-                                {/* Vertical "Hoje" Line - DYNAMIC POSITION */}
-                                {(() => {
-                                  const today = new Date();
-                                  const windowStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-                                  const windowDuration = 120 * 24 * 60 * 60 * 1000; 
-                                  const todayOffset = today.getTime() - windowStart.getTime();
-                                  const todayLeft = (todayOffset / windowDuration) * 100;
-                                  
-                                  return (
-                                    <div 
-                                      className="absolute top-0 bottom-0 border-l-2 border-dashed border-red-500 z-30 pointer-events-none"
-                                      style={{ left: `${todayLeft}%` }}
-                                    >
-                                      <div className="absolute -top-7 -left-1/2 bg-red-500 text-white text-[8px] px-2 py-0.5 rounded-full font-black whitespace-nowrap shadow-sm">
-                                        HOJE ({new Date().toLocaleDateString('pt-BR')})
-                                      </div>
-                                    </div>
-                                  );
-                                })()}
-
-                                {/* Bars Overlay */}
-                                <div className="absolute top-0 left-0 right-0 bottom-0 pointer-events-none">
-                                  {activities.filter(a => a.projectId === selectedScheduleProjectId).map((activity) => {
-                                    const start = new Date(activity.startDate);
-                                    const end = new Date(activity.endDate);
-                                    
-                                    const today = new Date();
-                                    const windowStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-                                    const windowDuration = 120 * 24 * 60 * 60 * 1000; 
-                                    
-                                    const startOffset = start.getTime() - windowStart.getTime();
-                                    const duration = end.getTime() - start.getTime();
-                                    
-                                    const left = (startOffset / windowDuration) * 100;
-                                    const width = (duration / windowDuration) * 100;
-
-                                    if (left > 100 || (left + width + 50) < 0) return null; // Added buffer for delayed parts
-
-                                    const hasDelay = activity.status === 'delayed' && activity.predictedEndDate;
-                                    const predictedEnd = hasDelay ? new Date(activity.predictedEndDate!) : end;
-                                     const delayedDuration = Math.max(predictedEnd.getTime() - end.getTime(), 0);
-                                    const delayedWidth = (delayedDuration / windowDuration) * 100;
- 
-                                     return (
-                                      <div key={`bar-group-${activity.id}`} className="h-14 relative px-0 pointer-events-none">
-                                        {/* Main Bar */}
-                                        <motion.div 
-                                          initial={{ width: 0, opacity: 0 }}
-                                          animate={{ width: `${Math.max(width, 2)}%`, opacity: 1 }}
-                                          className={`absolute h-8 top-3 shadow-sm flex items-center justify-center px-3 cursor-pointer pointer-events-auto transition-all hover:brightness-110 z-20 ${
-                                            activity.status === 'completed' ? 'bg-green-500 text-white rounded' : 
-                                            activity.status === 'scheduled' ? 'bg-purple-500 text-white rounded' :
-                                            'bg-axia-primary text-white rounded-l ' + (!hasDelay ? 'rounded-r' : '')
-                                          }`}
-                                          style={{ left: `${left}%` }}
-                                          onClick={() => {
-                                            setEditingActivity(activity);
-                                            setIsAddingActivity(true);
-                                          }}
-                                        >
-                                          <span className="text-[10px] font-black uppercase truncate drop-shadow-sm filter">
-                                            {activity.name}
-                                          </span>
-                                          {activity.status === 'completed' && <CheckCircle2 size={12} className="shrink-0 ml-1" />}
-                                        </motion.div>
- 
-                                        {/* Delayed (Hatched) Segment */}
-                                        {hasDelay && delayedWidth > 0 && (
-                                          <motion.div
-                                            initial={{ width: 0, opacity: 0 }}
-                                            animate={{ width: `${delayedWidth}%`, opacity: 1 }}
-                                            className="absolute h-8 top-3 bg-hatched-red border-t border-b border-r border-red-600 rounded-r shadow-sm z-10 cursor-pointer pointer-events-auto"
-                                            style={{ left: `${left + width}%` }}
-                                            onClick={() => {
-                                              setEditingActivity(activity);
-                                              setIsAddingActivity(true);
-                                            }}
-                                          >
-                                            <span className="absolute -right-16 text-[8px] font-bold text-slate-500 dark:text-slate-400">
-                                              {formatInputDate(activity.predictedEndDate!)}
-                                            </span>
-                                          </motion.div>
-                                        )}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                              
-                              {/* Bottom X-AXIS Labels */}
-                              <div className="h-10 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 flex">
-                                {Array.from({ length: 4 }).map((_, i) => (
-                                  <div key={`bottom-${i}`} className="flex-1 border-r border-slate-100 dark:border-slate-800 flex items-center justify-center">
-                                    <span className="text-[8px] font-bold text-slate-400">
-                                      {new Date(new Date().getFullYear(), new Date().getMonth() + i, 1).toLocaleDateString('pt-BR')}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
+                        {/* Vertical "Hoje" Line */}
+                        {scheduleTimelineData && scheduleTimelineData.exactTodayAbs >= scheduleTimelineData.startAbs && scheduleTimelineData.exactTodayAbs <= (scheduleTimelineData.endAbs + 1) && (
+                          <div 
+                            className="absolute top-0 bottom-0 border-l-2 border-dashed border-red-500 z-30 pointer-events-none"
+                            style={{ left: (scheduleTimelineData.exactTodayAbs - scheduleTimelineData.startAbs) * MONTH_WIDTH }}
+                          >
+                            <div className="absolute -top-7 -left-1/2 bg-red-500 text-white text-[8px] px-2 py-0.5 rounded-full font-black whitespace-nowrap shadow-sm">
+                              HOJE ({new Date().toLocaleDateString('pt-BR')})
                             </div>
                           </div>
+                        )}
+
+                        {/* Bars Overlay */}
+                        <div className="absolute top-0 left-0 right-0 bottom-0 pointer-events-none">
+                          {activities.filter(a => a.projectId === selectedScheduleProjectId && (showHiddenActivities || !a.isHidden)).map((activity) => {
+                             if (!scheduleTimelineData) return null;
+                             
+                             const start = new Date(activity.startDate);
+                             const end = new Date(activity.endDate);
+                             
+                             const absStart = start.getFullYear() * 12 + start.getMonth() + (start.getDate() - 1) / 30;
+                             const absEnd = end.getFullYear() * 12 + end.getMonth() + (end.getDate()) / 30;
+                             
+                             const left = (absStart - scheduleTimelineData.startAbs) * MONTH_WIDTH;
+                             const width = (absEnd - absStart) * MONTH_WIDTH;
+
+                             const hasDelay = activity.status === 'delayed' && activity.predictedEndDate;
+                             const predictedEnd = hasDelay ? new Date(activity.predictedEndDate!) : end;
+                             const absPredictedEnd = predictedEnd.getFullYear() * 12 + predictedEnd.getMonth() + (predictedEnd.getDate()) / 30;
+                             const delayedWidth = Math.max((absPredictedEnd - absEnd) * MONTH_WIDTH, 0);
+
+                             return (
+                               <div key={`bar-group-${activity.id}`} className="h-14 relative px-0 pointer-events-none">
+                                {/* Main Bar */}
+                                <motion.div 
+                                  initial={{ width: 0, opacity: 0 }}
+                                  animate={{ width: `${Math.max(width, 2)}px`, opacity: activity.isHidden ? 0.4 : 1 }}
+                                  className={`absolute h-8 top-3 shadow-sm flex items-center justify-center px-3 cursor-pointer pointer-events-auto transition-all hover:brightness-110 z-20 ${
+                                    activity.isHidden ? 'bg-slate-300 dark:bg-slate-700 grayscale italic border border-slate-400/30' :
+                                    activity.status === 'completed' ? 'bg-green-500 text-white rounded' : 
+                                    activity.status === 'scheduled' ? 'bg-purple-500 text-white rounded' :
+                                    'bg-axia-primary text-white rounded-l ' + (!hasDelay ? 'rounded-r' : '')
+                                  }`}
+                                  style={{ left: `${left}px` }}
+                                  onClick={() => {
+                                    setEditingActivity(activity);
+                                    setIsAddingActivity(true);
+                                  }}
+                                >
+                                  <span className={`text-[10px] font-black uppercase truncate drop-shadow-sm filter ${activity.isHidden ? 'text-slate-500' : ''}`}>
+                                    {activity.name} {activity.isHidden && '(Oculta)'}
+                                  </span>
+                                  {activity.status === 'completed' && !activity.isHidden && <CheckCircle2 size={12} className="shrink-0 ml-1" />}
+                                </motion.div>
+
+                                {/* Delayed (Hatched) Segment */}
+                                {hasDelay && delayedWidth > 0 && (
+                                  <motion.div
+                                    initial={{ width: 0, opacity: 0 }}
+                                    animate={{ width: `${delayedWidth}px`, opacity: activity.isHidden ? 0.4 : 1 }}
+                                    className={`absolute h-8 top-3 bg-hatched-red border-t border-b border-r border-red-600 rounded-r shadow-sm z-10 cursor-pointer pointer-events-auto ${activity.isHidden ? 'grayscale opacity-50' : ''}`}
+                                    style={{ left: `${left + width}px` }}
+                                    onClick={() => {
+                                      setEditingActivity(activity);
+                                      setIsAddingActivity(true);
+                                    }}
+                                  >
+                                    <span className="absolute -right-16 text-[8px] font-bold text-slate-500 dark:text-slate-400">
+                                      {formatInputDate(activity.predictedEndDate!)}
+                                    </span>
+                                  </motion.div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     </div>
-                  )
-                })()}
-              </div>
-            )}
-          </motion.div>
-        )}
+                  </div>
+                </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+            </motion.div>
+          )}
 
             {activeTab === 'measurements' && (
               <motion.div 

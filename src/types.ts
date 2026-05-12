@@ -22,6 +22,7 @@ export interface ScheduleActivity {
   dependencies?: string[];
   category?: string;
   order: number;
+  isHidden?: boolean;
 }
 
 export interface PhotoReportItem {
@@ -137,4 +138,5 @@ export interface PlanningActivity {
   order: number;
   category?: string;
   description?: string;
+  isHidden?: boolean;
 }

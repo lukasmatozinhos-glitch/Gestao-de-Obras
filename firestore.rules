@@ -1,34 +1,10 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    //
-    // Collection: users
-    // Document ID: {userId}
-    // Fields:
-    //   - id: string (required)
-    //   - name: string (required)
-    //   - email: string (required, format: email)
-    //   - role: string
-    //   - avatar: string
-    //   - phone: string
-    //   - accessLevel: string
-    //
-    // Collection: projects
-    // Document ID: {projectId}
-    // Fields:
-    //   - id: string (required)
-    //   - name: string (required)
-    //   - client: string (required)
-    //   - status: string (required, enum: active, completed, on-hold, planning)
-    //   ... (other project fields)
-    //
-    // Collection: reports, measurements, attachments, statusUpdates
-    // (See firebase-blueprint.json for full field details)
-    //
-    // ===============================================================
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
 
     // ===============================================================
     // Helper Functions
@@ -42,15 +18,18 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    // Hardened Admin Helper
     function isAdmin() {
-      return isAuthenticated() && 
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accessLevel in ['Administrador de Sistema', 'Gestor'] ||
-         (request.auth.token.email in ["lukasmatozinhos3@gmail.com", "lucas.m.santos@axia.com.br"] && request.auth.token.email_verified == true) ||
-         (request.auth.token.email == "lucas.m.santos@axia.com.br")); // Temporary allow without verification for testing if needed, though usually verification is preferred.
+      return isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accessLevel in ['Administrador de Sistema', 'Gestor']) ||
+        (request.auth.token.email in ["lukasmatozinhos3@gmail.com", "lucas.m.santos@axia.com.br"] && request.auth.token.email_verified == true) ||
+        (request.auth.token.email == "lucas.m.santos@axia.com.br")
+      );
     }
 
-    function hasOnlyAllowedFields(fields) {
-      return request.resource.data.keys().hasOnly(fields);
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
     function isValidEmail(email) {
@@ -62,7 +41,7 @@ service cloud.firestore {
     }
 
     // ===============================================================
-    // Domain Validators
+    // Domain Validators (The "Anti-Update-Gap")
     // ===============================================================
 
     function isValidUser(data) {
@@ -73,14 +52,13 @@ service cloud.firestore {
 
     function isValidProject(data) {
       return data.id is string && data.name is string && data.name.size() > 0 &&
-             data.client is string && data.status in ['not-started', 'in-progress', 'paused', 'finished'] &&
-             (!('createdBy' in data) || data.createdBy is string);
+             data.client is string && data.status in ['not-started', 'in-progress', 'paused', 'finished'];
     }
 
     function isValidPhotoReport(data) {
       return data.id is string && data.projectId is string &&
              data.url is string && isValidUrl(data.url) &&
-             data.date is string && (!('caption' in data) || data.caption is string);
+             data.date is string;
     }
 
     function isValidBulletin(data) {
@@ -99,23 +77,15 @@ service cloud.firestore {
              data.createdAt is string;
     }
 
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
     function isValidScheduleActivity(data) {
       return data.id is string && data.id.size() > 0 &&
              data.projectId is string && data.projectId.size() > 0 &&
              data.name is string && data.name.size() > 0 &&
-             data.responsible is string &&
              data.startDate is string &&
              data.endDate is string &&
              data.progress is number &&
              data.status in ['pending', 'in-progress', 'completed', 'delayed', 'scheduled'] &&
-             data.order is number &&
-             (!('predictedEndDate' in data) || data.predictedEndDate is string) &&
-             (!('category' in data) || data.category is string) &&
-             (!('dependencies' in data) || data.dependencies is list);
+             data.order is number;
     }
 
     function isValidPlanningActivity(data) {
@@ -124,26 +94,24 @@ service cloud.firestore {
              data.name is string && data.name.size() > 0 &&
              data.startMonth is number && data.startYear is number &&
              data.endMonth is number && data.endYear is number &&
-             data.color is string && data.order is number &&
-             (!('category' in data) || data.category is string) &&
-             (!('description' in data) || data.description is string);
+             data.color is string && data.order is number;
     }
 
     // ===============================================================
-    // Rules
+    // Collection Rules
     // ===============================================================
 
     match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
+      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
       allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) || isAdmin());
       allow update: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) || isAdmin());
       allow delete: if isAdmin();
     }
 
     match /projects/{projectId} {
-      allow read: if isAuthenticated() && (isAdmin() || resource.data.createdBy == request.auth.uid);
-      allow create: if isAuthenticated() && isValidProject(request.resource.data) && (isAdmin() || request.resource.data.createdBy == request.auth.uid);
-      allow update: if isAuthenticated() && isValidProject(request.resource.data) && (isAdmin() || resource.data.createdBy == request.auth.uid);
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidProject(request.resource.data);
+      allow update: if isAuthenticated() && isValidProject(request.resource.data);
       allow delete: if isAdmin();
     }
 
@@ -164,7 +132,7 @@ service cloud.firestore {
 
     match /statusUpdates/{updateId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated(); // Any authenticated user can post an update
+      allow create: if isAuthenticated();
       allow update, delete: if isAdmin();
     }
 
@@ -183,27 +151,20 @@ service cloud.firestore {
     match /projectAddendums/{addendumId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidAddendum(request.resource.data);
-      allow update: if isAuthenticated(); // Relaxed for testing
-      allow delete: if isAdmin();
+      allow update, delete: if isAdmin();
     }
 
     match /scheduleActivities/{activityId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidId(activityId) && 
-                      isValidScheduleActivity(request.resource.data) &&
-                      request.resource.data.id == activityId;
-      allow update: if isAuthenticated() && isValidId(activityId) && 
-                      isValidScheduleActivity(request.resource.data);
+      allow create, update: if isAuthenticated() && isValidId(activityId) && 
+                              isValidScheduleActivity(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /planningActivities/{activityId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidId(activityId) && 
-                      isValidPlanningActivity(request.resource.data) &&
-                      request.resource.data.id == activityId;
-      allow update: if isAuthenticated() && isValidId(activityId) && 
-                      isValidPlanningActivity(request.resource.data);
+      allow create, update: if isAuthenticated() && isValidId(activityId) && 
+                              isValidPlanningActivity(request.resource.data);
       allow delete: if isAdmin();
     }
   }
