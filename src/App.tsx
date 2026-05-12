@@ -4,8 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useMemo, Component } from 'react';
-import { 
-  LayoutDashboard, 
+import { GripVertical, LayoutDashboard, 
   HardHat, 
   ClipboardList, 
   BarChart3, 
@@ -48,8 +47,9 @@ import {
   Moon,
   ChevronUp,
   ChevronDown,
+  DownloadCloud
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, Reorder } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { db, auth, getStorageInstance } from './firebase';
@@ -174,7 +174,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
       emailVerified: auth.currentUser?.emailVerified,
       isAnonymous: auth.currentUser?.isAnonymous,
       tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
         providerId: provider.providerId,
         displayName: provider.displayName,
         email: provider.email,
@@ -239,6 +239,7 @@ export default function App() {
   const [planningActivities, setPlanningActivities] = useState<PlanningActivity[]>([]);
   const [selectedScheduleProjectId, setSelectedScheduleProjectId] = useState<string>('');
   const [selectedPlanningProjectId, setSelectedPlanningProjectId] = useState<string>('');
+  const [planningViewMonths, setPlanningViewMonths] = useState<number | 'auto'>('auto');
   const [isAddingActivity, setIsAddingActivity] = useState(false);
   const [isAddingPlanningActivity, setIsAddingPlanningActivity] = useState(false);
   const [editingActivity, setEditingActivity] = useState<ScheduleActivity | null>(null);
@@ -502,6 +503,68 @@ export default function App() {
     }
   };
 
+  const currentProjectPlanningActivities = useMemo(() => {
+    return planningActivities
+      .filter(a => a.projectId === selectedPlanningProjectId)
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
+  }, [planningActivities, selectedPlanningProjectId]);
+
+  const planningTimelineData = useMemo(() => {
+    if (!selectedPlanningProjectId) return null;
+    
+    const relevantActivities = planningActivities.filter(a => a.projectId === selectedPlanningProjectId);
+    const today = new Date();
+    const todayAbs = today.getFullYear() * 12 + today.getMonth();
+
+    let startAbs: number;
+    let endAbs: number;
+
+    if (relevantActivities.length > 0) {
+      const actMinAbs = Math.min(...relevantActivities.map(a => a.startYear * 12 + a.startMonth));
+      const actMaxAbs = Math.max(...relevantActivities.map(a => a.endYear * 12 + a.endMonth));
+
+      if (planningViewMonths === 'auto') {
+        // Add 1 month padding on each side for better visual balance
+        startAbs = Math.min(todayAbs, actMinAbs) - 1;
+        endAbs = Math.max(todayAbs, actMaxAbs) + 1;
+      } else {
+        startAbs = Math.min(todayAbs, actMinAbs);
+        endAbs = startAbs + (planningViewMonths as number) - 1;
+      }
+    } else {
+      startAbs = todayAbs - 1;
+      endAbs = todayAbs + (planningViewMonths === 'auto' ? 10 : (planningViewMonths as number) - 1);
+    }
+
+    const numMonths = endAbs - startAbs + 1;
+    const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+    const exactTodayAbs = todayAbs + (today.getDate() - 1) / daysInMonth;
+    
+    return {
+      startAbs,
+      endAbs,
+      numMonths,
+      todayAbs,
+      exactTodayAbs
+    };
+  }, [selectedPlanningProjectId, planningActivities, planningViewMonths]);
+
+  const handleReorderPlanningActivities = async (newOrder: PlanningActivity[]) => {
+    // We only update the order field in Firestore. 
+    // The local state will be updated via onSnapshot
+    try {
+      const updatePromises = newOrder.map((activity, index) => {
+        if (activity.order === index) return Promise.resolve();
+        return updateDoc(doc(db, 'planningActivities', activity.id), {
+          order: index
+        });
+      });
+      await Promise.all(updatePromises);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'planningActivities');
+    }
+  };
+
   const handleSavePlanningActivity = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedPlanningProjectId) return;
@@ -565,7 +628,7 @@ export default function App() {
     const project = projects.find(p => p.id === projectId);
     if (!project) return;
 
-    const relevantActivities = planningActivities.filter(a => a.projectId === projectId);
+    const relevantActivities = currentProjectPlanningActivities;
     const doc = new jsPDF('p', 'mm', 'a4');
     const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
     
@@ -587,9 +650,8 @@ export default function App() {
 
     // Table
     const tableData = relevantActivities
-      .sort((a, b) => (a.order || 0) - (b.order || 0))
       .map(a => [
-        a.name.toUpperCase(),
+        a.name.toUpperCase() + (a.category ? ` (${a.category.toUpperCase()})` : ''),
         `${monthNames[a.startMonth]}/${a.startYear} - ${monthNames[a.endMonth]}/${a.endYear}`
       ]);
 
@@ -620,6 +682,9 @@ export default function App() {
               chartDiv.style.borderRadius = '0';
               chartDiv.style.border = 'none';
               chartDiv.style.overflow = 'visible';
+
+              const hideElements = chartDiv.querySelectorAll('.export-hide');
+              hideElements.forEach(el => (el as HTMLElement).style.display = 'none');
             }
 
             const elements = clonedDoc.querySelectorAll('*');
@@ -1201,6 +1266,10 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
+        if (quotaExceeded) {
+          setIsAuthReady(true);
+          return;
+        }
         try {
           const userDoc = await getDoc(doc(db, 'users', user.uid));
           if (userDoc.exists()) {
@@ -1245,7 +1314,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!isLoggedIn || !isAuthReady) return;
+    if (!isLoggedIn || !isAuthReady || quotaExceeded) return;
 
     const isManager = currentUser.accessLevel === 'Administrador de Sistema' || currentUser.accessLevel === 'Gestor';
     const projectsQuery = isManager 
@@ -2587,8 +2656,26 @@ export default function App() {
   return (
     <div className="flex h-screen bg-slate-50 dark:bg-slate-950 overflow-hidden transition-colors duration-300">
       {quotaExceeded && (
-        <div className="fixed top-0 left-0 right-0 z-[200] bg-red-600 text-white px-4 py-2 text-center text-xs font-bold animate-pulse">
-          Limite de dados gratuito do Google atingido hoje. O sistema voltará ao normal em breve ou após o reset diário.
+        <div className="fixed top-0 left-0 right-0 z-[200] bg-amber-500 text-slate-900 px-4 py-3 flex items-center justify-between shadow-2xl border-b border-amber-600/20 backdrop-blur-md">
+          <div className="flex items-center gap-3">
+            <div className="bg-white/20 p-2 rounded-lg">
+              <AlertCircle size={20} className="text-amber-900" />
+            </div>
+            <div>
+              <p className="text-[13px] font-black uppercase tracking-tight leading-none mb-1">Limite de Uso Atingido (Quota do Google)</p>
+              <p className="text-[11px] font-medium opacity-80 leading-tight">O projeto atingiu o limite gratuito de leituras diárias do Firestore. Os dados em tempo real podem não atualizar até o reset automático do Google (amanhã).</p>
+            </div>
+          </div>
+          <button 
+            onClick={() => {
+              localStorage.removeItem('firestore_quota_extrapolated');
+              setQuotaExceeded(false);
+              window.location.reload();
+            }}
+            className="bg-slate-900 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all flex-shrink-0 ml-4"
+          >
+            Tentar Reconectar
+          </button>
         </div>
       )}
       <input 
@@ -4313,6 +4400,23 @@ export default function App() {
                             </p>
                           </div>
                         </div>
+
+                        <div className="flex items-center gap-2 export-hide">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Exibir:</span>
+                          <select 
+                            value={planningViewMonths}
+                            onChange={(e) => setPlanningViewMonths(e.target.value === 'auto' ? 'auto' : Number(e.target.value))}
+                            className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-[11px] font-bold text-slate-600 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all cursor-pointer"
+                          >
+                            <option value="auto">Automático (Todas)</option>
+                            <option value="6">06 Meses</option>
+                            <option value="12">12 Meses</option>
+                            <option value="18">18 Meses</option>
+                            <option value="24">24 Meses</option>
+                            <option value="36">36 Meses</option>
+                            <option value="48">48 Meses</option>
+                          </select>
+                        </div>
                       </div>
 
                       <div className="relative border border-slate-100 dark:border-slate-800 rounded-xl overflow-hidden bg-slate-50/30 dark:bg-slate-800/20 shadow-inner">
@@ -4322,18 +4426,35 @@ export default function App() {
                             <div className="h-12 border-b border-slate-200 dark:border-slate-700 flex items-center px-4">
                               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Atividades</span>
                             </div>
-                            {planningActivities.filter(a => a.projectId === selectedPlanningProjectId).map((activity) => (
+                            {currentProjectPlanningActivities.map((activity) => (
                               <div 
                                 key={activity.id} 
                                 className="h-14 border-b border-slate-100 dark:border-slate-800 flex items-center px-4 group cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800"
                                 onClick={() => {
                                   setEditingPlanningActivity(activity);
+                                  setNewPlanningActivity({
+                                    name: activity.name,
+                                    startMonth: activity.startMonth,
+                                    startYear: activity.startYear,
+                                    endMonth: activity.endMonth,
+                                    endYear: activity.endYear,
+                                    color: activity.color,
+                                    category: activity.category || '',
+                                    description: activity.description || ''
+                                  });
                                   setIsAddingPlanningActivity(true);
                                 }}
                               >
-                                <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 leading-tight group-hover:text-axia-primary transition-colors">
-                                  {activity.name}
-                                </span>
+                                <div className="flex flex-col">
+                                  <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 leading-tight group-hover:text-axia-primary transition-colors">
+                                    {activity.name}
+                                  </span>
+                                  {activity.category && (
+                                    <span className="text-[8px] font-bold text-axia-primary/60 uppercase tracking-widest leading-none mt-1">
+                                      {activity.category}
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             ))}
                             <div className="h-14 bg-slate-50 dark:bg-slate-800/50" />
@@ -4343,50 +4464,55 @@ export default function App() {
                           <div className="flex-grow overflow-x-auto overflow-y-hidden">
                             <div className="relative min-w-[800px]">
                               {/* Header Months */}
-                              <div className="h-12 border-b border-slate-200 dark:border-slate-700 flex bg-slate-50/50 dark:bg-slate-800/50">
-                                {(() => {
-                                  const relevantActivities = planningActivities.filter(a => a.projectId === selectedPlanningProjectId);
-                                  let startYear = new Date().getFullYear();
-                                  let numMonths = 12;
-
-                                  if (relevantActivities.length > 0) {
-                                    const minYear = Math.min(...relevantActivities.map(a => a.startYear));
-                                    const maxYear = Math.max(...relevantActivities.map(a => a.endYear));
-                                    startYear = minYear;
-                                    numMonths = (maxYear - minYear + 1) * 12;
-                                  }
-
-                                  return Array.from({ length: numMonths }).map((_, i) => {
-                                    const currentMonth = i % 12;
-                                    const currentYear = startYear + Math.floor(i / 12);
-                                    const monthNamesShort = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
-                                    return (
-                                      <div key={i} className="flex-1 min-w-[60px] border-r border-slate-100 dark:border-slate-800 flex flex-col items-center justify-center">
-                                        <span className="text-[9px] font-black text-slate-400 leading-none">
-                                          {monthNamesShort[currentMonth]}
-                                        </span>
-                                        <span className="text-[8px] text-slate-300 font-bold mt-0.5">
-                                          {currentYear}
-                                        </span>
-                                      </div>
-                                    );
-                                  });
-                                })()}
+                              <div className="h-12 border-b border-slate-200 dark:border-slate-700 flex bg-slate-50/50 dark:bg-slate-800/50 relative">
+                                {planningTimelineData && Array.from({ length: planningTimelineData.numMonths }).map((_, i) => {
+                                  const absMonth = planningTimelineData.startAbs + i;
+                                  const currentMonth = absMonth % 12;
+                                  const currentYear = Math.floor(absMonth / 12);
+                                  const monthNamesShort = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+                                  
+                                  return (
+                                    <div key={i} className="flex-1 min-w-[60px] border-r border-slate-100 dark:border-slate-800 flex flex-col items-center justify-center">
+                                      <span className="text-[9px] font-black text-slate-400 leading-none uppercase">
+                                        {monthNamesShort[currentMonth]}
+                                      </span>
+                                      <span className="text-[8px] text-slate-300 font-bold mt-0.5">
+                                        {currentYear}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
                               </div>
 
-                              {/* Bars */}
-                              <div className="relative">
-                                {planningActivities.filter(a => a.projectId === selectedPlanningProjectId).map((activity, rowIndex) => {
-                                  const relevantActivities = planningActivities.filter(a => a.projectId === selectedPlanningProjectId);
-                                  const minYear = Math.min(...relevantActivities.map(a => a.startYear));
-                                  const numMonths = (Math.max(...relevantActivities.map(a => a.endYear)) - minYear + 1) * 12;
+                              {/* Bars Area */}
+                              <div className="relative overflow-hidden">
+                                 {/* Vertical Grid Lines */}
+                                 <div className="absolute inset-0 flex pointer-events-none">
+                                  {planningTimelineData && Array.from({ length: planningTimelineData.numMonths }).map((_, i) => (
+                                    <div key={i} className="flex-1 border-r border-slate-100/30 dark:border-slate-800/20 h-full" />
+                                  ))}
+                                </div>
 
-                                  const startPos = (activity.startYear - minYear) * 12 + activity.startMonth;
-                                  const endPos = (activity.endYear - minYear) * 12 + activity.endMonth;
-                                  const duration = endPos - startPos + 1;
+                                {/* Today Marker Line */}
+                                {planningTimelineData && planningTimelineData.exactTodayAbs >= planningTimelineData.startAbs && planningTimelineData.exactTodayAbs <= (planningTimelineData.endAbs + 1) && (
+                                  <div 
+                                    className="absolute top-0 bottom-0 w-px border-l-2 border-dashed border-red-500/30 z-20 pointer-events-none"
+                                    style={{ 
+                                      left: `${((planningTimelineData.exactTodayAbs - planningTimelineData.startAbs) / planningTimelineData.numMonths) * 100}%`,
+                                    }}
+                                  >
+                                    <div className="absolute top-0 -left-[14px] px-1.5 py-0.5 bg-red-500 text-white text-[7px] font-black rounded uppercase tracking-tighter shadow-sm z-30">HOJE</div>
+                                  </div>
+                                )}
 
-                                  const left = (startPos / numMonths) * 100;
-                                  const width = (duration / numMonths) * 100;
+                                {currentProjectPlanningActivities.map((activity) => {
+                                  if (!planningTimelineData) return null;
+                                  
+                                  const absStart = activity.startYear * 12 + activity.startMonth;
+                                  const absEnd = activity.endYear * 12 + activity.endMonth;
+                                  const left = ((absStart - planningTimelineData.startAbs) / planningTimelineData.numMonths) * 100;
+                                  const duration = absEnd - absStart + 1;
+                                  const width = (duration / planningTimelineData.numMonths) * 100;
 
                                   return (
                                     <div key={activity.id} className="h-14 border-b border-slate-50 dark:border-slate-800 relative group">
@@ -4411,19 +4537,7 @@ export default function App() {
                                     </div>
                                   );
                                 })}
-                                {/* Vertical Grid Lines */}
-                                <div className="absolute inset-0 flex pointer-events-none">
-                                  {(() => {
-                                    const relevantActivities = planningActivities.filter(a => a.projectId === selectedPlanningProjectId);
-                                    if (relevantActivities.length === 0) return null;
-                                    const minYear = Math.min(...relevantActivities.map(a => a.startYear));
-                                    const maxYear = Math.max(...relevantActivities.map(a => a.endYear));
-                                    const numMonths = (maxYear - minYear + 1) * 12;
-                                    return Array.from({ length: numMonths }).map((_, i) => (
-                                      <div key={i} className="flex-1 border-r border-slate-100/30 dark:border-slate-800/20" />
-                                    ));
-                                  })()}
-                                </div>
+                                <div className="h-14 border-b border-slate-50 dark:border-slate-800 relative group" />
                               </div>
                             </div>
                           </div>
@@ -4447,18 +4561,39 @@ export default function App() {
                               <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-right">Ações</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                            {planningActivities.filter(a => a.projectId === selectedPlanningProjectId).length === 0 ? (
+                          <Reorder.Group 
+                            as="tbody" 
+                            axis="y" 
+                            values={currentProjectPlanningActivities} 
+                            onReorder={handleReorderPlanningActivities}
+                            className="divide-y divide-slate-100 dark:divide-slate-800"
+                          >
+                            {currentProjectPlanningActivities.length === 0 ? (
                               <tr>
                                 <td colSpan={5} className="px-6 py-12 text-center text-slate-400 italic font-medium">Nenhuma atividade planejada.</td>
                               </tr>
                             ) : (
-                              planningActivities.filter(a => a.projectId === selectedPlanningProjectId).map((activity) => (
-                                <tr key={activity.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
+                              currentProjectPlanningActivities.map((activity) => (
+                                <Reorder.Item 
+                                  key={activity.id} 
+                                  value={activity} 
+                                  as="tr"
+                                  className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group cursor-default"
+                                >
                                   <td className="px-6 py-4">
                                     <div className="flex items-center gap-3">
-                                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: activity.color }} />
-                                      <span className="font-bold text-slate-800 dark:text-slate-200">{activity.name}</span>
+                                      <div className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 transition-colors p-1">
+                                        <GripVertical size={16} />
+                                      </div>
+                                      <div className="flex flex-col">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: activity.color }} />
+                                          <span className="font-bold text-slate-800 dark:text-slate-200">{activity.name}</span>
+                                        </div>
+                                        {activity.category && (
+                                          <span className="text-[9px] font-bold text-axia-primary uppercase tracking-widest mt-1 ml-4">{activity.category}</span>
+                                        )}
+                                      </div>
                                     </div>
                                   </td>
                                   <td className="px-6 py-4">
@@ -4473,7 +4608,7 @@ export default function App() {
                                     </div>
                                   </td>
                                   <td className="px-6 py-4">
-                                    <div className="flex items-center gap-1">
+                                    <div className="flex items-center gap-1 opacity-40 group-hover:opacity-100 transition-opacity">
                                       <button 
                                         onClick={() => handleMovePlanningActivity(activity, 'up')}
                                         className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400"
@@ -4493,6 +4628,16 @@ export default function App() {
                                       <button 
                                         onClick={() => {
                                           setEditingPlanningActivity(activity);
+                                          setNewPlanningActivity({
+                                            name: activity.name,
+                                            startMonth: activity.startMonth,
+                                            startYear: activity.startYear,
+                                            endMonth: activity.endMonth,
+                                            endYear: activity.endYear,
+                                            color: activity.color,
+                                            category: activity.category || '',
+                                            description: activity.description || ''
+                                          });
                                           setIsAddingPlanningActivity(true);
                                         }}
                                         className="p-1.5 text-slate-400 hover:text-axia-primary transition-colors"
@@ -4507,10 +4652,10 @@ export default function App() {
                                       </button>
                                     </div>
                                   </td>
-                                </tr>
+                                </Reorder.Item>
                               ))
                             )}
-                          </tbody>
+                          </Reorder.Group>
                         </table>
                       </div>
                     </div>
@@ -5920,6 +6065,29 @@ export default function App() {
                       required
                       className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-medium text-slate-700 dark:text-slate-200"
                     />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Categoria (Opcional)</label>
+                      <input 
+                        type="text" 
+                        placeholder="Ex: Engenharia Civil"
+                        value={newPlanningActivity.category || ''}
+                        onChange={(e) => setNewPlanningActivity({ ...newPlanningActivity, category: e.target.value })}
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Descrição</label>
+                      <input 
+                        type="text" 
+                        placeholder="Breve descrição"
+                        value={newPlanningActivity.description || ''}
+                        onChange={(e) => setNewPlanningActivity({ ...newPlanningActivity, description: e.target.value })}
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
+                      />
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
