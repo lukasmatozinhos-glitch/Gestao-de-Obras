@@ -102,6 +102,10 @@ const MONTHS = [
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
 ];
 
+// Logo Base64 placeholder - o usuário deve substituir pelo conteúdo real da imagem enviada
+// Este valor é usado como marca d'água no canto inferior esquerdo
+const AXIA_LOGO_BASE64 = ''; 
+
 const Logo = ({ size = 40, className = "" }: { size?: number, className?: string }) => (
   <svg 
     width={size} 
@@ -111,20 +115,10 @@ const Logo = ({ size = 40, className = "" }: { size?: number, className?: string
     xmlns="http://www.w3.org/2000/svg"
     className={className}
   >
-    {/* Buildings */}
-    <path d="M20 60V40H30V30H40V60H20Z" fill="currentColor" />
-    <path d="M32 60V45H38V60H32Z" fill="currentColor" opacity="0.8" />
-    
-    {/* House */}
-    <path d="M40 60L60 40L80 60H40Z" stroke="currentColor" strokeWidth="4" strokeLinejoin="round" />
-    <path d="M55 50H65V60H55V50Z" fill="currentColor" />
-    
-    {/* Gear (simplified) */}
-    <circle cx="75" cy="40" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="4 2" />
-    <circle cx="75" cy="40" r="4" fill="currentColor" />
-    
-    {/* Wave */}
-    <path d="M10 70C30 60 70 80 90 70" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+    {/* Axia Logo Integration */}
+    <path d="M50 20L20 80H35L50 50L65 80H80L50 20Z" fill="currentColor" />
+    <path d="M70 40L85 40V80H40V70H70V40Z" fill="currentColor" opacity="0.8" />
+    <path d="M40 60L50 40L60 60H40Z" fill="white" />
   </svg>
 );
 
@@ -219,6 +213,35 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [showHiddenActivities, setShowHiddenActivities] = useState(false);
+  const getMonthIndex = (absMonth: number, visibleMonths: { absMonth: number }[]) => {
+    return visibleMonths.findIndex(m => m.absMonth === absMonth);
+  };
+
+  const getMonthPosition = (absMonth: number, visibleMonths: { absMonth: number }[]) => {
+    const index = getMonthIndex(absMonth, visibleMonths);
+    if (index !== -1) return index * MONTH_WIDTH;
+    
+    // If month is hidden, find the nearest previous visible month
+    const prevVisible = [...visibleMonths].reverse().find(m => m.absMonth < absMonth);
+    if (prevVisible) {
+      const prevIndex = visibleMonths.findIndex(m => m.absMonth === prevVisible.absMonth);
+      return (prevIndex + 1) * MONTH_WIDTH;
+    }
+    
+    return 0;
+  };
+  const [showTodayLine, setShowTodayLine] = useState(true);
+  const [hiddenMonths, setHiddenMonths] = useState<string[]>([]);
+
+  const toggleMonthVisibility = (monthYear: string) => {
+    setHiddenMonths(prev => 
+      prev.includes(monthYear) 
+        ? prev.filter(m => m !== monthYear) 
+        : [...prev, monthYear]
+    );
+  };
+
+  const showAllMonths = () => setHiddenMonths([]);
 
   useEffect(() => {
     const checkMobile = () => {
@@ -306,9 +329,9 @@ export default function App() {
   useEffect(() => {
     const palette = palettes.find(p => p.id === currentPalette) || palettes[0];
     const root = document.documentElement;
-    root.style.setProperty('--axia-primary', palette.primary);
-    root.style.setProperty('--axia-secondary', palette.secondary);
-    root.style.setProperty('--axia-accent', palette.accent);
+    root.style.setProperty('--al-primary', palette.primary);
+    root.style.setProperty('--al-secondary', palette.secondary);
+    root.style.setProperty('--al-accent', palette.accent);
     localStorage.setItem('currentPalette', currentPalette);
   }, [currentPalette]);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
@@ -556,28 +579,41 @@ export default function App() {
     const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
     const exactTodayAbs = todayAbs + (today.getDate() - 1) / daysInMonth;
     
-    // Group months by year for the header
-    const years: { year: number; monthsCount: number }[] = [];
+    // Filter visible months
+    const allMonths: { absMonth: number; year: number; month: number }[] = [];
     for (let i = 0; i < numMonths; i++) {
       const absMonth = startAbs + i;
-      const year = Math.floor(absMonth / 12);
+      allMonths.push({
+        absMonth,
+        year: Math.floor(absMonth / 12),
+        month: absMonth % 12
+      });
+    }
+
+    const visibleMonths = allMonths.filter(m => !hiddenMonths.includes(`${m.year}-${m.month}`));
+    
+    // Group visible months by year
+    const years: { year: number; monthsCount: number }[] = [];
+    visibleMonths.forEach(m => {
       const lastYear = years[years.length - 1];
-      if (lastYear && lastYear.year === year) {
+      if (lastYear && lastYear.year === m.year) {
         lastYear.monthsCount++;
       } else {
-        years.push({ year, monthsCount: 1 });
+        years.push({ year: m.year, monthsCount: 1 });
       }
-    }
+    });
     
     return {
       startAbs,
       endAbs,
-      numMonths,
+      numMonths: visibleMonths.length,
       todayAbs,
       exactTodayAbs,
-      years
+      years,
+      visibleMonths,
+      allMonths
     };
-  }, [selectedPlanningProjectId, planningActivities, planningViewMonths]);
+  }, [selectedPlanningProjectId, planningActivities, planningViewMonths, hiddenMonths]);
 
   const scheduleTimelineData = useMemo(() => {
     if (!selectedScheduleProjectId) return null;
@@ -738,20 +774,29 @@ export default function App() {
     const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
     
     // Header
-    doc.setFillColor(0, 51, 255);
+    doc.setFillColor(248, 250, 252);
     doc.rect(0, 0, 210, 40, 'F');
-    doc.setTextColor(255, 255, 255);
+    doc.setDrawColor(226, 232, 240);
+    doc.line(0, 40, 210, 40);
+    
+    // Logo
+    drawPDFLogo(doc, 15, 18);
+    addWatermark(doc);
+    
+    doc.setTextColor(15, 23, 42);
     doc.setFontSize(22);
     doc.setFont('helvetica', 'bold');
-    doc.text('PLANEJAMENTO DE OBRA', 15, 20);
-    doc.setFontSize(12);
-    doc.text(project.name.toUpperCase(), 15, 30);
+    doc.text('PLANEJAMENTO DE OBRA', 195, 20, { align: 'right' });
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text(project.name.toUpperCase(), 195, 28, { align: 'right' });
 
     // Project Info
-    doc.setTextColor(0, 0, 0);
+    doc.setTextColor(30, 41, 59);
     doc.setFontSize(10);
-    doc.text(`Cliente: ${project.client}`, 15, 50);
-    doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, 15, 55);
+    doc.text(`Cliente: ${project.client}`, 15, 52);
+    doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, 15, 57);
 
     // Table
     const tableData = relevantActivities
@@ -784,6 +829,64 @@ export default function App() {
           onclone: (clonedDoc) => {
             const chartDiv = clonedDoc.getElementById('planning-chart');
             if (chartDiv) {
+              // Add a beautiful logo header to the cloned document for the export
+              const header = clonedDoc.createElement('div');
+              header.style.backgroundColor = '#f8fafc';
+              header.style.width = '100%';
+              header.style.height = '140px';
+              header.style.display = 'flex';
+              header.style.justifyContent = 'space-between';
+              header.style.alignItems = 'center';
+              header.style.padding = '0 60px';
+              header.style.borderBottom = '4px solid #0033ff';
+              header.style.marginBottom = '40px';
+              
+              const logoContainer = clonedDoc.createElement('div');
+              logoContainer.style.display = 'flex';
+              logoContainer.style.flexDirection = 'column';
+              
+              const logoTitle = clonedDoc.createElement('h1');
+              logoTitle.innerText = 'AXIA';
+              logoTitle.style.color = '#0033ff';
+              logoTitle.style.fontSize = '48px';
+              logoTitle.style.fontWeight = '900';
+              logoTitle.style.margin = '0';
+              logoTitle.style.letterSpacing = '-2px';
+              
+              const logoSub = clonedDoc.createElement('p');
+              logoSub.innerText = 'ENERGIA';
+              logoSub.style.color = '#64748b';
+              logoSub.style.fontSize = '12px';
+              logoSub.style.fontWeight = 'bold';
+              logoSub.style.margin = '-5px 0 0 0';
+              logoSub.style.letterSpacing = '5px';
+              
+              logoContainer.appendChild(logoTitle);
+              logoContainer.appendChild(logoSub);
+              
+              const infoContainer = clonedDoc.createElement('div');
+              infoContainer.style.textAlign = 'right';
+              
+              const docTitle = clonedDoc.createElement('h2');
+              docTitle.innerText = 'PLANEJAMENTO MENSAL';
+              docTitle.style.color = '#0f172a';
+              docTitle.style.fontSize = '32px';
+              docTitle.style.fontWeight = 'bold';
+              docTitle.style.margin = '0';
+              
+              const projectTitle = clonedDoc.createElement('p');
+              projectTitle.innerText = `PROJETO: ${project.name.toUpperCase()}`;
+              projectTitle.style.color = '#64748b';
+              projectTitle.style.fontSize = '16px';
+              projectTitle.style.margin = '5px 0 0 0';
+              
+              infoContainer.appendChild(docTitle);
+              infoContainer.appendChild(projectTitle);
+              
+              header.appendChild(logoContainer);
+              header.appendChild(infoContainer);
+              chartDiv.prepend(header);
+
               chartDiv.style.width = `${exportWidth}px`; 
               chartDiv.style.padding = '80px 60px';
               chartDiv.style.backgroundColor = '#ffffff';
@@ -874,6 +977,7 @@ export default function App() {
 
         const imgData = canvas.toDataURL('image/png', 1.0);
         doc.addPage('a4', 'l');
+        addWatermark(doc);
         
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageHeight = doc.internal.pageSize.getHeight();
@@ -905,6 +1009,14 @@ export default function App() {
     }
 
     doc.save(`planejamento_${project.name.toLowerCase().replace(/\s+/g, '_')}.pdf`);
+    
+    // Add watermark and footer to all pages
+    const pageCountTotal = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= pageCountTotal; i++) {
+      doc.setPage(i);
+      addWatermark(doc);
+    }
+    
     showNotification('Planejamento exportado com sucesso!');
   };
 
@@ -924,6 +1036,64 @@ export default function App() {
         onclone: (clonedDoc) => {
           const chartDiv = clonedDoc.getElementById('planning-chart');
           if (chartDiv) {
+            // Add a beautiful logo header to the cloned document for the export
+            const header = clonedDoc.createElement('div');
+            header.style.backgroundColor = '#f8fafc';
+            header.style.width = '100%';
+            header.style.height = '140px';
+            header.style.display = 'flex';
+            header.style.justifyContent = 'space-between';
+            header.style.alignItems = 'center';
+            header.style.padding = '0 60px';
+            header.style.borderBottom = '4px solid #0033ff';
+            header.style.marginBottom = '40px';
+            
+            const logoContainer = clonedDoc.createElement('div');
+            logoContainer.style.display = 'flex';
+            logoContainer.style.flexDirection = 'column';
+            
+            const logoTitle = clonedDoc.createElement('h1');
+            logoTitle.innerText = 'AXIA';
+            logoTitle.style.color = '#0033ff';
+            logoTitle.style.fontSize = '48px';
+            logoTitle.style.fontWeight = '900';
+            logoTitle.style.margin = '0';
+            logoTitle.style.letterSpacing = '-2px';
+            
+            const logoSub = clonedDoc.createElement('p');
+            logoSub.innerText = 'ENERGIA';
+            logoSub.style.color = '#64748b';
+            logoSub.style.fontSize = '12px';
+            logoSub.style.fontWeight = 'bold';
+            logoSub.style.margin = '-5px 0 0 0';
+            logoSub.style.letterSpacing = '5px';
+            
+            logoContainer.appendChild(logoTitle);
+            logoContainer.appendChild(logoSub);
+            
+            const infoContainer = clonedDoc.createElement('div');
+            infoContainer.style.textAlign = 'right';
+            
+            const docTitle = clonedDoc.createElement('h2');
+            docTitle.innerText = 'PLANEJAMENTO MENSAL';
+            docTitle.style.color = '#0f172a';
+            docTitle.style.fontSize = '32px';
+            docTitle.style.fontWeight = 'bold';
+            docTitle.style.margin = '0';
+            
+            const projectTitleText = clonedDoc.createElement('p');
+            projectTitleText.innerText = `PROJETO: ${projects.find(p => p.id === projectId)?.name.toUpperCase()}`;
+            projectTitleText.style.color = '#64748b';
+            projectTitleText.style.fontSize = '16px';
+            projectTitleText.style.margin = '5px 0 0 0';
+            
+            infoContainer.appendChild(docTitle);
+            infoContainer.appendChild(projectTitleText);
+            
+            header.appendChild(logoContainer);
+            header.appendChild(infoContainer);
+            chartDiv.prepend(header);
+
             chartDiv.style.width = `${exportWidth}px`;
             chartDiv.style.padding = '80px 60px';
             chartDiv.style.backgroundColor = '#ffffff';
@@ -1027,20 +1197,29 @@ export default function App() {
     const doc = new jsPDF('p', 'mm', 'a4');
     
     // Header
-    doc.setFillColor(0, 51, 255);
+    doc.setFillColor(248, 250, 252);
     doc.rect(0, 0, 210, 40, 'F');
-    doc.setTextColor(255, 255, 255);
+    doc.setDrawColor(226, 232, 240);
+    doc.line(0, 40, 210, 40);
+    
+    // Logo
+    drawPDFLogo(doc, 15, 18);
+    addWatermark(doc);
+    
+    doc.setTextColor(15, 23, 42);
     doc.setFontSize(22);
     doc.setFont('helvetica', 'bold');
-    doc.text('CRONOGRAMA DE OBRA', 15, 20);
-    doc.setFontSize(12);
-    doc.text(project.name.toUpperCase(), 15, 30);
+    doc.text('CRONOGRAMA DE OBRA', 195, 20, { align: 'right' });
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text(project.name.toUpperCase(), 195, 28, { align: 'right' });
 
     // Project Info
-    doc.setTextColor(0, 0, 0);
+    doc.setTextColor(30, 41, 59);
     doc.setFontSize(10);
-    doc.text(`Cliente: ${project.client}`, 15, 50);
-    doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, 15, 55);
+    doc.text(`Cliente: ${project.client}`, 15, 52);
+    doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, 15, 57);
 
     // Table (Without Progress column as requested)
     const tableData = projectActivities.map(a => [
@@ -1077,6 +1256,64 @@ export default function App() {
           onclone: (clonedDoc) => {
             const container = clonedDoc.getElementById('timeline-container');
             if (container) {
+              // Add a beautiful logo header to the cloned document for the export
+              const header = clonedDoc.createElement('div');
+              header.style.backgroundColor = '#f8fafc';
+              header.style.width = '100%';
+              header.style.height = '140px';
+              header.style.display = 'flex';
+              header.style.justifyContent = 'space-between';
+              header.style.alignItems = 'center';
+              header.style.padding = '0 60px';
+              header.style.borderBottom = '4px solid #0033ff';
+              header.style.marginBottom = '40px';
+              
+              const logoContainer = clonedDoc.createElement('div');
+              logoContainer.style.display = 'flex';
+              logoContainer.style.flexDirection = 'column';
+              
+              const logoTitle = clonedDoc.createElement('h1');
+              logoTitle.innerText = 'AXIA';
+              logoTitle.style.color = '#0033ff';
+              logoTitle.style.fontSize = '48px';
+              logoTitle.style.fontWeight = '900';
+              logoTitle.style.margin = '0';
+              logoTitle.style.letterSpacing = '-2px';
+              
+              const logoSub = clonedDoc.createElement('p');
+              logoSub.innerText = 'ENERGIA';
+              logoSub.style.color = '#64748b';
+              logoSub.style.fontSize = '12px';
+              logoSub.style.fontWeight = 'bold';
+              logoSub.style.margin = '-5px 0 0 0';
+              logoSub.style.letterSpacing = '5px';
+              
+              logoContainer.appendChild(logoTitle);
+              logoContainer.appendChild(logoSub);
+              
+              const infoContainer = clonedDoc.createElement('div');
+              infoContainer.style.textAlign = 'right';
+              
+              const docTitle = clonedDoc.createElement('h2');
+              docTitle.innerText = 'CRONOGRAMA DE EXECUÇÃO';
+              docTitle.style.color = '#0f172a';
+              docTitle.style.fontSize = '32px';
+              docTitle.style.fontWeight = 'bold';
+              docTitle.style.margin = '0';
+              
+              const projectTitle = clonedDoc.createElement('p');
+              projectTitle.innerText = `PROJETO: ${project.name.toUpperCase()}`;
+              projectTitle.style.color = '#64748b';
+              projectTitle.style.fontSize = '16px';
+              projectTitle.style.margin = '5px 0 0 0';
+              
+              infoContainer.appendChild(docTitle);
+              infoContainer.appendChild(projectTitle);
+              
+              header.appendChild(logoContainer);
+              header.appendChild(infoContainer);
+              container.prepend(header);
+
               container.style.width = `${exportWidth}px`; 
               container.style.padding = '80px 60px';
               container.style.backgroundColor = '#ffffff';
@@ -1165,6 +1402,7 @@ export default function App() {
         
         // Use landscape for the chart
         doc.addPage('a4', 'l');
+        addWatermark(doc);
         
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageHeight = doc.internal.pageSize.getHeight();
@@ -1198,6 +1436,14 @@ export default function App() {
     }
 
     doc.save(`cronograma_${project.name.toLowerCase().replace(/\s+/g, '_')}.pdf`);
+    
+    // Add watermark to all pages
+    const pageCountTotal = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= pageCountTotal; i++) {
+      doc.setPage(i);
+      addWatermark(doc);
+    }
+    
     showNotification('Cronograma exportado com sucesso!');
   };
 
@@ -1218,6 +1464,64 @@ export default function App() {
         onclone: (clonedDoc) => {
           const container = clonedDoc.getElementById('timeline-container');
           if (container) {
+            // Add a beautiful logo header to the cloned document for the export
+            const header = clonedDoc.createElement('div');
+            header.style.backgroundColor = '#f8fafc';
+            header.style.width = '100%';
+            header.style.height = '140px';
+            header.style.display = 'flex';
+            header.style.justifyContent = 'space-between';
+            header.style.alignItems = 'center';
+            header.style.padding = '0 60px';
+            header.style.borderBottom = '4px solid #0033ff';
+            header.style.marginBottom = '40px';
+            
+            const logoContainer = clonedDoc.createElement('div');
+            logoContainer.style.display = 'flex';
+            logoContainer.style.flexDirection = 'column';
+            
+            const logoTitle = clonedDoc.createElement('h1');
+            logoTitle.innerText = 'AXIA';
+            logoTitle.style.color = '#0033ff';
+            logoTitle.style.fontSize = '48px';
+            logoTitle.style.fontWeight = '900';
+            logoTitle.style.margin = '0';
+            logoTitle.style.letterSpacing = '-2px';
+            
+            const logoSub = clonedDoc.createElement('p');
+            logoSub.innerText = 'ENERGIA';
+            logoSub.style.color = '#64748b';
+            logoSub.style.fontSize = '12px';
+            logoSub.style.fontWeight = 'bold';
+            logoSub.style.margin = '-5px 0 0 0';
+            logoSub.style.letterSpacing = '5px';
+            
+            logoContainer.appendChild(logoTitle);
+            logoContainer.appendChild(logoSub);
+            
+            const infoContainer = clonedDoc.createElement('div');
+            infoContainer.style.textAlign = 'right';
+            
+            const docTitle = clonedDoc.createElement('h2');
+            docTitle.innerText = 'CRONOGRAMA DE EXECUÇÃO';
+            docTitle.style.color = '#0f172a';
+            docTitle.style.fontSize = '32px';
+            docTitle.style.fontWeight = 'bold';
+            docTitle.style.margin = '0';
+            
+            const projectTitleText = clonedDoc.createElement('p');
+            projectTitleText.innerText = `PROJETO: ${project.name.toUpperCase()}`;
+            projectTitleText.style.color = '#64748b';
+            projectTitleText.style.fontSize = '16px';
+            projectTitleText.style.margin = '5px 0 0 0';
+            
+            infoContainer.appendChild(docTitle);
+            infoContainer.appendChild(projectTitleText);
+            
+            header.appendChild(logoContainer);
+            header.appendChild(infoContainer);
+            container.prepend(header);
+
             container.style.width = `${exportWidth}px`; 
             container.style.padding = '80px 60px';
             container.style.backgroundColor = '#ffffff';
@@ -1384,22 +1688,9 @@ export default function App() {
       }
     });
 
-    // Test connection
-    const testConnection = async () => {
-      if (localStorage.getItem('firestore_quota_extrapolated')) return;
-      try {
-        await getDocFromServer(doc(db, 'test', 'connection'));
-      } catch (error) {
-        if(error instanceof Error && error.message.includes('the client is offline')) {
-          console.error("Please check your Firebase configuration. ");
-        }
-        if(error instanceof Error && error.message.includes('Quota exceeded')) {
-          localStorage.setItem('firestore_quota_extrapolated', 'true');
-        }
-      }
-    };
-    testConnection();
-
+    // Remove connection test to save quota reads
+    // const testConnection = async () => { ... }
+    
     return () => unsubscribe();
   }, []);
 
@@ -1981,6 +2272,49 @@ export default function App() {
     }
   };
 
+  const drawPDFLogo = (doc: jsPDF, x: number, y: number, isDark: boolean = false) => {
+    // Logo "Axia Energia" apenas em texto para o PDF conforme solicitado
+    const primaryColor = isDark ? [255, 255, 255] : [0, 51, 255];
+    const secondaryColor = isDark ? [200, 210, 255] : [100, 116, 139];
+
+    // Nome da Marca com tipografia limpa e profissional
+    doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.text('AXIA', x, y);
+    
+    doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'bold');
+    doc.text('ENERGIA', x, y + 5, { charSpace: 1 });
+  };
+
+  const addWatermark = (doc: jsPDF) => {
+    const pageHeight = doc.internal.pageSize.getHeight();
+    
+    // Bottom left corner
+    const margin = 10;
+    const logoWidth = 40; // Largura aproximada do logo enviado
+    const logoHeight = 15; // Mantendo a proporção aproximada
+    
+    // Posição no canto inferior esquerdo
+    const x = margin;
+    const y = pageHeight - margin - logoHeight;
+    
+    try {
+      if (typeof AXIA_LOGO_BASE64 !== 'undefined' && AXIA_LOGO_BASE64 && AXIA_LOGO_BASE64.length > 0) {
+        doc.addImage(AXIA_LOGO_BASE64, 'PNG', x, y, logoWidth, logoHeight);
+      } else {
+        // Fallback para texto caso o base64 ainda não tenha sido inserido
+        doc.setFontSize(8);
+        doc.setTextColor(200, 200, 200);
+        doc.text('AXIA ENERGIA', x, pageHeight - margin);
+      }
+    } catch (e) {
+      console.warn('Erro ao adicionar marca d\'água de imagem:', e);
+    }
+  };
+
   const generateBulletinPDF = (bulletin: MeasurementBulletin) => {
     const doc = new jsPDF({
       orientation: 'landscape',
@@ -1991,28 +2325,23 @@ export default function App() {
     const pageHeight = doc.internal.pageSize.getHeight();
     
     // Header
-    doc.setFillColor(0, 51, 255); // axia-primary (Ocean Blue)
-    doc.rect(0, 0, pageWidth, 35, 'F');
+    doc.setFillColor(248, 250, 252); // soft slate background
+    doc.rect(0, 0, pageWidth, 40, 'F');
+    doc.setDrawColor(226, 232, 240); // bottom border
+    doc.line(0, 40, pageWidth, 40);
     
-    // Logo - AXIA ENERGIA (Single Line)
-    doc.setTextColor(255, 255, 255);
+    // Logo
+    drawPDFLogo(doc, 20, 18);
+    
+    doc.setTextColor(15, 23, 42); // slate-900
+    doc.setFontSize(24);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(22);
-    doc.text('AXIA', 20, 18);
+    doc.text('BOLETIM DE MEDIÇÃO', pageWidth - 20, 20, { align: 'right' });
     
-    const bAxiaWidth = doc.getTextWidth('AXIA');
+    doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(22);
-    doc.text(' ENERGIA', 20 + bAxiaWidth, 18);
-    
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(22);
-    doc.setFont('helvetica', 'bold');
-    doc.text('BOLETIM DE MEDIÇÃO', pageWidth / 2 + 20, 18, { align: 'center' });
-    
-    doc.setFontSize(11);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Documento de Registro de Medição de Obra - Emissão: ${new Date().toLocaleDateString('pt-BR')}`, pageWidth / 2 + 10, 28, { align: 'center' });
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Registro Oficial de Execução e Medição - Emissão: ${new Date().toLocaleDateString('pt-BR')}`, pageWidth - 20, 28, { align: 'right' });
 
     // Content
     doc.setTextColor(51, 65, 85); // slate-700
@@ -2060,6 +2389,7 @@ export default function App() {
     const projectPhotos = photoReports.filter(p => p.projectId === bulletin.projectId).slice(0, 3);
     if (projectPhotos.length > 0) {
       doc.addPage('a4', 'landscape');
+      addWatermark(doc);
       doc.setFillColor(0, 51, 255);
       doc.rect(0, 0, pageWidth, 20, 'F');
       doc.setTextColor(255, 255, 255);
@@ -2082,6 +2412,7 @@ export default function App() {
           // Adjust Y if photo height pushes caption off page
           if (photoY + photoHeight + 15 > pageHeight) {
             doc.addPage('a4', 'landscape');
+            addWatermark(doc);
             doc.setFillColor(0, 51, 255);
             doc.rect(0, 0, pageWidth, 20, 'F');
             doc.setTextColor(255, 255, 255);
@@ -2107,11 +2438,16 @@ export default function App() {
       });
     }
 
-    // Footer
-    doc.setFontSize(8);
-    doc.setTextColor(148, 163, 184);
-    doc.text('Este documento é um registro oficial de medição gerado pelo sistema AXIA ENERGIA.', pageWidth / 2, pageHeight - 15, { align: 'center' });
-    doc.text('© 2026 AXIA ENERGIA - Todos os direitos reservados', pageWidth / 2, pageHeight - 10, { align: 'center' });
+    // Footer & Watermark
+    const allPages = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= allPages; i++) {
+      doc.setPage(i);
+      addWatermark(doc);
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184);
+      doc.text('Este documento é um registro oficial de medição gerado pelo sistema AXIA ENERGIA.', pageWidth / 2, pageHeight - 15, { align: 'center' });
+      doc.text('© 2026 AXIA ENERGIA - Todos os direitos reservados', pageWidth / 2, pageHeight - 10, { align: 'center' });
+    }
 
     doc.save(`Boletim_${bulletin.projectName.replace(/\s+/g, '_')}_${bulletin.rcNumber}.pdf`);
     showNotification('Boletim PDF (Horizontal) gerado com sucesso!');
@@ -2122,28 +2458,23 @@ export default function App() {
     const pageWidth = doc.internal.pageSize.getWidth();
     
     // Header
-    doc.setFillColor(0, 51, 255); // axia-primary (Ocean Blue)
-    doc.rect(0, 0, pageWidth, 35, 'F');
+    doc.setFillColor(248, 250, 252);
+    doc.rect(0, 0, pageWidth, 40, 'F');
+    doc.setDrawColor(226, 232, 240);
+    doc.line(0, 40, pageWidth, 40);
     
-    // Logo - AXIA ENERGIA (Single Line)
-    doc.setTextColor(255, 255, 255);
+    // Logo
+    drawPDFLogo(doc, 20, 18);
+    
+    doc.setTextColor(15, 23, 42);
+    doc.setFontSize(24);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(22);
-    doc.text('AXIA', 20, 18);
+    doc.text('RELATÓRIO DE PROJETO', pageWidth - 20, 20, { align: 'right' });
     
-    const axiaReportWidthValue = doc.getTextWidth('AXIA');
+    doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(22);
-    doc.text(' ENERGIA', 20 + axiaReportWidthValue, 18);
-    
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(22);
-    doc.setFont('helvetica', 'bold');
-    doc.text('RELATÓRIO DE PROJETO', pageWidth / 2 + 20, 18, { align: 'center' });
-    
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`${project.name.toUpperCase()}`, pageWidth / 2 + 10, 26, { align: 'center' });
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Documento Técnico de Acompanhamento - ${new Date().toLocaleDateString('pt-BR')}`, pageWidth - 20, 28, { align: 'right' });
     
     // Project Info
     doc.setTextColor(30, 41, 59); // slate-800
@@ -2309,6 +2640,7 @@ export default function App() {
     const pageCount = (doc as any).internal.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
+      addWatermark(doc);
       doc.setFontSize(8);
       doc.setTextColor(148, 163, 184); // slate-400
       doc.text(`Página ${i} de ${pageCount}`, pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
@@ -2344,31 +2676,27 @@ export default function App() {
       if (index > 0) {
         doc.addPage();
       }
+      addWatermark(doc);
 
-      // Header for each project page
-      doc.setFillColor(0, 51, 255); // axia-primary color (Ocean Blue)
-      doc.rect(0, 0, pageWidth, 30, 'F');
+      // Header representing company brand
+      doc.setFillColor(248, 250, 252);
+      doc.rect(0, 0, pageWidth, 35, 'F');
+      doc.setDrawColor(226, 232, 240);
+      doc.line(0, 35, pageWidth, 35);
       
-      // Logo - AXIA ENERGIA (Single Line)
-      doc.setTextColor(255, 255, 255);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(18);
-      doc.text('AXIA', 20, 15);
+      // Logo
+      drawPDFLogo(doc, 20, 15);
       
-      const gAxiaWidth = doc.getTextWidth('AXIA');
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(18);
-      doc.text(' ENERGIA', 20 + gAxiaWidth, 15);
-      
-      doc.setTextColor(255, 255, 255);
+      doc.setTextColor(15, 23, 42);
       doc.setFontSize(18);
       doc.setFont('helvetica', 'bold');
-      doc.text('RELATÓRIO GERAL DE OBRAS', pageWidth / 2 + 20, 15, { align: 'center' });
+      doc.text('RELATÓRIO GERAL DE OBRAS', pageWidth - 15, 15, { align: 'right' });
       
-      doc.setFontSize(9);
+      doc.setFontSize(8);
       doc.setFont('helvetica', 'normal');
-      doc.text(`OBRA: ${project.name.toUpperCase()}`, pageWidth / 2 + 10, 22, { align: 'center' });
-      doc.text(`Emissão: ${new Date().toLocaleDateString('pt-BR')}`, pageWidth - 15, 22, { align: 'right' });
+      doc.setTextColor(100, 116, 139);
+      doc.text(`OBRA: ${project.name.toUpperCase()}`, pageWidth - 15, 22, { align: 'right' });
+      doc.text(`Emissão: ${new Date().toLocaleDateString('pt-BR')}`, pageWidth - 15, 27, { align: 'right' });
       
       // Project Info Section
       doc.setTextColor(51, 65, 85); // slate-700
@@ -2543,6 +2871,7 @@ export default function App() {
     const pageCount = (doc as any).internal.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
+      addWatermark(doc);
       doc.setFontSize(8);
       doc.setTextColor(148, 163, 184); // slate-400
       doc.text(`Página ${i} de ${pageCount}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
@@ -2886,7 +3215,7 @@ export default function App() {
             </div>
           ) : (
             <div className="w-10 h-10 bg-axia-primary rounded-lg flex items-center justify-center flex-shrink-0 shadow-lg shadow-axia-primary/20 mx-auto">
-              <span className="text-white font-black text-xl">A</span>
+              <span className="text-white font-black text-xl">AX</span>
             </div>
           )}
           {isMobile && isSidebarOpen && (
@@ -4416,6 +4745,28 @@ export default function App() {
                     <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">Cronograma Mensal de Atividades</p>
                   </div>
                   <div className="flex items-center gap-3">
+                    <button 
+                      onClick={() => setShowTodayLine(!showTodayLine)}
+                      className={`p-2 rounded-xl border transition-all flex items-center gap-2 text-xs font-bold ${
+                        showTodayLine 
+                          ? 'bg-red-50 border-red-200 text-red-600 dark:bg-red-900/20 dark:border-red-800' 
+                          : 'bg-slate-50 border-slate-200 text-slate-500 dark:bg-slate-800 dark:border-slate-700'
+                      }`}
+                      title={showTodayLine ? "Ocultar Hoje" : "Mostrar Hoje"}
+                    >
+                      <Calendar size={14} />
+                      {isMobile ? "" : "Hoje"}
+                    </button>
+                    {hiddenMonths.length > 0 && (
+                      <button 
+                        onClick={() => setHiddenMonths([])}
+                        className="p-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100 transition-all flex items-center gap-2 text-xs font-bold dark:bg-slate-800 dark:border-slate-700"
+                        title="Restaurar meses ocultos"
+                      >
+                         <Eye size={14} />
+                         {isMobile ? "" : "Meses"} ({hiddenMonths.length})
+                      </button>
+                    )}
                     <select 
                       value={selectedPlanningProjectId}
                       onChange={(e) => setSelectedPlanningProjectId(e.target.value)}
@@ -4467,6 +4818,16 @@ export default function App() {
                       <Download size={18} className="text-blue-500" />
                       PNG
                     </button>
+                    {hiddenMonths.length > 0 && (
+                      <button 
+                        onClick={showAllMonths}
+                        className="bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 px-6 py-2 rounded-xl font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-all flex items-center gap-2"
+                        title="Restaurar visualização de todos os meses ocultos"
+                      >
+                        <Eye size={18} className="text-emerald-500" />
+                        Meses Ocultos ({hiddenMonths.length})
+                      </button>
+                    )}
                     <button 
                       onClick={() => setShowHiddenActivities(!showHiddenActivities)}
                       className={`px-4 py-2 rounded-xl font-bold text-sm transition-all flex items-center gap-2 border ${
@@ -4601,17 +4962,25 @@ export default function App() {
                                 </div>
                                 {/* Month Row */}
                                 <div className="h-10 flex border-b border-slate-200 dark:border-slate-700">
-                                  {planningTimelineData && Array.from({ length: planningTimelineData.numMonths }).map((_, i) => {
-                                    const absMonth = planningTimelineData.startAbs + i;
-                                    const currentMonth = absMonth % 12;
+                                  {planningTimelineData && planningTimelineData.visibleMonths.map((m) => {
                                     const monthNamesShort = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
                                     return (
                                       <div 
-                                        key={`month-header-${absMonth}`} 
-                                        className="flex items-center justify-center border-r border-slate-100 dark:border-slate-800 text-[9px] font-bold text-slate-400"
+                                        key={`month-header-${m.absMonth}`} 
+                                        className="flex flex-col items-center justify-center border-r border-slate-100 dark:border-slate-800 text-[9px] font-bold text-slate-400 group relative"
                                         style={{ width: MONTH_WIDTH, minWidth: MONTH_WIDTH }}
                                       >
-                                        {monthNamesShort[currentMonth]}
+                                        {monthNamesShort[m.month]}
+                                        <div 
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            toggleMonthVisibility(`${m.year}-${m.month}`);
+                                          }}
+                                          className="absolute top-0 right-1 opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-500 cursor-pointer pointer-events-auto"
+                                          title="Ocultar mês"
+                                        >
+                                          <X size={10} />
+                                        </div>
                                       </div>
                                     );
                                   })}
@@ -4622,9 +4991,9 @@ export default function App() {
                               <div className="relative min-h-[400px]">
                                  {/* Vertical Grid Lines */}
                                  <div className="absolute inset-0 flex pointer-events-none">
-                                  {planningTimelineData && Array.from({ length: planningTimelineData.numMonths }).map((_, i) => (
+                                  {planningTimelineData && planningTimelineData.visibleMonths.map((m) => (
                                     <div 
-                                      key={`grid-${i}`} 
+                                      key={`grid-${m.absMonth}`} 
                                       className="border-r border-slate-100 dark:border-slate-800/50 h-full" 
                                       style={{ width: MONTH_WIDTH, minWidth: MONTH_WIDTH }}
                                     />
@@ -4632,15 +5001,19 @@ export default function App() {
                                 </div>
 
                                 {/* Today Marker Line */}
-                                {planningTimelineData && planningTimelineData.exactTodayAbs >= planningTimelineData.startAbs && planningTimelineData.exactTodayAbs <= (planningTimelineData.endAbs + 1) && (
+                                {showTodayLine && planningTimelineData && planningTimelineData.exactTodayAbs >= planningTimelineData.startAbs && planningTimelineData.exactTodayAbs <= (planningTimelineData.endAbs + 1) && !hiddenMonths.includes(`${Math.floor(planningTimelineData.exactTodayAbs / 12)}-${Math.floor(planningTimelineData.exactTodayAbs % 12)}`) && (
                                   <div 
                                     className="absolute top-0 bottom-0 w-px border-l-2 border-dashed border-red-500/40 z-20 pointer-events-none"
                                     style={{ 
-                                      left: (planningTimelineData.exactTodayAbs - planningTimelineData.startAbs) * MONTH_WIDTH,
+                                      left: getMonthPosition(Math.floor(planningTimelineData.exactTodayAbs), planningTimelineData.visibleMonths) + (planningTimelineData.exactTodayAbs % 1) * MONTH_WIDTH,
                                     }}
                                   >
-                                    <div className="absolute top-2 -left-[18px] px-1.5 py-0.5 bg-red-500 text-white text-[7px] font-black rounded-sm uppercase tracking-tighter shadow-md z-30 flex items-center gap-1">
-                                      <div className="w-1 h-1 bg-white rounded-full animate-pulse" />
+                                    <div 
+                                      onClick={() => setShowTodayLine(false)}
+                                      className="absolute top-2 -left-[18px] px-1.5 py-0.5 bg-red-500 text-white text-[7px] font-black rounded-sm uppercase tracking-tighter shadow-md z-30 flex items-center gap-1 cursor-pointer pointer-events-auto hover:scale-110 active:scale-95 transition-transform"
+                                      title="Clique para ocultar"
+                                    >
+                                      <Calendar className="w-2 h-2" />
                                       HOJE
                                     </div>
                                   </div>
@@ -4651,9 +5024,11 @@ export default function App() {
                                   
                                   const absStart = activity.startYear * 12 + activity.startMonth;
                                   const absEnd = activity.endYear * 12 + activity.endMonth;
-                                  const left = (absStart - planningTimelineData.startAbs) * MONTH_WIDTH;
-                                  const duration = absEnd - absStart + 1;
-                                  const width = duration * MONTH_WIDTH;
+                                  
+                                  const left = getMonthPosition(absStart, planningTimelineData.visibleMonths);
+                                  const width = getMonthPosition(absEnd + 1, planningTimelineData.visibleMonths) - left;
+
+                                  if (width <= 0) return null;
 
                                   return (
                                     <div key={activity.id} className="h-14 border-b border-slate-50 dark:border-slate-800/50 relative group">
@@ -4840,6 +5215,18 @@ export default function App() {
                     <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">Gestão de prazos e atividades</p>
                   </div>
                   <div className="flex items-center gap-3">
+                    <button 
+                      onClick={() => setShowTodayLine(!showTodayLine)}
+                      className={`p-2 rounded-xl border transition-all flex items-center gap-2 text-xs font-bold ${
+                        showTodayLine 
+                          ? 'bg-red-50 border-red-200 text-red-600 dark:bg-red-900/20 dark:border-red-800' 
+                          : 'bg-slate-50 border-slate-200 text-slate-500 dark:bg-slate-800 dark:border-slate-700'
+                      }`}
+                      title={showTodayLine ? "Ocultar Hoje" : "Mostrar Hoje"}
+                    >
+                      <Calendar size={14} />
+                      {isMobile ? "" : "Hoje"}
+                    </button>
                     <select 
                       value={selectedScheduleProjectId}
                       onChange={(e) => setSelectedScheduleProjectId(e.target.value)}
@@ -5149,12 +5536,17 @@ export default function App() {
                         ))}
 
                         {/* Vertical "Hoje" Line */}
-                        {scheduleTimelineData && scheduleTimelineData.exactTodayAbs >= scheduleTimelineData.startAbs && scheduleTimelineData.exactTodayAbs <= (scheduleTimelineData.endAbs + 1) && (
+                        {showTodayLine && scheduleTimelineData && scheduleTimelineData.exactTodayAbs >= scheduleTimelineData.startAbs && scheduleTimelineData.exactTodayAbs <= (scheduleTimelineData.endAbs + 1) && (
                           <div 
                             className="absolute top-0 bottom-0 border-l-2 border-dashed border-red-500 z-30 pointer-events-none"
                             style={{ left: (scheduleTimelineData.exactTodayAbs - scheduleTimelineData.startAbs) * MONTH_WIDTH }}
                           >
-                            <div className="absolute -top-7 -left-1/2 bg-red-500 text-white text-[8px] px-2 py-0.5 rounded-full font-black whitespace-nowrap shadow-sm">
+                            <div 
+                              onClick={() => setShowTodayLine(false)}
+                              className="absolute -top-7 -left-1/2 bg-red-500 text-white text-[8px] px-2 py-0.5 rounded-full font-black whitespace-nowrap shadow-sm cursor-pointer pointer-events-auto hover:scale-110 active:scale-95 transition-transform flex items-center gap-1.5"
+                              title="Clique para ocultar"
+                            >
+                              <Calendar className="w-2.5 h-2.5" />
                               HOJE ({new Date().toLocaleDateString('pt-BR')})
                             </div>
                           </div>
@@ -5867,7 +6259,7 @@ export default function App() {
               >
                 <div>
                   <h2 className="text-3xl font-display font-bold text-slate-900">Configurações</h2>
-                  <p className="text-slate-500">Personalize sua experiência no sistema A.L Gestão de Obras.</p>
+                  <p className="text-slate-500">Personalize sua experiência no sistema Axia Energia.</p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -6665,17 +7057,36 @@ function LoginPage({ onLogin, onRegister }: {
         setMode('login');
       }
     } catch (err: any) {
-      console.error('Auth error:', err);
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        setError('E-mail ou senha incorretos.');
-      } else if (err.code === 'auth/email-already-in-use') {
+      console.error('Full Auth Error Object:', JSON.stringify(err, null, 2));
+      console.error('Auth error code:', err.code);
+      console.error('Auth error message:', err.message);
+      
+      const errorCode = err.code || '';
+      const errorMessage = err.message || '';
+
+      if (errorMessage.includes('Quota exceeded') || errorCode.includes('quota-exceeded')) {
+        setError('O limite de acesso aos dados do Google foi atingido para hoje. O sistema voltará ao normal em breve.');
+        localStorage.setItem('firestore_quota_extrapolated', 'true');
+      } else if (
+        errorCode === 'auth/user-not-found' || 
+        errorCode === 'auth/wrong-password' || 
+        errorCode === 'auth/invalid-credential' ||
+        errorMessage.includes('auth/invalid-credential') ||
+        errorMessage.includes('invalid-credential')
+      ) {
+        setError('E-mail ou senha incorretos. Verifique suas credenciais e tente novamente.');
+      } else if (errorCode === 'auth/email-already-in-use') {
         setError('Este e-mail já está em uso.');
-      } else if (err.code === 'auth/weak-password') {
+      } else if (errorCode === 'auth/weak-password') {
         setError('A senha deve ter pelo menos 6 caracteres.');
-      } else if (err.code === 'auth/invalid-email') {
+      } else if (errorCode === 'auth/invalid-email') {
         setError('E-mail inválido.');
+      } else if (errorCode === 'auth/network-request-failed') {
+        setError('Erro de conexão: Não foi possível conectar ao servidor da AXIA. Verifique sua internet e tente novamente.');
+      } else if (errorCode === 'auth/too-many-requests') {
+        setError('Muitas tentativas malsucedidas. Sua conta foi temporariamente bloqueada. Tente novamente mais tarde.');
       } else {
-        setError('Ocorreu um erro ao processar sua solicitação: ' + (err.message || 'Erro desconhecido'));
+        setError('Ocorreu um erro ao processar sua solicitação: ' + (errorMessage || 'Erro desconhecido'));
       }
     } finally {
       setIsLoading(false);
@@ -6872,7 +7283,7 @@ function LoginPage({ onLogin, onRegister }: {
         </motion.div>
         
         <div className="mt-8 text-center">
-          <p className="text-xs text-slate-400 font-medium">© 2026 A.L Gestão de Obras. Todos os direitos reservados.</p>
+          <p className="text-xs text-slate-400 font-medium">© 2026 Axia Energia. Todos os direitos reservados.</p>
         </div>
       </div>
     </div>
