@@ -93,6 +93,8 @@ export interface UserProfile {
   avatar: string;
   phone: string;
   accessLevel: string;
+  palette?: string;
+  isDarkMode?: boolean;
 }
 
 export interface Attachment {

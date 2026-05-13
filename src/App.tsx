@@ -329,11 +329,40 @@ export default function App() {
   useEffect(() => {
     const palette = palettes.find(p => p.id === currentPalette) || palettes[0];
     const root = document.documentElement;
-    root.style.setProperty('--al-primary', palette.primary);
-    root.style.setProperty('--al-secondary', palette.secondary);
-    root.style.setProperty('--al-accent', palette.accent);
+    root.style.setProperty('--axia-primary', palette.primary);
+    root.style.setProperty('--axia-secondary', palette.secondary);
+    root.style.setProperty('--axia-accent', palette.accent);
     localStorage.setItem('currentPalette', currentPalette);
   }, [currentPalette]);
+
+  useEffect(() => {
+    if (currentUser && currentUser.palette && currentUser.palette !== currentPalette) {
+      setCurrentPalette(currentUser.palette);
+    }
+  }, [currentUser.palette]);
+
+  useEffect(() => {
+    if (currentUser && currentUser.isDarkMode !== undefined && currentUser.isDarkMode !== isDarkMode) {
+      setIsDarkMode(currentUser.isDarkMode);
+    }
+  }, [currentUser.isDarkMode]);
+
+  const handleSaveSettings = async () => {
+    try {
+      const userRef = doc(db, 'users', currentUser.id);
+      await updateDoc(userRef, {
+        palette: currentPalette,
+        isDarkMode: isDarkMode
+      });
+      setCurrentUser({ ...currentUser, palette: currentPalette, isDarkMode: isDarkMode });
+      showNotification('Configurações salvas com sucesso no seu perfil.');
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      showNotification('Erro ao salvar no perfil. Salvando localmente...');
+      localStorage.setItem('currentPalette', currentPalette);
+      localStorage.setItem('darkMode', isDarkMode.toString());
+    }
+  };
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [editingMeasurement, setEditingMeasurement] = useState<Measurement | null>(null);
   const [projectDetailTab, setProjectDetailTab] = useState<'details' | 'attachments' | 'history' | 'photos' | 'addendums'>('details');
@@ -6478,7 +6507,7 @@ export default function App() {
 
                       <div className="pt-4">
                         <button 
-                          onClick={() => showNotification('Configurações salvas com sucesso.')}
+                          onClick={handleSaveSettings}
                           className="w-full bg-axia-primary text-white py-3 rounded-xl font-bold hover:bg-axia-primary/90 transition-all shadow-lg shadow-axia-primary/20"
                         >
                           Salvar Configurações

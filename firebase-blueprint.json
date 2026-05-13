@@ -11,7 +11,9 @@
         "role": { "type": "string" },
         "avatar": { "type": "string" },
         "phone": { "type": "string" },
-        "accessLevel": { "type": "string" }
+        "accessLevel": { "type": "string" },
+        "palette": { "type": "string" },
+        "isDarkMode": { "type": "boolean" }
       },
       "required": ["id", "name", "email"]
     },
