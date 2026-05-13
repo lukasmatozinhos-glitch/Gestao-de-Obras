@@ -144,3 +144,29 @@ export interface PlanningActivity {
   description?: string;
   isHidden: boolean;
 }
+
+export interface ConsumptionRCRequest {
+  id: string;
+  projectId: string;
+  projectName: string;
+  requestDate: string;
+  status: 'requested' | 'pending' | 'received' | 'returned';
+  rcNumber?: string;
+  value: number;
+  signedBulletin?: {
+    name: string;
+    url: string;
+    size?: string;
+  };
+  observations: RCHistoryEntry[];
+  createdBy: string;
+  creatorName: string;
+  createdAt: any;
+}
+
+export interface RCHistoryEntry {
+  id: string;
+  text: string;
+  date: string;
+  userName: string;
+}

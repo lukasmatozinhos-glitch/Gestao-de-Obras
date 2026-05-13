@@ -181,6 +181,48 @@
         "description": { "type": "string" }
       },
       "required": ["id", "projectId", "name", "startMonth", "startYear", "endMonth", "endYear", "color", "order"]
+    },
+    "ConsumptionRCRequest": {
+      "title": "Consumption RC Request",
+      "description": "A request for consumption RC to enable measurements",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "projectName": { "type": "string" },
+        "requestDate": { "type": "string" },
+        "status": { "type": "string", "enum": ["requested", "pending", "received", "returned"] },
+        "rcNumber": { "type": "string" },
+        "value": { "type": "number" },
+        "signedBulletin": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "url": { "type": "string" },
+            "size": { "type": "string" }
+          }
+        },
+        "observations": { 
+          "type": "array",
+          "items": { "$ref": "RCHistoryEntry" }
+        },
+        "createdBy": { "type": "string" },
+        "creatorName": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "projectId", "projectName", "requestDate", "status", "observations"]
+    },
+    "RCHistoryEntry": {
+      "title": "RC History Entry",
+      "description": "A single observation in the RC request timeline",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "date": { "type": "string" },
+        "userName": { "type": "string" }
+      },
+      "required": ["id", "text", "date", "userName"]
     }
   },
   "firestore": {
@@ -227,6 +269,10 @@
     "/planningActivities/{activityId}": {
       "schema": "PlanningActivity",
       "description": "Planning activity documents"
+    },
+    "/consumptionRCRequests/{requestId}": {
+      "schema": "ConsumptionRCRequest",
+      "description": "Consumption RC request documents"
     }
   }
 }

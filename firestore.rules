@@ -94,6 +94,18 @@ service cloud.firestore {
              data.color is string && data.order is number;
     }
 
+    function isValidRCRequest(data) {
+      return data.projectId is string && 
+             data.projectName is string &&
+             data.requestDate is string &&
+             data.status in ['requested', 'pending', 'received', 'returned'] &&
+             (data.value is number || !('value' in data)) &&
+             (!('signedBulletin' in data) || (
+               data.signedBulletin.name is string &&
+               data.signedBulletin.url is string
+             ));
+    }
+
     // ===============================================================
     // Collection Rules
     // ===============================================================
@@ -163,6 +175,13 @@ service cloud.firestore {
       allow create, update: if isAuthenticated() && isValidId(activityId) && 
                               isValidPlanningActivity(request.resource.data);
       allow delete: if isAdmin();
+    }
+
+    match /consumptionRCRequests/{requestId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidRCRequest(request.resource.data);
+      allow update: if isAuthenticated() && (isAdmin() || (isOwner(resource.data.createdBy) && isValidRCRequest(request.resource.data)));
+      allow delete: if isAdmin() || isOwner(resource.data.createdBy);
     }
   }
 }

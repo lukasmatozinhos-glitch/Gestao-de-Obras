@@ -48,6 +48,7 @@ import { GripVertical, LayoutDashboard,
   ChevronUp,
   ChevronDown,
   DownloadCloud,
+  UploadCloud,
   EyeOff
 } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
@@ -95,7 +96,7 @@ import {
 } from 'recharts';
 import { MOCK_PROJECTS, MOCK_RESOURCES, MOCK_REPORTS, MOCK_MEASUREMENTS, MOCK_ATTACHMENTS, MOCK_STATUS_UPDATES } from './constants';
 import html2canvas from 'html2canvas';
-import { Project, WeeklyReport, Measurement, UserProfile, Attachment, StatusUpdate, PhotoReportItem, MeasurementBulletin, ProjectAddendum, ScheduleActivity, PlanningActivity } from './types';
+import { Project, WeeklyReport, Measurement, UserProfile, Attachment, StatusUpdate, PhotoReportItem, MeasurementBulletin, ProjectAddendum, ScheduleActivity, PlanningActivity, ConsumptionRCRequest, RCHistoryEntry } from './types';
 
 const MONTHS = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -262,6 +263,19 @@ export default function App() {
   const [addendums, setAddendums] = useState<ProjectAddendum[]>([]);
   const [activities, setActivities] = useState<ScheduleActivity[]>([]);
   const [planningActivities, setPlanningActivities] = useState<PlanningActivity[]>([]);
+  const [consumptionRCRequests, setConsumptionRCRequests] = useState<ConsumptionRCRequest[]>([]);
+  const [isAddingRCRequest, setIsAddingRCRequest] = useState(false);
+  const [isUpdatingRCStatus, setIsUpdatingRCStatus] = useState<string | null>(null);
+  const [tempRCNumber, setTempRCNumber] = useState('');
+  const [newRCRequest, setNewRCRequest] = useState({
+    projectId: '',
+    requestDate: new Date().toISOString().split('T')[0],
+    value: 0,
+    signedBulletin: null as { name: string; url: string; size?: string } | null,
+  });
+  const [requestToDelete, setRequestToDelete] = useState<string | null>(null);
+  const [newRCObservation, setNewRCObservation] = useState('');
+  const [viewingRCRequest, setViewingRCRequest] = useState<ConsumptionRCRequest | null>(null);
   const [selectedScheduleProjectId, setSelectedScheduleProjectId] = useState<string>('');
   const [selectedPlanningProjectId, setSelectedPlanningProjectId] = useState<string>('');
   const [planningViewMonths, setPlanningViewMonths] = useState<number | 'auto'>('auto');
@@ -1844,6 +1858,16 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'users');
     });
 
+    const unsubRCRequests = onSnapshot(collection(db, 'consumptionRCRequests'), (snapshot) => {
+      setConsumptionRCRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ConsumptionRCRequest)));
+    }, (error) => {
+      if (error.message.includes('Quota exceeded')) {
+        localStorage.setItem('firestore_quota_extrapolated', 'true');
+        setQuotaExceeded(true);
+      }
+      handleFirestoreError(error, OperationType.LIST, 'consumptionRCRequests');
+    });
+
     return () => {
       unsubProjects();
       unsubReports();
@@ -1856,6 +1880,7 @@ export default function App() {
       unsubActivities();
       unsubPlanning();
       unsubUsers();
+      unsubRCRequests();
     };
   }, [isLoggedIn, isAuthReady]);
 
@@ -2313,6 +2338,129 @@ export default function App() {
     } catch (error) {
       console.error('Error archiving bulletin:', error);
       handleFirestoreError(error, OperationType.WRITE, `measurementBulletins/${bulletin.id}`);
+    }
+  };
+
+  const handleAddRCRequest = async () => {
+    if (!newRCRequest.projectId) {
+      showNotification('Selecione uma obra.');
+      return;
+    }
+    
+    const project = projects.find(p => p.id === newRCRequest.projectId);
+    if (!project) return;
+
+    try {
+      const requestData: Omit<ConsumptionRCRequest, 'id'> = {
+        projectId: newRCRequest.projectId,
+        projectName: project.name,
+        requestDate: newRCRequest.requestDate,
+        value: newRCRequest.value,
+        signedBulletin: newRCRequest.signedBulletin || undefined,
+        status: 'requested',
+        observations: [{
+          id: Math.random().toString(36).substr(2, 9),
+          text: 'Solicitação inicial de RC de Consumo criada.',
+          date: new Date().toLocaleString('pt-BR'),
+          userName: currentUser.name
+        }],
+        createdBy: currentUser.id,
+        creatorName: currentUser.name,
+        createdAt: new Date().toISOString()
+      };
+      
+      await addDoc(collection(db, 'consumptionRCRequests'), requestData);
+      showNotification('Solicitação de RC criada com sucesso!');
+      setIsAddingRCRequest(false);
+      setNewRCRequest({
+        projectId: '',
+        requestDate: new Date().toISOString().split('T')[0],
+        value: 0,
+        signedBulletin: null,
+      });
+    } catch (error) {
+      console.error('Error adding RC request:', error);
+      handleFirestoreError(error, OperationType.WRITE, 'consumptionRCRequests');
+    }
+  };
+
+  const handleUpdateRCStatus = async (request: ConsumptionRCRequest, newStatus: ConsumptionRCRequest['status'], rcNumber?: string) => {
+    try {
+      const requestRef = doc(db, 'consumptionRCRequests', request.id);
+      const updateData: any = { status: newStatus };
+      
+      let observationText = '';
+      if (newStatus === 'pending') observationText = 'Status alterado para Pendente.';
+      if (newStatus === 'requested') observationText = 'Status alterado para Solicitado.';
+      if (newStatus === 'returned') observationText = 'RC Devolvida para correção/ajuste.';
+      if (newStatus === 'received') {
+        observationText = `RC Recebida. Número: ${rcNumber}`;
+        updateData.rcNumber = rcNumber;
+      }
+      
+      const newObservation: RCHistoryEntry = {
+        id: Math.random().toString(36).substr(2, 9),
+        text: observationText,
+        date: new Date().toLocaleString('pt-BR'),
+        userName: currentUser.name
+      };
+      
+      const currentObservations = request.observations || [];
+      updateData.observations = [...currentObservations, newObservation];
+      
+      await updateDoc(requestRef, updateData);
+      
+      // Update the viewing request to reflect changes immediately
+      if (viewingRCRequest && viewingRCRequest.id === request.id) {
+        setViewingRCRequest({ ...request, ...updateData });
+      }
+      
+      showNotification('Status atualizado!');
+    } catch (error) {
+      console.error('Error updating RC status:', error);
+      handleFirestoreError(error, OperationType.WRITE, `consumptionRCRequests/${request.id}`);
+    }
+  };
+
+  const handleAddRCObservation = async (request: ConsumptionRCRequest) => {
+    if (!newRCObservation.trim()) return;
+    
+    try {
+      const requestRef = doc(db, 'consumptionRCRequests', request.id);
+      const newObservation: RCHistoryEntry = {
+        id: Math.random().toString(36).substr(2, 9),
+        text: newRCObservation,
+        date: new Date().toLocaleString('pt-BR'),
+        userName: currentUser.name
+      };
+      
+      const updatedObservations = [...(request.observations || []), newObservation];
+      
+      await updateDoc(requestRef, {
+        observations: updatedObservations
+      });
+      
+      if (viewingRCRequest && viewingRCRequest.id === request.id) {
+        setViewingRCRequest({ ...request, observations: updatedObservations });
+      }
+      
+      setNewRCObservation('');
+      showNotification('Observação adicionada!');
+    } catch (error) {
+      console.error('Error adding RC observation:', error);
+      handleFirestoreError(error, OperationType.WRITE, `consumptionRCRequests/${request.id}`);
+    }
+  };
+
+  const handleDeleteRCRequest = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'consumptionRCRequests', id));
+      if (viewingRCRequest?.id === id) setViewingRCRequest(null);
+      setRequestToDelete(null);
+      showNotification('Solicitação excluída.');
+    } catch (error) {
+      console.error('Error deleting RC request:', error);
+      handleFirestoreError(error, OperationType.DELETE, `consumptionRCRequests/${id}`);
     }
   };
 
@@ -3325,6 +3473,13 @@ export default function App() {
             collapsed={!isSidebarOpen && !isMobile}
           />
           <NavItem 
+            icon={<ShieldCheck size={20} />} 
+            label="Controle de RC" 
+            active={activeTab === 'rc-control'} 
+            onClick={() => { setActiveTab('rc-control'); if(isMobile) setIsSidebarOpen(false); }}
+            collapsed={!isSidebarOpen && !isMobile}
+          />
+          <NavItem 
             icon={<BarChart3 size={20} />} 
             label="Relatórios" 
             active={activeTab === 'reports'} 
@@ -3468,12 +3623,12 @@ export default function App() {
                     isGeneratingReport={isGeneratingReport}
                   />
                   <StatCard 
-                    title="Paralisadas" 
-                    value={statusCounts['paused'].toString()} 
-                    change="Necessita atenção" 
-                    icon={<AlertCircle className="text-axia-secondary" />} 
+                    title="RC Pendentes" 
+                    value={consumptionRCRequests.filter(r => r.status !== 'received').length.toString()} 
+                    change="Controle de RC" 
+                    icon={<ShieldCheck className="text-axia-secondary" />} 
                     color="orange"
-                    onClickDetails={() => setActiveTab('projects')}
+                    onClickDetails={() => setActiveTab('rc-control')}
                     onClickReport={handleGenerateGeneralReport}
                     isGeneratingReport={isGeneratingReport}
                   />
@@ -5864,6 +6019,300 @@ export default function App() {
               </motion.div>
             )}
 
+            {activeTab === 'rc-control' && (
+              <motion.div 
+                key="rc-control"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 1.05 }}
+                className="space-y-6"
+              >
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-3xl font-display font-bold text-slate-900 dark:text-white">Controle de RC de Consumo</h2>
+                    <p className="text-slate-500 dark:text-slate-400">Gerencie as solicitações de RC necessárias para medição.</p>
+                  </div>
+                  <button 
+                    onClick={() => setIsAddingRCRequest(true)}
+                    className="bg-axia-primary text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 hover:bg-axia-primary/90 shadow-lg shadow-axia-primary/20 transition-all"
+                  >
+                    <Plus size={20} />
+                    Nova Solicitação
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* RC Request List */}
+                  <div className="lg:col-span-2 space-y-4">
+                    {consumptionRCRequests.length === 0 ? (
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-20 text-center text-slate-400 dark:text-slate-600 shadow-sm">
+                        <Receipt size={64} className="mx-auto mb-4 opacity-10" />
+                        <p className="text-lg font-medium">Nenhuma solicitação de RC registrada.</p>
+                        <p className="text-sm">Clique em "Nova Solicitação" para começar.</p>
+                      </div>
+                    ) : (
+                      consumptionRCRequests.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).map((request) => (
+                        <div 
+                          key={request.id} 
+                          onClick={() => setViewingRCRequest(request)}
+                          className={`bg-white dark:bg-slate-900 border ${viewingRCRequest?.id === request.id ? 'border-axia-primary ring-2 ring-axia-primary/10' : 'border-slate-200 dark:border-slate-800'} rounded-2xl p-6 shadow-sm hover:shadow-md transition-all cursor-pointer group`}
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <div className="flex items-center gap-4">
+                              <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
+                                request.status === 'received' ? 'bg-green-100 dark:bg-green-900/30 text-green-600' :
+                                request.status === 'pending' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600' :
+                                'bg-blue-100 dark:bg-blue-900/30 text-blue-600'
+                              }`}>
+                                <FileText size={24} />
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <h4 className="font-bold text-slate-900 dark:text-white group-hover:text-axia-primary transition-colors">{request.projectName}</h4>
+                                  <span className="text-[10px] font-black text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded uppercase tracking-wider">
+                                    {projects.find(p => p.id === request.projectId)?.contractNumber || '---'}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-3 mt-1">
+                                  <span className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                                    <Calendar size={12} /> Solicitação: {formatInputDate(request.requestDate)}
+                                  </span>
+                                  {request.rcNumber && (
+                                    <span className="text-xs font-bold text-axia-primary bg-axia-primary/10 px-2 py-0.5 rounded-full">
+                                      RC: {request.rcNumber}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-end gap-2">
+                              {requestToDelete === request.id ? (
+                                <div className="flex items-center gap-2 animate-pulse bg-red-50 dark:bg-red-900/10 p-1.5 rounded-xl border border-red-100 dark:border-red-900/20">
+                                  <span className="text-[10px] font-bold text-red-600 px-1">Excluir?</span>
+                                  <button 
+                                    onClick={(e) => { e.stopPropagation(); handleDeleteRCRequest(request.id); }}
+                                    className="p-1 px-2 bg-red-600 text-white rounded-lg text-[10px] font-bold"
+                                  >
+                                    Sim
+                                  </button>
+                                  <button 
+                                    onClick={(e) => { e.stopPropagation(); setRequestToDelete(null); }}
+                                    className="p-1 px-2 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg text-[10px] font-bold"
+                                  >
+                                    Não
+                                  </button>
+                                </div>
+                              ) : (
+                                <>
+                                  <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                    request.status === 'received' ? 'bg-green-100 text-green-700 border border-green-200' :
+                                    request.status === 'returned' ? 'bg-red-100 text-red-700 border border-red-200' :
+                                    request.status === 'pending' ? 'bg-amber-100 text-amber-700 border border-amber-200' :
+                                    'bg-blue-100 text-blue-700 border border-blue-200'
+                                  }`}>
+                                    {request.status === 'received' ? 'Recebido' : 
+                                     request.status === 'returned' ? 'Devolvido' : 
+                                     request.status === 'pending' ? 'Pendente' : 'Solicitado'}
+                                  </span>
+                                  <button 
+                                    onClick={(e) => { e.stopPropagation(); setRequestToDelete(request.id); }}
+                                    className="p-2 hover:bg-red-50 hover:text-red-600 rounded-lg text-slate-400 transition-colors"
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {/* RC Request Details / Timeline */}
+                  <div className="space-y-6">
+                    {viewingRCRequest ? (
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm sticky top-6">
+                        <div className="flex items-center justify-between mb-6">
+                          <h3 className="font-bold text-slate-900 dark:text-white">Detalhes da Solicitação</h3>
+                          <button onClick={() => setViewingRCRequest(null)} className="text-slate-400 hover:text-slate-600">
+                            <X size={20} />
+                          </button>
+                        </div>
+
+                        <div className="space-y-4 mb-8">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <p className="text-[10px] uppercase font-black text-slate-400 tracking-wider mb-1">Obra</p>
+                              <p className="text-sm font-bold text-slate-700 dark:text-slate-300">{viewingRCRequest.projectName}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase font-black text-slate-400 tracking-wider mb-1">Contrato</p>
+                              <p className="text-sm font-bold text-slate-700 dark:text-slate-300">
+                                {projects.find(p => p.id === viewingRCRequest.projectId)?.contractNumber || 'N/A'}
+                              </p>
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-[10px] uppercase font-black text-slate-400 tracking-wider mb-1">Valor</p>
+                            <p className="text-sm font-bold text-axia-primary">
+                              {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingRCRequest.value || 0)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] uppercase font-black text-slate-400 tracking-wider mb-1">Status Atual</p>
+                            <div className="flex flex-wrap gap-2 mt-2">
+                              {['requested', 'pending', 'returned', 'received'].map((s) => (
+                                <button
+                                  key={s}
+                                  onClick={() => {
+                                    if (s === 'received' && !viewingRCRequest.rcNumber) {
+                                      setIsUpdatingRCStatus(s);
+                                      setTempRCNumber(viewingRCRequest.rcNumber || '');
+                                    } else if (s === viewingRCRequest.status) {
+                                      // Do nothing if clicking same status
+                                    } else {
+                                      handleUpdateRCStatus(viewingRCRequest, s as any);
+                                      setIsUpdatingRCStatus(null);
+                                    }
+                                  }}
+                                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                                    viewingRCRequest.status === s 
+                                      ? s === 'returned' ? 'bg-red-600 text-white border-red-600 shadow-sm' : 'bg-axia-primary text-white border-axia-primary shadow-sm' 
+                                      : 'bg-white dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700 hover:border-axia-primary/30'
+                                  }`}
+                                >
+                                  {s === 'requested' ? 'Solicitado' : 
+                                   s === 'pending' ? 'Pendente' : 
+                                   s === 'returned' ? 'Devolvido' : 'Recebido'}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {viewingRCRequest.signedBulletin && (
+                            <div className="bg-slate-50 dark:bg-slate-800/50 rounded-2xl p-4 border border-slate-100 dark:border-slate-800">
+                               <p className="text-[10px] uppercase font-black text-slate-400 tracking-wider mb-3 px-1">Boletim de Medição Anexado</p>
+                               <a 
+                                 href={viewingRCRequest.signedBulletin.url}
+                                 download={viewingRCRequest.signedBulletin.name}
+                                 className="flex items-center gap-3 p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 hover:border-axia-primary hover:shadow-md transition-all group"
+                               >
+                                 <div className="w-10 h-10 rounded-lg bg-axia-primary/10 flex items-center justify-center text-axia-primary group-hover:bg-axia-primary group-hover:text-white transition-colors">
+                                   <Download size={20} />
+                                 </div>
+                                 <div className="flex-1 overflow-hidden">
+                                   <p className="text-xs font-bold text-slate-700 dark:text-slate-200 truncate">{viewingRCRequest.signedBulletin.name}</p>
+                                   <p className="text-[10px] text-slate-400 font-medium">{viewingRCRequest.signedBulletin.size || 'Arquivo'}</p>
+                                 </div>
+                               </a>
+                            </div>
+                          )}
+
+                          {isUpdatingRCStatus === 'received' && (
+                            <motion.div 
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              className="bg-axia-primary/5 p-4 rounded-2xl border border-axia-primary/10 space-y-3"
+                            >
+                              <label className="text-[10px] font-bold text-axia-primary uppercase tracking-widest">Informar Número da RC</label>
+                              <div className="flex gap-2">
+                                <input 
+                                  type="text"
+                                  value={tempRCNumber}
+                                  onChange={(e) => setTempRCNumber(e.target.value)}
+                                  placeholder="Digite o número da RC..."
+                                  className="flex-1 px-3 py-2 bg-white dark:bg-slate-800 border border-axia-primary/20 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20 dark:text-white"
+                                />
+                                <button 
+                                  onClick={() => {
+                                    if (tempRCNumber.trim()) {
+                                      handleUpdateRCStatus(viewingRCRequest, 'received', tempRCNumber);
+                                      setIsUpdatingRCStatus(null);
+                                    }
+                                  }}
+                                  className="bg-axia-primary text-white px-4 py-2 rounded-lg text-xs font-bold"
+                                >
+                                  Salvar
+                                </button>
+                              </div>
+                            </motion.div>
+                          )}
+
+                          {viewingRCRequest.rcNumber && (
+                            <div>
+                              <p className="text-[10px] uppercase font-black text-slate-400 tracking-wider mb-1">Número da RC</p>
+                              <div className="bg-slate-50 dark:bg-slate-800 p-3 rounded-xl border border-slate-100 dark:border-slate-700 flex items-center justify-between">
+                                <p className="text-lg font-mono font-bold text-axia-primary">{viewingRCRequest.rcNumber}</p>
+                                <button 
+                                  onClick={() => {
+                                    setIsUpdatingRCStatus('received');
+                                    setTempRCNumber(viewingRCRequest.rcNumber || '');
+                                  }}
+                                  className="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-400 transition-colors"
+                                >
+                                  <Pencil size={14} />
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="pt-6 border-t border-slate-100 dark:border-slate-800">
+                          <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider mb-4 flex items-center gap-2">
+                            <History size={14} />
+                            Linha do Tempo
+                          </h4>
+                          
+                          <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin">
+                            {viewingRCRequest.observations.map((obs, idx) => (
+                              <div key={obs.id} className="relative pl-4 pb-4 border-l border-slate-100 dark:border-slate-800 last:pb-0">
+                                <div className="absolute left-[-4.5px] top-1.5 w-2 h-2 rounded-full bg-axia-primary ring-4 ring-white dark:ring-slate-900" />
+                                <div className="space-y-1">
+                                  <div className="flex items-center justify-between text-[10px]">
+                                    <span className="font-bold text-slate-900 dark:text-white">{obs.userName}</span>
+                                    <span className="text-slate-400">{obs.date}</span>
+                                  </div>
+                                  <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed italic border-l-2 border-slate-100 dark:border-slate-800 pl-2">
+                                    "{obs.text}"
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="mt-6 flex gap-2">
+                            <input
+                              type="text"
+                              value={newRCObservation}
+                              onChange={(e) => setNewRCObservation(e.target.value)}
+                              placeholder="Adicionar observação..."
+                              className="flex-1 px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-axia-primary/20 dark:text-white"
+                              onKeyDown={(e) => e.key === 'Enter' && handleAddRCObservation(viewingRCRequest)}
+                            />
+                            <button 
+                              onClick={() => handleAddRCObservation(viewingRCRequest)}
+                              disabled={!newRCObservation.trim()}
+                              className="w-10 h-10 bg-axia-primary text-white rounded-xl flex items-center justify-center hover:bg-axia-primary/90 shadow-sm disabled:opacity-50 disabled:grayscale transition-all"
+                            >
+                              <Plus size={20} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-slate-50 dark:bg-slate-900/50 border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl p-12 text-center text-slate-400 dark:text-slate-600 h-full flex flex-col items-center justify-center">
+                        <div className="w-16 h-16 rounded-full bg-white dark:bg-slate-900 flex items-center justify-center mb-4 shadow-sm">
+                          <MessageSquare size={32} className="opacity-20" />
+                        </div>
+                        <p className="text-sm font-medium">Selecione uma solicitação para ver os detalhes e a linha do tempo.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
             {activeTab === 'reports' && (
               <motion.div 
                 key="reports"
@@ -6580,6 +7029,13 @@ export default function App() {
             <span className="text-[10px] font-bold">Medir</span>
           </button>
           <button 
+            onClick={() => setActiveTab('rc-control')}
+            className={`flex flex-col items-center gap-1 flex-1 transition-all ${activeTab === 'rc-control' ? 'text-axia-primary scale-110' : 'text-slate-400'}`}
+          >
+            <ShieldCheck size={20} />
+            <span className="text-[10px] font-bold">RC</span>
+          </button>
+          <button 
             onClick={() => setShowProfile(true)}
             className="flex flex-col items-center gap-1 flex-1 text-slate-400"
           >
@@ -7068,6 +7524,152 @@ export default function App() {
                   >
                     {editingActivity ? 'Salvar Alterações' : 'Salvar Atividade'}
                   </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {isAddingRCRequest && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[32px] overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800"
+            >
+              <div className="p-8">
+                <div className="flex items-center justify-between mb-8">
+                  <div>
+                    <h3 className="text-2xl font-display font-bold text-slate-900 dark:text-white tracking-tight">Nova Solicitação de RC</h3>
+                    <p className="text-sm text-slate-500">Inicie o processo de solicitação de RC de consumo.</p>
+                  </div>
+                  <button 
+                    onClick={() => setIsAddingRCRequest(false)}
+                    className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                  >
+                    <X size={24} className="text-slate-400" />
+                  </button>
+                </div>
+
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Obra / Projeto</label>
+                    <div className="relative">
+                      <Briefcase className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                      <select 
+                        value={newRCRequest.projectId}
+                        onChange={(e) => setNewRCRequest({ ...newRCRequest, projectId: e.target.value })}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl pl-12 pr-5 py-4 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                      >
+                        <option value="">Selecione a Obra</option>
+                        {projects.map(p => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Data da Solicitação</label>
+                    <div className="relative">
+                      <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                      <input 
+                        type="date" 
+                        value={newRCRequest.requestDate}
+                        onChange={(e) => setNewRCRequest({ ...newRCRequest, requestDate: e.target.value })}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl pl-12 pr-5 py-4 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Valor da Solicitação</label>
+                    <div className="relative">
+                      <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">R$</div>
+                      <input 
+                        type="number" 
+                        value={newRCRequest.value}
+                        onChange={(e) => setNewRCRequest({ ...newRCRequest, value: parseFloat(e.target.value) || 0 })}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl pl-12 pr-5 py-4 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                        placeholder="0,00"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Boletim de Medição Assinado</label>
+                    <div className="relative group">
+                      <div className={`w-full border-2 border-dashed rounded-2xl p-6 transition-all flex flex-col items-center justify-center gap-3 ${
+                        newRCRequest.signedBulletin ? 'border-green-500/50 bg-green-50/30' : 'border-slate-200 dark:border-slate-800 hover:border-axia-primary/50'
+                      }`}>
+                        {newRCRequest.signedBulletin ? (
+                          <div className="flex items-center gap-3 text-green-600 dark:text-green-400">
+                            <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
+                              <FileText size={24} />
+                            </div>
+                            <div className="flex-1 overflow-hidden">
+                              <p className="text-sm font-bold truncate">{newRCRequest.signedBulletin.name}</p>
+                              <p className="text-[10px] opacity-70 uppercase font-black tracking-widest">Documento Anexado</p>
+                            </div>
+                            <button 
+                              onClick={() => setNewRCRequest({ ...newRCRequest, signedBulletin: null })}
+                              className="p-2 hover:bg-red-50 hover:text-red-600 rounded-xl transition-colors"
+                            >
+                              <X size={18} />
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="w-12 h-12 rounded-2xl bg-axia-primary/5 flex items-center justify-center text-axia-primary group-hover:scale-110 transition-transform">
+                              <UploadCloud size={28} />
+                            </div>
+                            <div className="text-center">
+                              <p className="text-sm font-bold text-slate-700 dark:text-slate-200">Clique ou arraste o arquivo</p>
+                              <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mt-1">PDF, JPG ou PNG</p>
+                            </div>
+                            <input 
+                              type="file"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  const reader = new FileReader();
+                                  reader.onload = (event) => {
+                                    setNewRCRequest({
+                                      ...newRCRequest,
+                                      signedBulletin: {
+                                        name: file.name,
+                                        url: event.target?.result as string,
+                                        size: `${(file.size / 1024 / 1024).toFixed(2)} MB`
+                                      }
+                                    });
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
+                              }}
+                              className="absolute inset-0 opacity-0 cursor-pointer"
+                              accept=".pdf,.jpg,.jpeg,.png"
+                            />
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4 pt-6">
+                    <button 
+                      onClick={() => setIsAddingRCRequest(false)}
+                      className="flex-1 py-4 text-slate-500 font-bold hover:bg-slate-50 dark:hover:bg-slate-800 rounded-2xl transition-all"
+                    >
+                      Cancelar
+                    </button>
+                    <button 
+                      onClick={handleAddRCRequest}
+                      disabled={!newRCRequest.projectId}
+                      className="flex-[2] py-4 bg-axia-primary text-white font-bold rounded-2xl hover:shadow-xl hover:shadow-axia-primary/20 transition-all disabled:opacity-50 shadow-lg shadow-axia-primary/20"
+                    >
+                      Criar Solicitação
+                    </button>
+                  </div>
                 </div>
               </div>
             </motion.div>
