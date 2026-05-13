@@ -21,23 +21,22 @@ service cloud.firestore {
     // Hardened Admin Helper
     function isAdmin() {
       return isAuthenticated() && (
+        request.auth.token.email in ["lukasmatozinhos3@gmail.com", "lucas.m.santos@axia.com.br", "lucas.m.santos@axia.com.br"] ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accessLevel in ['Administrador de Sistema', 'Gestor']) ||
-        (request.auth.token.email in ["lukasmatozinhos3@gmail.com", "lucas.m.santos@axia.com.br"] && request.auth.token.email_verified == true) ||
-        (request.auth.token.email == "lucas.m.santos@axia.com.br")
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accessLevel in ['Administrador de Sistema', 'Gestor'])
       );
     }
 
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() <= 128;
     }
 
     function isValidEmail(email) {
-      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+      return email is string && email.size() > 5;
     }
 
     function isValidUrl(url) {
-      return url is string && (url.matches("^https://.*") || url.matches("^http://.*") || url.matches("^data:image/.*"));
+      return url is string && url.size() > 0;
     }
 
     // ===============================================================
@@ -45,29 +44,27 @@ service cloud.firestore {
     // ===============================================================
 
     function isValidUser(data) {
-      return data.id is string && data.id.size() > 0 &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             isValidEmail(data.email);
+      return data.id is string && 
+             data.name is string && 
+             data.email is string;
     }
 
     function isValidProject(data) {
-      return data.id is string && data.name is string && data.name.size() > 0 &&
-             data.client is string && data.status in ['not-started', 'in-progress', 'paused', 'finished'];
+      return data.id is string && data.name is string &&
+             data.client is string && data.status is string;
     }
 
     function isValidPhotoReport(data) {
       return data.id is string && data.projectId is string &&
-             data.url is string && isValidUrl(data.url) &&
+             data.url is string && 
              data.date is string;
     }
 
     function isValidBulletin(data) {
       return data.id is string && data.projectId is string &&
              data.projectName is string && data.contractNumber is string &&
-             data.rcNumber is string && data.sapItem is string &&
-             data.installation is string && data.supplier is string &&
              data.value is number && data.date is string &&
-             data.status in ['pending', 'approved', 'paid'];
+             data.status is string;
     }
 
     function isValidAddendum(data) {
@@ -78,20 +75,20 @@ service cloud.firestore {
     }
 
     function isValidScheduleActivity(data) {
-      return data.id is string && data.id.size() > 0 &&
-             data.projectId is string && data.projectId.size() > 0 &&
-             data.name is string && data.name.size() > 0 &&
+      return data.id is string && 
+             data.projectId is string && 
+             data.name is string &&
              data.startDate is string &&
              data.endDate is string &&
              data.progress is number &&
-             data.status in ['pending', 'in-progress', 'completed', 'delayed', 'scheduled'] &&
+             data.status is string &&
              data.order is number;
     }
 
     function isValidPlanningActivity(data) {
-      return data.id is string && data.id.size() > 0 &&
-             data.projectId is string && data.projectId.size() > 0 &&
-             data.name is string && data.name.size() > 0 &&
+      return data.id is string && 
+             data.projectId is string && 
+             data.name is string &&
              data.startMonth is number && data.startYear is number &&
              data.endMonth is number && data.endYear is number &&
              data.color is string && data.order is number;

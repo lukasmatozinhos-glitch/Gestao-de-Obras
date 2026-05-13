@@ -257,7 +257,8 @@ export default function App() {
     progress: 0,
     status: 'pending',
     category: '',
-    order: activities.length
+    order: activities.length,
+    isHidden: false
   });
   const [newPlanningActivity, setNewPlanningActivity] = useState<Omit<PlanningActivity, 'id' | 'projectId'>>({
     name: '',
@@ -268,7 +269,8 @@ export default function App() {
     color: '#0033FF',
     order: planningActivities.length,
     category: '',
-    description: ''
+    description: '',
+    isHidden: false
   });
   const [newBulletin, setNewBulletin] = useState({
     projectId: '',
@@ -453,7 +455,8 @@ export default function App() {
       const newActivity: ScheduleActivity = {
         ...activity,
         id: activityId,
-        projectId: selectedScheduleProjectId
+        projectId: selectedScheduleProjectId,
+        isHidden: activity.isHidden ?? false
       };
       await setDoc(doc(db, 'scheduleActivities', activityId), newActivity);
       showNotification('Atividade adicionada com sucesso!');
@@ -655,14 +658,19 @@ export default function App() {
     e.preventDefault();
     if (!selectedPlanningProjectId) return;
 
+    const dataToSave = {
+      ...newPlanningActivity,
+      isHidden: newPlanningActivity.isHidden ?? false
+    };
+
     try {
       if (editingPlanningActivity) {
-        await updateDoc(doc(db, 'planningActivities', editingPlanningActivity.id), newPlanningActivity);
+        await updateDoc(doc(db, 'planningActivities', editingPlanningActivity.id), dataToSave);
         showNotification('Atividade do planejamento atualizada!');
       } else {
         const id = `plan-${Date.now()}`;
         await setDoc(doc(db, 'planningActivities', id), {
-          ...newPlanningActivity,
+          ...dataToSave,
           id,
           projectId: selectedPlanningProjectId,
           order: planningActivities.filter(a => a.projectId === selectedPlanningProjectId).length
@@ -812,18 +820,19 @@ export default function App() {
                 el.style.overflow = 'visible';
                 el.style.display = 'flex';
                 el.style.alignItems = 'center';
-                el.style.justifyContent = 'center';
+                el.style.justifyContent = 'flex-start';
                 
                 const textSpan = el.querySelector('span');
                 if (textSpan) {
                   textSpan.style.fontSize = '14px';
                   textSpan.style.fontWeight = '900';
-                  textSpan.style.overflow = 'visible';
-                  textSpan.style.textOverflow = 'clip';
+                  textSpan.style.overflow = 'hidden';
+                  textSpan.style.textOverflow = 'ellipsis';
                   textSpan.style.whiteSpace = 'nowrap';
-                  textSpan.style.width = 'auto';
-                  textSpan.style.maxWidth = 'none';
-                  textSpan.style.display = 'inline-block';
+                  textSpan.style.width = '100%';
+                  textSpan.style.maxWidth = '100%';
+                  textSpan.style.display = 'block';
+                  textSpan.style.lineHeight = '50px';
                   textSpan.style.padding = '0 15px';
                 }
               }
@@ -948,18 +957,19 @@ export default function App() {
               el.style.overflow = 'visible';
               el.style.display = 'flex';
               el.style.alignItems = 'center';
-              el.style.justifyContent = 'center';
+              el.style.justifyContent = 'flex-start';
               
               const textSpan = el.querySelector('span');
               if (textSpan) {
                 textSpan.style.fontSize = '14px';
                 textSpan.style.fontWeight = '900';
-                textSpan.style.overflow = 'visible';
-                textSpan.style.textOverflow = 'clip';
+                textSpan.style.overflow = 'hidden';
+                textSpan.style.textOverflow = 'ellipsis';
                 textSpan.style.whiteSpace = 'nowrap';
-                textSpan.style.width = 'auto';
-                textSpan.style.maxWidth = 'none';
-                textSpan.style.display = 'inline-block';
+                textSpan.style.width = '100%';
+                textSpan.style.maxWidth = '100%';
+                textSpan.style.display = 'block';
+                textSpan.style.lineHeight = '50px';
                 textSpan.style.padding = '0 15px';
               }
             }
@@ -1099,13 +1109,19 @@ export default function App() {
                 el.style.overflow = 'visible';
                 el.style.display = 'flex';
                 el.style.alignItems = 'center';
-                el.style.justifyContent = 'center';
+                el.style.justifyContent = 'flex-start';
                 
                 const textSpan = el.querySelector('span');
                 if (textSpan) {
                   textSpan.style.fontSize = '14px';
                   textSpan.style.fontWeight = '900';
+                  textSpan.style.overflow = 'hidden';
+                  textSpan.style.textOverflow = 'ellipsis';
                   textSpan.style.whiteSpace = 'nowrap';
+                  textSpan.style.width = '100%';
+                  textSpan.style.maxWidth = '100%';
+                  textSpan.style.display = 'block';
+                  textSpan.style.lineHeight = '50px';
                   textSpan.style.padding = '0 15px';
                 }
               }
@@ -1234,13 +1250,19 @@ export default function App() {
               el.style.overflow = 'visible';
               el.style.display = 'flex';
               el.style.alignItems = 'center';
-              el.style.justifyContent = 'center';
+              el.style.justifyContent = 'flex-start';
               
               const textSpan = el.querySelector('span');
               if (textSpan) {
                 textSpan.style.fontSize = '14px';
                 textSpan.style.fontWeight = '900';
+                textSpan.style.overflow = 'hidden';
+                textSpan.style.textOverflow = 'ellipsis';
                 textSpan.style.whiteSpace = 'nowrap';
+                textSpan.style.width = '100%';
+                textSpan.style.maxWidth = '100%';
+                textSpan.style.display = 'block';
+                textSpan.style.lineHeight = '50px';
                 textSpan.style.padding = '0 15px';
               }
             }
@@ -4410,6 +4432,8 @@ export default function App() {
                         setIsAddingPlanningActivity(true);
                         setEditingPlanningActivity(null);
                         setNewPlanningActivity({
+                          id: '',
+                          projectId: selectedPlanningProjectId,
                           name: '',
                           startMonth: new Date().getMonth(),
                           startYear: new Date().getFullYear(),
@@ -4418,7 +4442,8 @@ export default function App() {
                           color: '#0033FF',
                           order: planningActivities.filter(a => a.projectId === selectedPlanningProjectId).length,
                           category: '',
-                          description: ''
+                          description: '',
+                          isHidden: false
                         });
                       }}
                       className="bg-axia-primary text-white px-6 py-2 rounded-xl font-bold text-sm hover:shadow-lg hover:shadow-axia-primary/25 transition-all flex items-center gap-2"
@@ -4514,14 +4539,18 @@ export default function App() {
                                 onClick={() => {
                                   setEditingPlanningActivity(activity);
                                   setNewPlanningActivity({
+                                    id: activity.id,
+                                    projectId: activity.projectId,
                                     name: activity.name,
                                     startMonth: activity.startMonth,
                                     startYear: activity.startYear,
                                     endMonth: activity.endMonth,
                                     endYear: activity.endYear,
                                     color: activity.color,
+                                    order: activity.order,
                                     category: activity.category || '',
-                                    description: activity.description || ''
+                                    description: activity.description || '',
+                                    isHidden: activity.isHidden
                                   });
                                   setIsAddingPlanningActivity(true);
                                 }}
@@ -4640,6 +4669,20 @@ export default function App() {
                                         }}
                                         onClick={() => {
                                           setEditingPlanningActivity(activity);
+                                          setNewPlanningActivity({
+                                            id: activity.id,
+                                            projectId: activity.projectId,
+                                            name: activity.name,
+                                            startMonth: activity.startMonth,
+                                            startYear: activity.startYear,
+                                            endMonth: activity.endMonth,
+                                            endYear: activity.endYear,
+                                            color: activity.color,
+                                            order: activity.order,
+                                            category: activity.category || '',
+                                            description: activity.description || '',
+                                            isHidden: !!activity.isHidden
+                                          });
                                           setIsAddingPlanningActivity(true);
                                         }}
                                       >
@@ -4744,14 +4787,18 @@ export default function App() {
                                         onClick={() => {
                                           setEditingPlanningActivity(activity);
                                           setNewPlanningActivity({
+                                            id: activity.id,
+                                            projectId: activity.projectId,
                                             name: activity.name,
                                             startMonth: activity.startMonth,
                                             startYear: activity.startYear,
                                             endMonth: activity.endMonth,
                                             endYear: activity.endYear,
                                             color: activity.color,
+                                            order: activity.order,
                                             category: activity.category || '',
-                                            description: activity.description || ''
+                                            description: activity.description || '',
+                                            isHidden: !!activity.isHidden
                                           });
                                           setIsAddingPlanningActivity(true);
                                         }}
