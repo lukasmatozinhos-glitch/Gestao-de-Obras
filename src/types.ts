@@ -47,6 +47,7 @@ export interface Project {
   spent: number;
   location: string;
   executingCompany: string;
+  responsible: string;
   image?: string;
   createdBy?: string;
   creatorName?: string;

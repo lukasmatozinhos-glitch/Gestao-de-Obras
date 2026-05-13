@@ -104,7 +104,7 @@ const MONTHS = [
 
 // Logo Base64 placeholder - o usuário deve substituir pelo conteúdo real da imagem enviada
 // Este valor é usado como marca d'água no canto inferior esquerdo
-const AXIA_LOGO_BASE64 = ''; 
+const AXIA_LOGO_BASE64 = "" as string; 
 
 const Logo = ({ size = 40, className = "" }: { size?: number, className?: string }) => (
   <svg 
@@ -796,7 +796,8 @@ export default function App() {
     doc.setTextColor(30, 41, 59);
     doc.setFontSize(10);
     doc.text(`Cliente: ${project.client}`, 15, 52);
-    doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, 15, 57);
+    doc.text(`Responsável: ${project.responsible || project.creatorName || ''}`, 15, 57);
+    doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, 15, 62);
 
     // Table
     const tableData = relevantActivities
@@ -806,7 +807,7 @@ export default function App() {
       ]);
 
     autoTable(doc, {
-      startY: 70,
+      startY: 75,
       head: [['ATIVIDADE', 'PERÍODO PREVISTO']],
       body: tableData,
       theme: 'striped',
@@ -1219,7 +1220,8 @@ export default function App() {
     doc.setTextColor(30, 41, 59);
     doc.setFontSize(10);
     doc.text(`Cliente: ${project.client}`, 15, 52);
-    doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, 15, 57);
+    doc.text(`Responsável: ${project.responsible || project.creatorName || ''}`, 15, 57);
+    doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, 15, 62);
 
     // Table (Without Progress column as requested)
     const tableData = projectActivities.map(a => [
@@ -1233,7 +1235,7 @@ export default function App() {
     ]);
 
     autoTable(doc, {
-      startY: 70,
+      startY: 75,
       head: [['ATIVIDADE', 'RESPONSÁVEL', 'PERÍODO', 'STATUS']],
       body: tableData,
       theme: 'striped',
@@ -1958,6 +1960,7 @@ export default function App() {
     startDate: '',
     endDate: '',
     executingCompany: '',
+    responsible: '',
     status: 'not-started' as Project['status'],
     progress: 0
   });
@@ -2004,6 +2007,7 @@ export default function App() {
           spent: 0,
           location: newProject.location,
           executingCompany: newProject.executingCompany,
+          responsible: newProject.responsible,
           image: `https://picsum.photos/seed/${newProject.name}/800/600`,
           createdBy: currentUser.id,
           creatorName: currentUser.name
@@ -2023,6 +2027,7 @@ export default function App() {
         startDate: '',
         endDate: '',
         executingCompany: '',
+        responsible: '',
         status: 'not-started',
         progress: 0
       });
@@ -2119,6 +2124,7 @@ export default function App() {
       startDate: project.startDate,
       endDate: project.endDate,
       executingCompany: project.executingCompany,
+      responsible: project.responsible || '',
       status: project.status,
       progress: project.progress
     });
@@ -2381,6 +2387,13 @@ export default function App() {
     doc.setFontSize(9);
     doc.setTextColor(100, 116, 139);
     doc.text('Responsável Técnico / Fiscalização', 80, signatureY + 5, { align: 'center' });
+    const projectOfBulletin = projects.find(p => p.id === bulletin.projectId);
+    const responsibleName = projectOfBulletin?.responsible || '';
+    if (responsibleName) {
+      doc.setFont('helvetica', 'bold');
+      doc.text(responsibleName.toUpperCase(), 80, signatureY + 10, { align: 'center' });
+      doc.setFont('helvetica', 'normal');
+    }
     
     // Signature 2
     doc.line(pageWidth - 120, signatureY, pageWidth - 40, signatureY);
@@ -2489,6 +2502,7 @@ export default function App() {
     // Details Table
     const detailsData = [
       ['Cliente', project.client],
+      ['Responsável', project.responsible || project.creatorName || 'Sistema'],
       ['Contrato', project.contractNumber],
       ['Empresa Executora', project.executingCompany],
       ['Data de Início', project.startDate],
@@ -2708,6 +2722,7 @@ export default function App() {
       
       const generalInfo = [
         ['Cliente', project.client],
+        ['Responsável', project.responsible || project.creatorName || 'Sistema'],
         ['Contrato', project.contractNumber],
         ['Localidade', project.location],
         ['Empresa Executora', project.executingCompany],
@@ -3400,7 +3415,7 @@ export default function App() {
                     value={statusCounts['preliminary-study'].toString()} 
                     change="Fase inicial" 
                     icon={<Search className="text-amber-500" />} 
-                    color="yellow"
+                    color="orange"
                     onClickDetails={() => setActiveTab('projects')}
                     onClickReport={handleGenerateGeneralReport}
                     isGeneratingReport={isGeneratingReport}
@@ -3757,7 +3772,7 @@ export default function App() {
                                 </div>
                                 <div className="p-4 lg:p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm transition-all hover:bg-slate-100/50">
                                   <p className="text-[10px] lg:text-[11px] font-bold text-slate-400 uppercase mb-1 tracking-wider text-center lg:text-left">Responsável</p>
-                                  <p className="font-bold text-slate-900 text-sm lg:text-base truncate text-center lg:text-left">{viewingProject.creatorName || 'Sistema'}</p>
+                                  <p className="font-bold text-slate-900 text-sm lg:text-base truncate text-center lg:text-left">{viewingProject.responsible || viewingProject.creatorName || 'Sistema'}</p>
                                 </div>
                                 <div className="p-4 lg:p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm transition-all hover:bg-slate-100/50">
                                   <p className="text-[10px] lg:text-[11px] font-bold text-slate-400 uppercase mb-1 tracking-wider text-center lg:text-left">Duração</p>
@@ -4596,6 +4611,17 @@ export default function App() {
                               value={newProject.executingCompany}
                               onChange={e => setNewProject({...newProject, executingCompany: e.target.value})}
                               placeholder="Nome da empresa"
+                              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-axia-primary/20"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Responsável pela Obra</label>
+                            <input 
+                              required
+                              type="text" 
+                              value={newProject.responsible}
+                              onChange={e => setNewProject({...newProject, responsible: e.target.value})}
+                              placeholder="Nome do responsável"
                               className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-axia-primary/20"
                             />
                           </div>
