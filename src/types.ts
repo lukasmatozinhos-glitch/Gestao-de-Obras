@@ -39,7 +39,7 @@ export interface Project {
   client: string;
   contractNumber: string;
   description: string;
-  status: 'not-started' | 'in-progress' | 'paused' | 'finished';
+  status: 'not-started' | 'preliminary-study' | 'in-progress' | 'paused' | 'finished';
   progress: number;
   startDate: string;
   endDate: string;

@@ -1895,6 +1895,7 @@ export default function App() {
 
   const statusCounts = {
     'not-started': projects.filter(p => p.status === 'not-started').length,
+    'preliminary-study': projects.filter(p => p.status === 'preliminary-study').length,
     'in-progress': projects.filter(p => p.status === 'in-progress').length,
     'paused': projects.filter(p => p.status === 'paused').length,
     'finished': projects.filter(p => p.status === 'finished').length,
@@ -2493,6 +2494,7 @@ export default function App() {
       ['Data de Início', project.startDate],
       ['Previsão de Término', project.endDate],
       ['Status', 
+        project.status === 'preliminary-study' ? 'Estudo Preliminar' :
         project.status === 'in-progress' ? 'Em Andamento' : 
         project.status === 'finished' ? 'Concluído' : 
         project.status === 'paused' ? 'Paralisado' : 'Não Iniciado'
@@ -3034,6 +3036,7 @@ export default function App() {
   const getStatusColor = (status: Project['status']) => {
     switch (status) {
       case 'not-started': return 'bg-slate-100 text-slate-700 border-slate-200';
+      case 'preliminary-study': return 'bg-amber-100 text-amber-700 border-amber-200';
       case 'in-progress': return 'bg-green-100 text-green-700 border-green-200';
       case 'finished': return 'bg-blue-100 text-blue-700 border-blue-200';
       case 'paused': return 'bg-red-100 text-red-700 border-red-200';
@@ -3044,6 +3047,7 @@ export default function App() {
   const getStatusLabel = (status: Project['status']) => {
     switch (status) {
       case 'not-started': return 'Não Iniciada';
+      case 'preliminary-study': return 'Estudo Preliminar';
       case 'in-progress': return 'Em Andamento';
       case 'paused': return 'Paralisada';
       case 'finished': return 'Finalizada';
@@ -3380,13 +3384,23 @@ export default function App() {
                 </div>
 
                 {/* Stats Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 lg:gap-6">
                   <StatCard 
                     title="Não Iniciadas" 
                     value={statusCounts['not-started'].toString()} 
                     change="Aguardando início" 
                     icon={<Clock className="text-slate-400" />} 
                     color="slate"
+                    onClickDetails={() => setActiveTab('projects')}
+                    onClickReport={handleGenerateGeneralReport}
+                    isGeneratingReport={isGeneratingReport}
+                  />
+                  <StatCard 
+                    title="Estudo Preliminar" 
+                    value={statusCounts['preliminary-study'].toString()} 
+                    change="Fase inicial" 
+                    icon={<Search className="text-amber-500" />} 
+                    color="yellow"
                     onClickDetails={() => setActiveTab('projects')}
                     onClickReport={handleGenerateGeneralReport}
                     isGeneratingReport={isGeneratingReport}
@@ -4555,6 +4569,7 @@ export default function App() {
                               className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-axia-primary/20"
                             >
                               <option value="not-started">Não Iniciada</option>
+                              <option value="preliminary-study">Em Estudo Preliminar</option>
                               <option value="in-progress">Em Andamento</option>
                               <option value="paused">Paralisada</option>
                               <option value="finished">Finalizada</option>
