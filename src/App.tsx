@@ -378,6 +378,7 @@ export default function App() {
   const [tempProgress, setTempProgress] = useState(0);
   const [isAddingPhoto, setIsAddingPhoto] = useState(false);
   const [isAddingAddendum, setIsAddingAddendum] = useState(false);
+  const [showArchivedBulletins, setShowArchivedBulletins] = useState(false);
   const [isSubmittingPhoto, setIsSubmittingPhoto] = useState(false);
   const [newPhoto, setNewPhoto] = useState({ url: '', caption: '' });
   const [newAddendum, setNewAddendum] = useState({
@@ -2293,18 +2294,25 @@ export default function App() {
   };
 
   const handleDeleteBulletin = async (bulletin: MeasurementBulletin) => {
-    // Using custom modal instead of window.confirm as per instructions
-    // Actually, the instructions say "avoid using window.alert or window.open", but doesn't explicitly forbid confirm, 
-    // however it says "use custom modal UI for these" in the Firestore section.
-    // I'll just use a simple check for now or assume the user will confirm via UI if I build it.
-    // Given the constraints, I'll just proceed with the deletion if called.
-    
     try {
       await deleteDoc(doc(db, 'measurementBulletins', bulletin.id));
       showNotification('Boletim excluído com sucesso!');
     } catch (error) {
       console.error('Error deleting bulletin:', error);
       handleFirestoreError(error, OperationType.DELETE, `measurementBulletins/${bulletin.id}`);
+    }
+  };
+
+  const handleToggleArchiveBulletin = async (bulletin: MeasurementBulletin) => {
+    try {
+      const bulletinRef = doc(db, 'measurementBulletins', bulletin.id);
+      await updateDoc(bulletinRef, {
+        archived: !bulletin.archived
+      });
+      showNotification(bulletin.archived ? 'Boletim desarquivado!' : 'Boletim arquivado com sucesso!');
+    } catch (error) {
+      console.error('Error archiving bulletin:', error);
+      handleFirestoreError(error, OperationType.WRITE, `measurementBulletins/${bulletin.id}`);
     }
   };
 
@@ -6240,36 +6248,48 @@ export default function App() {
                   {/* Bulletins History */}
                   <div className="lg:col-span-2 space-y-6">
                     <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-                      <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                        <h3 className="text-lg font-bold dark:text-white">Histórico de Boletins</h3>
+                      <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div className="flex items-center gap-4">
+                          <h3 className="text-lg font-bold dark:text-white">Histórico de Boletins</h3>
+                          <button 
+                            onClick={() => setShowArchivedBulletins(!showArchivedBulletins)}
+                            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border transition-all ${showArchivedBulletins ? 'bg-slate-100 border-slate-200 text-slate-600' : 'bg-axia-primary/10 border-axia-primary/20 text-axia-primary'}`}
+                          >
+                            {showArchivedBulletins ? <Eye size={12} /> : <EyeOff size={12} />}
+                            {showArchivedBulletins ? 'Ver Ativos' : 'Ver Arquivados'}
+                          </button>
+                        </div>
                         <div className="flex items-center gap-2 text-xs font-bold text-slate-400 dark:text-slate-500">
                           <TrendingUp size={14} />
-                          <span>Total: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(measurementBulletins.reduce((acc, b) => acc + b.value, 0))}</span>
+                          <span>Total: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(measurementBulletins.filter(b => !!b.archived === showArchivedBulletins).reduce((acc, b) => acc + b.value, 0))}</span>
                         </div>
                       </div>
                       <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                        {measurementBulletins.length === 0 ? (
+                        {measurementBulletins.filter(b => !!b.archived === showArchivedBulletins).length === 0 ? (
                           <div className="p-20 text-center text-slate-400 dark:text-slate-600">
                             <ClipboardList size={48} className="mx-auto mb-4 opacity-20" />
-                            <p>Nenhum boletim registrado ainda.</p>
+                            <p>{showArchivedBulletins ? 'Nenhum boletim arquivado.' : 'Nenhum boletim ativo encontrado.'}</p>
                           </div>
                         ) : (
-                          measurementBulletins.map((bulletin) => (
-                            <div key={bulletin.id} className="p-6 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                          measurementBulletins.filter(b => !!b.archived === showArchivedBulletins).map((bulletin) => (
+                            <div key={bulletin.id} className={`p-6 transition-colors ${bulletin.archived ? 'bg-slate-50/50 dark:bg-slate-800/20' : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}>
                               <div className="flex items-start justify-between mb-4">
                                 <div>
                                   <div className="flex items-center gap-2 mb-1">
-                                    <h4 className="font-bold text-slate-900 dark:text-white">{bulletin.projectName}</h4>
+                                    <h4 className={`font-bold ${bulletin.archived ? 'text-slate-500' : 'text-slate-900 dark:text-white'}`}>{bulletin.projectName}</h4>
                                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-900/30">
                                       Contrato: {bulletin.contractNumber}
                                     </span>
+                                    {bulletin.archived && (
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200">Arquivado</span>
+                                    )}
                                   </div>
                                   <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
                                     <Calendar size={12} /> {bulletin.date}
                                   </p>
                                 </div>
                                 <div className="text-right">
-                                  <p className="text-lg font-bold text-axia-accent">
+                                  <p className={`text-lg font-bold ${bulletin.archived ? 'text-slate-400' : 'text-axia-accent'}`}>
                                     {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(bulletin.value)}
                                   </p>
                                   <div className="flex items-center justify-end gap-2 mt-1">
@@ -6279,6 +6299,13 @@ export default function App() {
                                       title="Baixar PDF"
                                     >
                                       <FileDown size={14} />
+                                    </button>
+                                    <button 
+                                      onClick={() => handleToggleArchiveBulletin(bulletin)}
+                                      className={`p-1.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors ${bulletin.archived ? 'text-axia-primary hover:text-axia-primary/80' : 'text-slate-400 hover:text-slate-600'}`}
+                                      title={bulletin.archived ? 'Desarquivar' : 'Arquivar'}
+                                    >
+                                      {bulletin.archived ? <Eye size={14} /> : <EyeOff size={14} />}
                                     </button>
                                     <button 
                                       onClick={() => handleDeleteBulletin(bulletin)}

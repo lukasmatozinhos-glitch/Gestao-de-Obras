@@ -127,6 +127,7 @@ export interface MeasurementBulletin {
   value: number;
   date: string;
   status: 'pending' | 'approved' | 'paid';
+  archived?: boolean;
 }
 
 export interface PlanningActivity {

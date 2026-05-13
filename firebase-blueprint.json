@@ -122,7 +122,8 @@
         "supplier": { "type": "string" },
         "value": { "type": "number" },
         "date": { "type": "string" },
-        "status": { "type": "string", "enum": ["pending", "approved", "paid"] }
+        "status": { "type": "string", "enum": ["pending", "approved", "paid"] },
+        "archived": { "type": "boolean" }
       },
       "required": ["id", "projectId", "projectName", "contractNumber", "rcNumber", "sapItem", "installation", "supplier", "value", "date", "status"]
     },
