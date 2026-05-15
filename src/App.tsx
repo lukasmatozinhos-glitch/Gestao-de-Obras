@@ -846,7 +846,7 @@ export default function App() {
     // Table
     const tableData = relevantActivities
       .map(a => [
-        a.name.toUpperCase() + (a.category ? ` (${a.category.toUpperCase()})` : ''),
+        (a.name || '').toUpperCase() + (a.category ? ` (${a.category.toUpperCase()})` : ''),
         `${monthNames[a.startMonth]}/${a.startYear} - ${monthNames[a.endMonth]}/${a.endYear}`
       ]);
 
@@ -1269,7 +1269,7 @@ export default function App() {
 
     // Table (Without Progress column as requested)
     const tableData = projectActivities.map(a => [
-      a.name.toUpperCase(),
+      (a.name || '').toUpperCase(),
       a.responsible,
       `${formatInputDate(a.startDate)} - ${formatInputDate(a.endDate)}`,
       a.status === 'completed' ? 'CONCLUÍDO' : 
@@ -1713,7 +1713,14 @@ export default function App() {
         try {
           const userDoc = await getDoc(doc(db, 'users', user.uid));
           if (userDoc.exists()) {
-            setCurrentUser(userDoc.data() as UserProfile);
+            const data = userDoc.data();
+            setCurrentUser({ 
+              ...DEFAULT_USER,
+              ...data,
+              id: user.uid,
+              name: data.name || 'Usuário',
+              accessLevel: data.accessLevel || 'Usuário Padrão'
+            } as UserProfile);
             setIsLoggedIn(true);
           } else {
             console.warn('User authenticated but profile not found in Firestore');
@@ -2095,8 +2102,8 @@ export default function App() {
           executingCompany: newProject.executingCompany,
           responsible: newProject.responsible,
           image: `https://picsum.photos/seed/${newProject.name}/800/600`,
-          createdBy: currentUser.id,
-          creatorName: currentUser.name
+          createdBy: currentUser?.id || '',
+          creatorName: currentUser?.name || 'Sistema'
         };
         await setDoc(doc(db, 'projects', projectId), project);
         showNotification('Novo projeto cadastrado com sucesso!');
@@ -2393,10 +2400,10 @@ export default function App() {
           id: Math.random().toString(36).substr(2, 9),
           text: 'Solicitação inicial de RC de Consumo criada.',
           date: new Date().toLocaleString('pt-BR'),
-          userName: currentUser.name
+          userName: currentUser?.name || 'Sistema'
         }],
-        createdBy: currentUser.id,
-        creatorName: currentUser.name,
+        createdBy: currentUser?.id || '',
+        creatorName: currentUser?.name || 'Sistema',
         createdAt: new Date().toISOString()
       };
       
@@ -2433,7 +2440,7 @@ export default function App() {
         id: Math.random().toString(36).substr(2, 9),
         text: observationText,
         date: new Date().toLocaleString('pt-BR'),
-        userName: currentUser.name
+        userName: currentUser?.name || 'Sistema'
       };
       
       const currentObservations = request.observations || [];
@@ -2462,7 +2469,7 @@ export default function App() {
         id: Math.random().toString(36).substr(2, 9),
         text: newRCObservation,
         date: new Date().toLocaleString('pt-BR'),
-        userName: currentUser.name
+        userName: currentUser?.name || 'Sistema'
       };
       
       const updatedObservations = [...(request.observations || []), newObservation];
@@ -2576,7 +2583,7 @@ export default function App() {
       ['Obra', bulletin.projectName, 'N° de Contrato', bulletin.contractNumber],
       ['N° RC de Consumo', bulletin.rcNumber, 'Item SAP', bulletin.sapItem],
       ['Instalação', bulletin.installation, 'Fornecedor', bulletin.supplier],
-      ['Valor Medido', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(bulletin.value), 'Data da Medição', new Date(bulletin.date).toLocaleDateString('pt-BR')]
+      ['Valor Medido', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(bulletin.value || 0), 'Data da Medição', new Date(bulletin.date || Date.now()).toLocaleDateString('pt-BR')]
     ];
 
     autoTable(doc, {
@@ -2607,7 +2614,7 @@ export default function App() {
     const responsibleName = projectOfBulletin?.responsible || '';
     if (responsibleName) {
       doc.setFont('helvetica', 'bold');
-      doc.text(responsibleName.toUpperCase(), 80, signatureY + 10, { align: 'center' });
+      doc.text((responsibleName || '').toUpperCase(), 80, signatureY + 10, { align: 'center' });
       doc.setFont('helvetica', 'normal');
     }
     
@@ -2729,10 +2736,10 @@ export default function App() {
         project.status === 'finished' ? 'Concluído' : 
         project.status === 'paused' ? 'Paralisado' : 'Não Iniciado'
       ],
-      ['Orçamento Total', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget)],
-      ['Total Medido', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.spent)],
-      ['Saldo Disponível', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget - project.spent)],
-      ['Percentual Executado', `${Math.round((project.spent / project.budget) * 100)}%`]
+      ['Orçamento Total', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget || 0)],
+      ['Total Medido', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.spent || 0)],
+      ['Saldo Disponível', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((project.budget || 0) - (project.spent || 0))],
+      ['Percentual Executado', `${Math.round(((project.spent || 0) / (project.budget || 1)) * 100)}%`]
     ];
     
     autoTable(doc, {
@@ -2943,7 +2950,7 @@ export default function App() {
         ['Localidade', project.location],
         ['Empresa Executora', project.executingCompany],
         ['Status', getStatusLabel(project.status)],
-        ['Progresso', `${project.progress}%`],
+        ['Progresso', `${(project.progress || 0)}%`],
         ['Data de Início', project.startDate],
         ['Previsão de Término', project.endDate]
       ];
@@ -2976,10 +2983,10 @@ export default function App() {
       doc.text('Resumo Financeiro', 15, financialStartY);
       
       const financialInfo = [
-        ['Orçamento Total', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget)],
-        ['Total Medido', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.spent)],
-        ['Saldo Disponível', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget - project.spent)],
-        ['Utilização', `${Math.round((project.spent / project.budget) * 100)}%`]
+        ['Orçamento Total', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget || 0)],
+        ['Total Medido', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.spent || 0)],
+        ['Saldo Disponível', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((project.budget || 0) - (project.spent || 0))],
+        ['Utilização', `${Math.round(((project.spent || 0) / (project.budget || 1)) * 100)}%`]
       ];
 
       autoTable(doc, {
@@ -3000,9 +3007,9 @@ export default function App() {
         doc.text('Últimas Medições', 15, finalYFinancial + 10);
         
         const measurementData = projectMeasurements.map(m => [
-          m.date,
-          m.description,
-          new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(m.value),
+          m.date || '',
+          m.description || '',
+          new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(m.value || 0),
           m.status === 'paid' ? 'Pago' : m.status === 'approved' ? 'Aprovado' : 'Pendente'
         ]);
 
@@ -3580,11 +3587,11 @@ export default function App() {
               className="flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-800 p-1.5 rounded-xl transition-colors text-left"
             >
               <div className="text-right hidden sm:block">
-                <p className="text-sm font-semibold dark:text-white">{currentUser.name}</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">{currentUser.role}</p>
+                <p className="text-sm font-semibold dark:text-white">{currentUser?.name || ''}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{currentUser?.role || ''}</p>
               </div>
               <img 
-                src={currentUser.avatar} 
+                src={currentUser?.avatar || 'https://picsum.photos/seed/user/200/200'} 
                 alt="Profile" 
                 className="w-10 h-10 rounded-full border-2 border-axia-primary/10"
                 referrerPolicy="no-referrer"
@@ -3853,12 +3860,12 @@ export default function App() {
                               <td className="px-6 py-4">
                                 <div className="w-full max-w-[120px]">
                                   <div className="flex items-center justify-between mb-1">
-                                    <span className="text-xs font-bold text-slate-700">{project.progress}%</span>
+                                    <span className="text-xs font-bold text-slate-700">{(project.progress || 0)}%</span>
                                   </div>
                                   <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
                                     <motion.div 
                                       initial={{ width: 0 }}
-                                      animate={{ width: `${project.progress}%` }}
+                                      animate={{ width: `${(project.progress || 0)}%` }}
                                       className={`h-full rounded-full ${
                                         project.status === 'delayed' ? 'bg-red-500' : 'bg-axia-primary'
                                       }`}
@@ -4472,7 +4479,7 @@ export default function App() {
                                           <div className="text-right">
                                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Valor do Aditivo</p>
                                             <p className="text-2xl font-black text-axia-primary">
-                                              {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(addendum.value)}
+                                              {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(addendum.value || 0)}
                                             </p>
                                           </div>
                                           <div className="flex flex-col gap-2">
@@ -4952,12 +4959,12 @@ export default function App() {
                               <div className="flex-1">
                                 <div className="flex items-center justify-between mb-1">
                                   <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase">Progresso Fis.</span>
-                                  <span className="text-[10px] font-bold text-axia-primary">{project.progress}%</span>
+                                  <span className="text-[10px] font-bold text-axia-primary">{(project.progress || 0)}%</span>
                                 </div>
                                 <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                                   <motion.div 
                                     initial={{ width: 0 }}
-                                    animate={{ width: `${project.progress}%` }}
+                                    animate={{ width: `${(project.progress || 0)}%` }}
                                     className="h-full bg-axia-primary rounded-full"
                                   />
                                 </div>
@@ -5991,7 +5998,7 @@ export default function App() {
                         <h3 className="text-lg font-bold dark:text-white">Histórico de Medições</h3>
                         <div className="flex items-center gap-2 text-xs font-bold text-slate-400 dark:text-slate-500">
                           <TrendingUp size={14} />
-                          <span>Total Medido: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(measurements.reduce((acc, m) => acc + m.value, 0))}</span>
+                          <span>Total Medido: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(measurements.reduce((acc, m) => acc + (m.value || 0), 0))}</span>
                         </div>
                       </div>
                       <div className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -6017,7 +6024,7 @@ export default function App() {
                                 </div>
                                 <div className="text-right">
                                   <p className="text-lg font-bold text-axia-accent">
-                                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(measurement.value)}
+                                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(measurement.value || 0)}
                                   </p>
                                   <div className="flex items-center justify-end gap-2 mt-1">
                                     <button 
@@ -6741,7 +6748,7 @@ export default function App() {
                         </div>
                         <div className="flex items-center gap-2 text-xs font-bold text-slate-400 dark:text-slate-500">
                           <TrendingUp size={14} />
-                          <span>Total: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(measurementBulletins.filter(b => !!b.archived === showArchivedBulletins).reduce((acc, b) => acc + b.value, 0))}</span>
+                          <span>Total: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(measurementBulletins.filter(b => !!b.archived === showArchivedBulletins).reduce((acc, b) => acc + (b.value || 0), 0))}</span>
                         </div>
                       </div>
                       <div className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -6770,7 +6777,7 @@ export default function App() {
                                 </div>
                                 <div className="text-right">
                                   <p className={`text-lg font-bold ${bulletin.archived ? 'text-slate-400' : 'text-axia-accent'}`}>
-                                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(bulletin.value)}
+                                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(bulletin.value || 0)}
                                   </p>
                                   <div className="flex items-center justify-end gap-2 mt-1">
                                     <button 
@@ -7124,8 +7131,8 @@ export default function App() {
                 </div>
 
                 <div className="mb-8">
-                  <h3 className="text-2xl font-bold text-slate-900">{currentUser.name}</h3>
-                  <p className="text-axia-secondary font-semibold">{currentUser.role}</p>
+                  <h3 className="text-2xl font-bold text-slate-900">{currentUser?.name || ''}</h3>
+                  <p className="text-axia-secondary font-semibold">{currentUser?.role || ''}</p>
                 </div>
 
                 <div className="space-y-4 mb-8">
@@ -7135,7 +7142,7 @@ export default function App() {
                     </div>
                     <div>
                       <p className="text-[10px] font-bold text-slate-400 uppercase">E-mail Corporativo</p>
-                      <p className="text-sm font-bold text-slate-700">{currentUser.email}</p>
+                      <p className="text-sm font-bold text-slate-700">{currentUser?.email || ''}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-4 p-3 bg-slate-50 rounded-2xl border border-slate-100">
@@ -7144,7 +7151,7 @@ export default function App() {
                     </div>
                     <div>
                       <p className="text-[10px] font-bold text-slate-400 uppercase">Telefone / WhatsApp</p>
-                      <p className="text-sm font-bold text-slate-700">{currentUser.phone}</p>
+                      <p className="text-sm font-bold text-slate-700">{currentUser?.phone || ''}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-4 p-3 bg-slate-50 rounded-2xl border border-slate-100">
@@ -7153,7 +7160,7 @@ export default function App() {
                     </div>
                     <div>
                       <p className="text-[10px] font-bold text-slate-400 uppercase">Nível de Acesso</p>
-                      <p className="text-sm font-bold text-slate-700">{currentUser.accessLevel}</p>
+                      <p className="text-sm font-bold text-slate-700">{currentUser?.accessLevel || ''}</p>
                     </div>
                   </div>
                 </div>
