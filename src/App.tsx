@@ -66,6 +66,7 @@ import {
   getDoc,
   query,
   where,
+  or,
   orderBy,
   getDocFromServer
 } from 'firebase/firestore';
@@ -1753,7 +1754,13 @@ export default function App() {
     const isManager = currentUser.accessLevel === 'Administrador de Sistema' || currentUser.accessLevel === 'Gestor';
     const projectsQuery = isManager 
       ? collection(db, 'projects') 
-      : query(collection(db, 'projects'), where('createdBy', '==', currentUser.id));
+      : query(
+          collection(db, 'projects'), 
+          or(
+            where('createdBy', '==', currentUser.id),
+            where('responsibleId', '==', currentUser.id)
+          )
+        );
 
     const unsubProjects = onSnapshot(projectsQuery, (snapshot) => {
       setProjects(snapshot.docs.map(doc => {
@@ -1767,7 +1774,9 @@ export default function App() {
           progress: Number(data.progress) || 0,
           status: data.status || 'not-started',
           startDate: data.startDate || '',
-          endDate: data.endDate || ''
+          endDate: data.endDate || '',
+          responsible: data.responsible || '',
+          responsibleId: data.responsibleId || ''
         } as Project;
       }));
     }, (error) => {
@@ -2054,6 +2063,7 @@ export default function App() {
     endDate: '',
     executingCompany: '',
     responsible: '',
+    responsibleId: '',
     status: 'not-started' as Project['status'],
     progress: 0
   });
@@ -2101,6 +2111,7 @@ export default function App() {
           location: newProject.location,
           executingCompany: newProject.executingCompany,
           responsible: newProject.responsible,
+          responsibleId: newProject.responsibleId,
           image: `https://picsum.photos/seed/${newProject.name}/800/600`,
           createdBy: currentUser?.id || '',
           creatorName: currentUser?.name || 'Sistema'
@@ -2218,6 +2229,7 @@ export default function App() {
       endDate: project.endDate || '',
       executingCompany: project.executingCompany || '',
       responsible: project.responsible || '',
+      responsibleId: project.responsibleId || '',
       status: project.status || 'not-started',
       progress: project.progress ?? 0
     });
@@ -4846,14 +4858,25 @@ export default function App() {
                           </div>
                           <div>
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Responsável pela Obra</label>
-                            <input 
+                            <select 
                               required
-                              type="text" 
-                              value={newProject.responsible}
-                              onChange={e => setNewProject({...newProject, responsible: e.target.value})}
-                              placeholder="Nome do responsável"
+                              value={newProject.responsibleId || ''}
+                              onChange={e => {
+                                const userId = e.target.value;
+                                const user = registeredUsers.find(u => u.id === userId);
+                                setNewProject({
+                                  ...newProject, 
+                                  responsibleId: userId,
+                                  responsible: user ? user.name : ''
+                                });
+                              }}
                               className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-axia-primary/20"
-                            />
+                            >
+                              <option value="">Selecione um responsável</option>
+                              {registeredUsers.map(user => (
+                                <option key={user.id} value={user.id}>{user.name} ({user.role})</option>
+                              ))}
+                            </select>
                           </div>
                           <div>
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Incluído por (Automático)</label>
