@@ -2170,18 +2170,18 @@ export default function App() {
   const startEditing = (project: Project) => {
     setEditingProject(project);
     setNewProject({
-      name: project.name,
-      client: project.client,
-      contractNumber: project.contractNumber,
-      description: project.description,
-      budget: project.budget.toString(),
-      location: project.location,
-      startDate: project.startDate,
-      endDate: project.endDate,
-      executingCompany: project.executingCompany,
+      name: project.name || '',
+      client: project.client || '',
+      contractNumber: project.contractNumber || '',
+      description: project.description || '',
+      budget: (project.budget ?? 0).toString(),
+      location: project.location || '',
+      startDate: project.startDate || '',
+      endDate: project.endDate || '',
+      executingCompany: project.executingCompany || '',
       responsible: project.responsible || '',
-      status: project.status,
-      progress: project.progress
+      status: project.status || 'not-started',
+      progress: project.progress ?? 0
     });
     setShowAddProject(true);
     setViewingProject(null);
@@ -2250,8 +2250,8 @@ export default function App() {
     setNewMeasurement({
       projectId: measurement.projectId,
       date: measurement.date,
-      value: measurement.value.toString(),
-      description: measurement.description
+      value: (measurement.value ?? 0).toString(),
+      description: measurement.description || ''
     });
   };
 
@@ -4822,7 +4822,7 @@ export default function App() {
                             <div className="w-full bg-slate-100 border border-slate-200 rounded-lg px-4 py-2.5 text-slate-500 flex items-center gap-2">
                               <User size={16} className="text-slate-400" />
                               <span className="font-medium text-sm">
-                                {editingProject ? (editingProject.creatorName || 'Sistema') : currentUser.name}
+                                {editingProject ? (editingProject.creatorName || 'Sistema') : (currentUser?.name || '')}
                               </span>
                             </div>
                           </div>
@@ -4901,19 +4901,19 @@ export default function App() {
                               <div className="flex items-center justify-between mb-1.5">
                                 <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase">Financ.</span>
                                 <span className="text-[9px] font-bold text-axia-accent">
-                                  {Math.round((project.spent / project.budget) * 100)}%
+                                  {Math.round(((project.spent || 0) / (project.budget || 1)) * 100)}%
                                 </span>
                               </div>
                               <div className="h-1 w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden mb-1.5">
                                 <motion.div 
                                   initial={{ width: 0 }}
-                                  animate={{ width: `${(project.spent / project.budget) * 100}%` }}
+                                  animate={{ width: `${((project.spent || 0) / (project.budget || 1)) * 100}%` }}
                                   className="h-full bg-axia-accent rounded-full"
                                 />
                               </div>
                               <div className="flex justify-between text-[9px] font-bold gap-2">
-                                <div className="text-slate-400 dark:text-slate-500 truncate italic">Saldo: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget - project.spent)}</div>
-                                <div className="text-axia-primary shrink-0">Medido: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.spent)}</div>
+                                <div className="text-slate-400 dark:text-slate-500 truncate italic">Saldo: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((project.budget || 0) - (project.spent || 0))}</div>
+                                <div className="text-axia-primary shrink-0">Medido: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.spent || 0)}</div>
                               </div>
                             </div>
 
