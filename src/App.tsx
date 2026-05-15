@@ -2005,6 +2005,12 @@ export default function App() {
     'finished': projects.filter(p => p.status === 'finished').length,
   };
 
+  const totalPendingRCValue = useMemo(() => {
+    return consumptionRCRequests
+      .filter(r => r.status !== 'received')
+      .reduce((acc, r) => acc + (r.value || 0), 0);
+  }, [consumptionRCRequests]);
+
   const { timelineData, timelineWindow } = useMemo(() => {
     const validProjects = projects.filter(p => p.startDate && p.endDate);
     if (validProjects.length === 0) return { timelineData: [], timelineWindow: null };
@@ -3675,13 +3681,34 @@ export default function App() {
                   <StatCard 
                     title="RC Pendentes" 
                     value={consumptionRCRequests.filter(r => r.status !== 'received').length.toString()} 
+                    secondaryValue={new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalPendingRCValue)}
                     change="Controle de RC" 
                     icon={<ShieldCheck className="text-axia-secondary" />} 
                     color="orange"
                     onClickDetails={() => setActiveTab('rc-control')}
                     onClickReport={handleGenerateGeneralReport}
                     isGeneratingReport={isGeneratingReport}
-                  />
+                  >
+                    <div className="space-y-1.5">
+                      {consumptionRCRequests
+                        .filter(r => r.status !== 'received')
+                        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                        .slice(0, 3)
+                        .map(rc => (
+                          <div key={rc.id} className="flex items-center justify-between gap-2 overflow-hidden">
+                            <span className="text-[9px] font-bold text-slate-600 dark:text-slate-400 truncate">{rc.projectName}</span>
+                            <span className="text-[9px] font-black text-axia-primary shrink-0">
+                              {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', notation: 'compact' }).format(rc.value || 0)}
+                            </span>
+                          </div>
+                      ))}
+                      {consumptionRCRequests.filter(r => r.status !== 'received').length > 3 && (
+                        <p className="text-[8px] font-bold text-slate-400 uppercase text-center mt-1">
+                          + {consumptionRCRequests.filter(r => r.status !== 'received').length - 3} outras pendentes
+                        </p>
+                      )}
+                    </div>
+                  </StatCard>
                   <StatCard 
                     title="Finalizadas" 
                     value={statusCounts['finished'].toString()} 
@@ -6135,6 +6162,10 @@ export default function App() {
                                   </span>
                                 </div>
                                 <div className="flex items-center gap-3 mt-1">
+                                  <span className="text-xs font-bold text-axia-primary">
+                                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(request.value || 0)}
+                                  </span>
+                                  <span className="text-xs text-slate-400 dark:text-slate-500">•</span>
                                   <span className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
                                     <Calendar size={12} /> Solicitação: {formatInputDate(request.requestDate)}
                                   </span>
@@ -8050,15 +8081,17 @@ function LoginPage({ onLogin, onRegister }: {
   );
 }
 
-function StatCard({ title, value, change, icon, color, onClickDetails, onClickReport, isGeneratingReport }: { 
+function StatCard({ title, value, secondaryValue, change, icon, color, onClickDetails, onClickReport, isGeneratingReport, children }: { 
   title: string, 
   value: string, 
+  secondaryValue?: string,
   change: string, 
   icon: React.ReactNode,
   color: 'blue' | 'orange' | 'green' | 'slate',
   onClickDetails?: () => void,
   onClickReport?: () => void,
-  isGeneratingReport?: boolean
+  isGeneratingReport?: boolean,
+  children?: React.ReactNode
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const colors = {
@@ -8079,7 +8112,7 @@ function StatCard({ title, value, change, icon, color, onClickDetails, onClickRe
             onClick={() => setShowMenu(!showMenu)}
             className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
           >
-            <MoreVertical size={18} />
+            < MoreVertical size={18} />
           </button>
           
           <AnimatePresence>
@@ -8130,7 +8163,9 @@ function StatCard({ title, value, change, icon, color, onClickDetails, onClickRe
       <div>
         <p className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">{title}</p>
         <h4 className="text-3xl font-bold text-slate-900 dark:text-white mb-1">{value}</h4>
-        <p className="text-xs font-semibold text-slate-400 dark:text-slate-500">{change}</p>
+        {secondaryValue && <p className="text-sm font-bold text-axia-primary mb-1">{secondaryValue}</p>}
+        {children && <div className="mt-4 border-t border-slate-100 dark:border-slate-800 pt-3 space-y-2">{children}</div>}
+        <p className="text-xs font-semibold text-slate-400 dark:text-slate-500 mt-2">{change}</p>
       </div>
     </div>
   );
