@@ -1045,7 +1045,7 @@ export default function App() {
 
         doc.setTextColor(0, 51, 255);
         doc.setFontSize(10);
-        doc.text(`CRONOGRAMA MENSAL (VISUAL): ${project.name.toUpperCase()}`, pageWidth / 2, 6, { align: 'center' });
+        doc.text(`CRONOGRAMA MENSAL (VISUAL): ${(project.name || '').toUpperCase()}`, pageWidth / 2, 6, { align: 'center' });
         
         doc.addImage(imgData, 'PNG', xPos, yPos, finalWidth, finalHeight, undefined, 'FAST');
       } catch (err) {
@@ -1127,7 +1127,7 @@ export default function App() {
             docTitle.style.margin = '0';
             
             const projectTitleText = clonedDoc.createElement('p');
-            projectTitleText.innerText = `PROJETO: ${projects.find(p => p.id === projectId)?.name.toUpperCase()}`;
+            projectTitleText.innerText = `PROJETO: ${(projects.find(p => p.id === projectId)?.name || '').toUpperCase()}`;
             projectTitleText.style.color = '#64748b';
             projectTitleText.style.fontSize = '16px';
             projectTitleText.style.margin = '5px 0 0 0';
@@ -1473,7 +1473,7 @@ export default function App() {
 
         doc.setTextColor(0, 51, 255);
         doc.setFontSize(10);
-        doc.text(`CRONOGRAMA VISUAL: ${project.name.toUpperCase()}`, pageWidth / 2, 6, { align: 'center' });
+        doc.text(`CRONOGRAMA VISUAL: ${(project.name || '').toUpperCase()}`, pageWidth / 2, 6, { align: 'center' });
         
         doc.addImage(imgData, 'PNG', xPos, yPos, finalWidth, finalHeight, undefined, 'FAST');
       } catch (err) {
@@ -1556,7 +1556,7 @@ export default function App() {
             docTitle.style.margin = '0';
             
             const projectTitleText = clonedDoc.createElement('p');
-            projectTitleText.innerText = `PROJETO: ${project.name.toUpperCase()}`;
+            projectTitleText.innerText = `PROJETO: ${(project.name || '').toUpperCase()}`;
             projectTitleText.style.color = '#64748b';
             projectTitleText.style.fontSize = '16px';
             projectTitleText.style.margin = '5px 0 0 0';
@@ -1749,7 +1749,20 @@ export default function App() {
       : query(collection(db, 'projects'), where('createdBy', '==', currentUser.id));
 
     const unsubProjects = onSnapshot(projectsQuery, (snapshot) => {
-      setProjects(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Project)));
+      setProjects(snapshot.docs.map(doc => {
+        const data = doc.data();
+        return { 
+          id: doc.id, 
+          ...data,
+          name: data.name || '',
+          budget: Number(data.budget) || 0,
+          spent: Number(data.spent) || 0,
+          progress: Number(data.progress) || 0,
+          status: data.status || 'not-started',
+          startDate: data.startDate || '',
+          endDate: data.endDate || ''
+        } as Project;
+      }));
     }, (error) => {
       if (error.message.includes('Quota exceeded')) {
         localStorage.setItem('firestore_quota_extrapolated', 'true');
@@ -1769,7 +1782,16 @@ export default function App() {
     });
 
     const unsubMeasurements = onSnapshot(collection(db, 'measurements'), (snapshot) => {
-      setMeasurements(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Measurement)));
+      setMeasurements(snapshot.docs.map(doc => {
+        const data = doc.data();
+        return { 
+          id: doc.id, 
+          ...data,
+          value: Number(data.value) || 0,
+          date: data.date || '',
+          status: data.status || 'pending'
+        } as Measurement;
+      }));
     }, (error) => {
       if (error.message.includes('Quota exceeded')) {
         localStorage.setItem('firestore_quota_extrapolated', 'true');
@@ -1859,7 +1881,16 @@ export default function App() {
     });
 
     const unsubRCRequests = onSnapshot(collection(db, 'consumptionRCRequests'), (snapshot) => {
-      setConsumptionRCRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ConsumptionRCRequest)));
+      setConsumptionRCRequests(snapshot.docs.map(doc => {
+        const data = doc.data();
+        return { 
+          id: doc.id, 
+          ...data,
+          value: Number(data.value) || 0,
+          status: data.status || 'requested',
+          createdAt: data.createdAt || { toDate: () => new Date() }
+        } as ConsumptionRCRequest;
+      }));
     }, (error) => {
       if (error.message.includes('Quota exceeded')) {
         localStorage.setItem('firestore_quota_extrapolated', 'true');
@@ -2679,7 +2710,7 @@ export default function App() {
     doc.setTextColor(30, 41, 59); // slate-800
     doc.setFontSize(16);
     doc.setFont('helvetica', 'bold');
-    doc.text(project.name.toUpperCase(), 20, 55);
+    doc.text((project.name || '').toUpperCase(), 20, 55);
     
     doc.setDrawColor(226, 232, 240); // slate-200
     doc.line(20, 60, pageWidth - 20, 60);
@@ -2896,7 +2927,7 @@ export default function App() {
       doc.setFontSize(8);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(100, 116, 139);
-      doc.text(`OBRA: ${project.name.toUpperCase()}`, pageWidth - 15, 22, { align: 'right' });
+      doc.text(`OBRA: ${(project.name || '').toUpperCase()}`, pageWidth - 15, 22, { align: 'right' });
       doc.text(`Emissão: ${new Date().toLocaleDateString('pt-BR')}`, pageWidth - 15, 27, { align: 'right' });
       
       // Project Info Section
@@ -3992,13 +4023,13 @@ export default function App() {
                                     <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
                                       <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Orçamento Total</p>
                                       <p className="text-2xl font-bold text-axia-accent">
-                                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingProject.budget)}
+                                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingProject.budget || 0)}
                                       </p>
                                     </div>
                                     <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
                                       <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Total Medido</p>
                                       <p className="text-2xl font-bold text-axia-primary">
-                                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingProject.spent)}
+                                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingProject.spent || 0)}
                                       </p>
                                     </div>
                                   </div>
@@ -4007,19 +4038,19 @@ export default function App() {
                                     <div className="flex justify-between items-center">
                                       <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Utilização do Orçamento</span>
                                       <span className="text-sm font-bold text-axia-primary bg-axia-primary/10 px-2 py-0.5 rounded-lg">
-                                        {Math.round((viewingProject.spent / viewingProject.budget) * 100)}%
+                                        {Math.round(((viewingProject.spent || 0) / (viewingProject.budget || 1)) * 100)}%
                                       </span>
                                     </div>
                                     <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-200">
                                       <motion.div 
                                         initial={{ width: 0 }}
-                                        animate={{ width: `${(viewingProject.spent / viewingProject.budget) * 100}%` }}
+                                        animate={{ width: `${((viewingProject.spent || 0) / (viewingProject.budget || 1)) * 100}%` }}
                                         className="h-full bg-axia-accent rounded-full shadow-inner"
                                       />
                                     </div>
                                     <div className="flex justify-between text-[11px] font-bold text-slate-400">
-                                      <span>Saldo: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingProject.budget - viewingProject.spent)}</span>
-                                      <span>Total: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingProject.budget)}</span>
+                                      <span>Saldo: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((viewingProject.budget || 0) - (viewingProject.spent || 0))}</span>
+                                      <span>Total: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingProject.budget || 0)}</span>
                                     </div>
                                   </div>
                                 </div>
@@ -4609,7 +4640,7 @@ export default function App() {
                                       </div>
                                       <div className="text-right ml-3">
                                         <p className="text-xs font-bold text-axia-primary">
-                                          {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(measurement.value)}
+                                          {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(measurement.value || 0)}
                                         </p>
                                         <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md uppercase ${
                                           measurement.status === 'paid' ? 'bg-green-100 text-green-600' : 
@@ -4874,7 +4905,7 @@ export default function App() {
                               <div className="xl:text-right shrink-0">
                                 <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase">Valor</p>
                                 <p className="text-base lg:text-lg font-bold text-axia-accent">
-                                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget)}
+                                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget || 0)}
                                 </p>
                               </div>
                             </div>
