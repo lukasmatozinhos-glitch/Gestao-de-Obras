@@ -139,6 +139,8 @@ export interface PlanningActivity {
   startYear: number;
   endMonth: number;
   endYear: number;
+  startDate?: string;
+  endDate?: string;
   color: string;
   order: number;
   category?: string;

@@ -64,6 +64,7 @@ import {
   doc, 
   setDoc, 
   getDoc,
+  increment,
   query,
   where,
   or,
@@ -219,15 +220,15 @@ export default function App() {
     return visibleMonths.findIndex(m => m.absMonth === absMonth);
   };
 
-  const getMonthPosition = (absMonth: number, visibleMonths: { absMonth: number }[]) => {
+  const getMonthPosition = (absMonth: number, visibleMonths: { absMonth: number }[], width: number = MONTH_WIDTH) => {
     const index = getMonthIndex(absMonth, visibleMonths);
-    if (index !== -1) return index * MONTH_WIDTH;
+    if (index !== -1) return index * width;
     
     // If month is hidden, find the nearest previous visible month
     const prevVisible = [...visibleMonths].reverse().find(m => m.absMonth < absMonth);
     if (prevVisible) {
       const prevIndex = visibleMonths.findIndex(m => m.absMonth === prevVisible.absMonth);
-      return (prevIndex + 1) * MONTH_WIDTH;
+      return (prevIndex + 1) * width;
     }
     
     return 0;
@@ -264,6 +265,7 @@ export default function App() {
   const [addendums, setAddendums] = useState<ProjectAddendum[]>([]);
   const [activities, setActivities] = useState<ScheduleActivity[]>([]);
   const [planningActivities, setPlanningActivities] = useState<PlanningActivity[]>([]);
+
   const [consumptionRCRequests, setConsumptionRCRequests] = useState<ConsumptionRCRequest[]>([]);
   const [isAddingRCRequest, setIsAddingRCRequest] = useState(false);
   const [isUpdatingRCStatus, setIsUpdatingRCStatus] = useState<string | null>(null);
@@ -280,6 +282,7 @@ export default function App() {
   const [selectedScheduleProjectId, setSelectedScheduleProjectId] = useState<string>('');
   const [selectedPlanningProjectId, setSelectedPlanningProjectId] = useState<string>('');
   const [planningViewMonths, setPlanningViewMonths] = useState<number | 'auto'>('auto');
+  const [planningViewScale, setPlanningViewScale] = useState<'month' | 'week'>('month');
   const [isAddingActivity, setIsAddingActivity] = useState(false);
   const [isAddingPlanningActivity, setIsAddingPlanningActivity] = useState(false);
   const [editingActivity, setEditingActivity] = useState<ScheduleActivity | null>(null);
@@ -304,12 +307,82 @@ export default function App() {
     startYear: new Date().getFullYear(),
     endMonth: (new Date().getMonth() + 1) % 12,
     endYear: new Date().getMonth() === 11 ? new Date().getFullYear() + 1 : new Date().getFullYear(),
+    startDate: '',
+    endDate: '',
     color: '#0033FF',
     order: planningActivities.length,
     category: '',
     description: '',
     isHidden: false
   });
+  const [useSpecificPlanningDates, setUseSpecificPlanningDates] = useState(false);
+
+  // States for Fiscal Planning
+  const [fiscalPlanningActivities, setFiscalPlanningActivities] = useState<PlanningActivity[]>([]);
+  const [isAddingFiscalPlanningActivity, setIsAddingFiscalPlanningActivity] = useState(false);
+  const [editingFiscalPlanningActivity, setEditingFiscalPlanningActivity] = useState<PlanningActivity | null>(null);
+  const [fiscalPlanningViewMonths, setFiscalPlanningViewMonths] = useState<number | 'auto'>('auto');
+  const [fiscalPlanningViewScale, setFiscalPlanningViewScale] = useState<'month' | 'week'>('month');
+  const [newFiscalPlanningActivity, setNewFiscalPlanningActivity] = useState<Omit<PlanningActivity, 'id'>>({
+    projectId: '',
+    name: '',
+    startMonth: new Date().getMonth(),
+    startYear: new Date().getFullYear(),
+    endMonth: (new Date().getMonth() + 1) % 12,
+    endYear: new Date().getMonth() === 11 ? new Date().getFullYear() + 1 : new Date().getFullYear(),
+    startDate: '',
+    endDate: '',
+    color: '#0033FF',
+    order: 0,
+    category: '',
+    description: '',
+    isHidden: false
+  });
+  const [useSpecificFiscalDates, setUseSpecificFiscalDates] = useState(false);
+
+  useEffect(() => {
+    if (editingFiscalPlanningActivity) {
+      setUseSpecificFiscalDates(!!(editingFiscalPlanningActivity.startDate || editingFiscalPlanningActivity.endDate));
+      setNewFiscalPlanningActivity({
+        projectId: editingFiscalPlanningActivity.projectId || '',
+        name: editingFiscalPlanningActivity.name,
+        startMonth: editingFiscalPlanningActivity.startMonth,
+        startYear: editingFiscalPlanningActivity.startYear,
+        endMonth: editingFiscalPlanningActivity.endMonth,
+        endYear: editingFiscalPlanningActivity.endYear,
+        startDate: editingFiscalPlanningActivity.startDate || '',
+        endDate: editingFiscalPlanningActivity.endDate || '',
+        color: editingFiscalPlanningActivity.color,
+        order: editingFiscalPlanningActivity.order,
+        category: editingFiscalPlanningActivity.category || '',
+        description: editingFiscalPlanningActivity.description || '',
+        isHidden: !!editingFiscalPlanningActivity.isHidden
+      });
+    }
+  }, [editingFiscalPlanningActivity]);
+
+  useEffect(() => {
+    if (editingPlanningActivity) {
+      setUseSpecificPlanningDates(!!(editingPlanningActivity.startDate || editingPlanningActivity.endDate));
+      setNewPlanningActivity({
+        id: editingPlanningActivity.id,
+        projectId: editingPlanningActivity.projectId,
+        name: editingPlanningActivity.name,
+        startMonth: editingPlanningActivity.startMonth,
+        startYear: editingPlanningActivity.startYear,
+        endMonth: editingPlanningActivity.endMonth,
+        endYear: editingPlanningActivity.endYear,
+        startDate: editingPlanningActivity.startDate || '',
+        endDate: editingPlanningActivity.endDate || '',
+        color: editingPlanningActivity.color,
+        order: editingPlanningActivity.order,
+        category: editingPlanningActivity.category || '',
+        description: editingPlanningActivity.description || '',
+        isHidden: !!editingPlanningActivity.isHidden
+      } as any);
+    }
+  }, [editingPlanningActivity]);
+
   const [newBulletin, setNewBulletin] = useState({
     projectId: '',
     rcNumber: '',
@@ -325,7 +398,51 @@ export default function App() {
   const [selectedProject, setSelectedProject] = useState('');
   const [selectedDate, setSelectedDate] = useState('');
   const [showAddProject, setShowAddProject] = useState(false);
+  const [isGlobalTimelineExpanded, setIsGlobalTimelineExpanded] = useState(false);
   const [viewingProject, setViewingProject] = useState<Project | null>(null);
+  useEffect(() => {
+    if (viewingProject) {
+      const updatedProject = projects.find(p => p.id === viewingProject.id);
+      if (updatedProject) {
+        setViewingProject(updatedProject);
+      }
+    }
+  }, [projects]);
+
+  const viewingProjectStats = useMemo(() => {
+    if (!viewingProject) return { addendumsSum: 0, totalBudget: 0, usage: 0, balance: 0 };
+    const projectAddendums = addendums.filter(a => a.projectId === viewingProject.id);
+    const addendumsSum = projectAddendums.reduce((sum, a) => sum + (Number(a.value) || 0), 0);
+    const baseBudget = Number(viewingProject.budget) || 0;
+    const totalBudget = baseBudget + addendumsSum;
+    const spent = Number(viewingProject.spent) || 0;
+    const usage = totalBudget > 0 ? (spent / totalBudget) * 100 : 0;
+    const balance = totalBudget - spent;
+
+    return {
+      addendumsSum,
+      totalBudget,
+      usage,
+      balance
+    };
+  }, [viewingProject, addendums]);
+
+  const projectsWithTotals = useMemo(() => {
+    return projects.map(project => {
+      const pAddendums = addendums.filter(a => a.projectId === project.id);
+      const addendumsSum = pAddendums.reduce((sum, a) => sum + (Number(a.value) || 0), 0);
+      const totalBudget = (Number(project.budget) || 0) + addendumsSum;
+      const usage = totalBudget > 0 ? ((project.spent || 0) / totalBudget) * 100 : 0;
+      const balance = totalBudget - (project.spent || 0);
+      return {
+        ...project,
+        totalBudget,
+        addendumsSum,
+        usage,
+        balance
+      };
+    });
+  }, [projects, addendums]);
   const [currentPalette, setCurrentPalette] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('currentPalette') || 'ocean';
@@ -462,32 +579,50 @@ export default function App() {
 
     try {
       const addendumId = `add-${Date.now()}`;
+      
+      // Safe parsing for Brazilian number formats (dots as thousands, comma as decimal)
+      let cleanValue = newAddendum.value.toString()
+        .replace(/\./g, '')
+        .replace(',', '.');
+      
+      const parsedValue = parseFloat(cleanValue);
+      
+      if (isNaN(parsedValue)) {
+        showNotification('O valor do aditivo deve ser um número válido.');
+        return;
+      }
+
       const addendum: ProjectAddendum = {
         id: addendumId,
         projectId: viewingProject.id,
         number: newAddendum.number,
         description: newAddendum.description,
         rcNumber: newAddendum.rcNumber,
-        value: parseFloat(newAddendum.value),
+        value: parsedValue,
         isApproved: newAddendum.isApproved,
         createdAt: new Date().toISOString()
       };
 
       await setDoc(doc(db, 'projectAddendums', addendumId), addendum);
+      
       setNewAddendum({ number: '', description: '', rcNumber: '', value: '', isApproved: false });
       setIsAddingAddendum(false);
-      showNotification('Aditivo registrado com sucesso!');
+      showNotification('Aditivo registrado e orçamento atualizado!');
     } catch (error) {
-       handleFirestoreError(error, OperationType.WRITE, 'projectAddendums');
+      console.error('Error adding addendum:', error);
+      handleFirestoreError(error, OperationType.WRITE, 'projectAddendums');
     }
   };
 
-  const handleDeleteAddendum = async (id: string) => {
+  const handleDeleteAddendum = async (addendum: ProjectAddendum) => {
     try {
-      await deleteDoc(doc(db, 'projectAddendums', id));
-      showNotification('Aditivo excluído com sucesso.');
+      if (!addendum || !addendum.id || !addendum.projectId) return;
+
+      await deleteDoc(doc(db, 'projectAddendums', addendum.id));
+      
+      showNotification('Aditivo excluído e orçamento recalculado.');
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `projectAddendums/${id}`);
+      handleFirestoreError(error, OperationType.DELETE, `projectAddendums/${addendum.id}`);
     }
   };
 
@@ -600,14 +735,14 @@ export default function App() {
     const today = new Date();
     const todayAbs = today.getFullYear() * 12 + today.getMonth();
 
-    // Start anchor should be consistent: either the first activity or today, whichever is earlier.
-    // We add 1 month padding at the start for visual breathing room.
+    // Start anchor should be consistent: the first activity's start.
+    // If no activities are present, default to today.
     let baseMinAbs = todayAbs;
     if (relevantActivities.length > 0) {
-      baseMinAbs = Math.min(todayAbs, ...relevantActivities.map(a => a.startYear * 12 + a.startMonth));
+      baseMinAbs = Math.min(...relevantActivities.map(a => a.startYear * 12 + a.startMonth));
     }
     
-    const startAbs = baseMinAbs - 1;
+    const startAbs = baseMinAbs;
     let endAbs: number;
 
     if (planningViewMonths === 'auto') {
@@ -660,6 +795,70 @@ export default function App() {
     };
   }, [selectedPlanningProjectId, planningActivities, planningViewMonths, hiddenMonths]);
 
+  const fiscalPlanningTimelineData = useMemo(() => {
+    const today = new Date();
+    const todayAbs = today.getFullYear() * 12 + today.getMonth();
+
+    // Start anchor should be the first activity's start.
+    // If no activities exist, default to today.
+    let baseMinAbs = todayAbs;
+    if (fiscalPlanningActivities.length > 0) {
+      baseMinAbs = Math.min(...fiscalPlanningActivities.map(a => a.startYear * 12 + a.startMonth));
+    }
+    
+    const startAbs = baseMinAbs;
+    let endAbs: number;
+
+    if (fiscalPlanningViewMonths === 'auto') {
+      let baseMaxAbs = todayAbs;
+      if (fiscalPlanningActivities.length > 0) {
+        baseMaxAbs = Math.max(todayAbs, ...fiscalPlanningActivities.map(a => a.endYear * 12 + a.endMonth));
+      }
+      endAbs = baseMaxAbs + 1; // 1 month padding at the end
+    } else {
+      endAbs = startAbs + (fiscalPlanningViewMonths as number) - 1;
+    }
+
+    const numMonths = endAbs - startAbs + 1;
+    const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+    const exactTodayAbs = todayAbs + (today.getDate() - 1) / daysInMonth;
+    
+    // Filter visible months using the shared hiddenMonths state
+    const allMonths: { absMonth: number; year: number; month: number }[] = [];
+    for (let i = 0; i < numMonths; i++) {
+      const absMonth = startAbs + i;
+      allMonths.push({
+        absMonth,
+        year: Math.floor(absMonth / 12),
+        month: absMonth % 12
+      });
+    }
+
+    const visibleMonths = allMonths.filter(m => !hiddenMonths.includes(`${m.year}-${m.month}`));
+    
+    // Group visible months by year
+    const years: { year: number; monthsCount: number }[] = [];
+    visibleMonths.forEach(m => {
+      const lastYear = years[years.length - 1];
+      if (lastYear && lastYear.year === m.year) {
+        lastYear.monthsCount++;
+      } else {
+        years.push({ year: m.year, monthsCount: 1 });
+      }
+    });
+    
+    return {
+      startAbs,
+      endAbs,
+      numMonths: visibleMonths.length,
+      todayAbs,
+      exactTodayAbs,
+      years,
+      visibleMonths,
+      allMonths
+    };
+  }, [fiscalPlanningActivities, fiscalPlanningViewMonths, hiddenMonths]);
+
   const scheduleTimelineData = useMemo(() => {
     if (!selectedScheduleProjectId) return null;
     
@@ -677,10 +876,10 @@ export default function App() {
         const d = new Date(a.startDate);
         return d.getFullYear() * 12 + d.getMonth();
       });
-      baseMinAbs = Math.min(todayAbs, ...startDates);
+      baseMinAbs = Math.min(...startDates);
     }
     
-    const startAbs = baseMinAbs - 1;
+    const startAbs = baseMinAbs;
     let baseMaxAbs = todayAbs;
     if (relevantActivities.length > 0) {
       const endDates = relevantActivities.map(a => {
@@ -718,6 +917,9 @@ export default function App() {
   }, [selectedScheduleProjectId, activities]);
 
   const MONTH_WIDTH = 100;
+  const PLANNING_COLUMN_WIDTH = planningViewScale === 'month' ? 100 : 40;
+  const PLANNING_MONTH_COLUMNS = planningViewScale === 'month' ? 1 : 4;
+  const PLANNING_MONTH_WIDTH = PLANNING_COLUMN_WIDTH * PLANNING_MONTH_COLUMNS;
 
   const handleReorderPlanningActivities = async (newOrder: PlanningActivity[]) => {
     // We only update the order field in Firestore. 
@@ -760,6 +962,23 @@ export default function App() {
       }
       setIsAddingPlanningActivity(false);
       setEditingPlanningActivity(null);
+      setUseSpecificPlanningDates(false);
+      setNewPlanningActivity({
+        id: '',
+        projectId: selectedPlanningProjectId,
+        name: '',
+        startMonth: new Date().getMonth(),
+        startYear: new Date().getFullYear(),
+        endMonth: (new Date().getMonth() + 1) % 12,
+        endYear: new Date().getMonth() === 11 ? new Date().getFullYear() + 1 : new Date().getFullYear(),
+        startDate: '',
+        endDate: '',
+        color: '#0033FF',
+        order: planningActivities.filter(a => a.projectId === selectedPlanningProjectId).length,
+        category: '',
+        description: '',
+        isHidden: false
+      } as any);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'planningActivities');
     }
@@ -806,6 +1025,106 @@ export default function App() {
         await updateDoc(doc(db, 'planningActivities', nextActivity.id), { order: activity.order });
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, `planningActivities/${activity.id}`);
+      }
+    }
+  };
+
+  const handleReorderFiscalPlanningActivities = async (newOrder: PlanningActivity[]) => {
+    try {
+      const updatePromises = newOrder.map((activity, index) => {
+        if (activity.order === index) return Promise.resolve();
+        return updateDoc(doc(db, 'fiscalPlanningActivities', activity.id), {
+          order: index
+        });
+      });
+      await Promise.all(updatePromises);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'fiscalPlanningActivities');
+    }
+  };
+
+  const handleSaveFiscalPlanningActivity = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const dataToSave = {
+      ...newFiscalPlanningActivity,
+      isHidden: newFiscalPlanningActivity.isHidden ?? false
+    };
+
+    try {
+      if (editingFiscalPlanningActivity) {
+        await updateDoc(doc(db, 'fiscalPlanningActivities', editingFiscalPlanningActivity.id), dataToSave);
+        showNotification('Atividade do planejamento anual atualizada!');
+      } else {
+        const id = `fiscal-${Date.now()}`;
+        await setDoc(doc(db, 'fiscalPlanningActivities', id), {
+          ...dataToSave,
+          id,
+          order: fiscalPlanningActivities.length
+        });
+        showNotification('Atividade adicionada ao planejamento anual!');
+      }
+      setIsAddingFiscalPlanningActivity(false);
+      setEditingFiscalPlanningActivity(null);
+      setUseSpecificFiscalDates(false);
+      setNewFiscalPlanningActivity({
+        projectId: '',
+        name: '',
+        startMonth: new Date().getMonth(),
+        startYear: new Date().getFullYear(),
+        endMonth: (new Date().getMonth() + 1) % 12,
+        endYear: new Date().getMonth() === 11 ? new Date().getFullYear() + 1 : new Date().getFullYear(),
+        startDate: '',
+        endDate: '',
+        color: '#0033FF',
+        order: fiscalPlanningActivities.length,
+        category: '',
+        description: '',
+        isHidden: false
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'fiscalPlanningActivities');
+    }
+  };
+
+  const handleDeleteFiscalPlanningActivity = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'fiscalPlanningActivities', id));
+      showNotification('Atividade removida do planejamento anual.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `fiscalPlanningActivities/${id}`);
+    }
+  };
+
+  const handleToggleFiscalPlanningActivityVisibility = async (activity: PlanningActivity) => {
+    try {
+      await updateDoc(doc(db, 'fiscalPlanningActivities', activity.id), { 
+        isHidden: !activity.isHidden 
+      });
+      showNotification(activity.isHidden ? 'Atividade agora está visível.' : 'Atividade ocultada.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `fiscalPlanningActivities/${activity.id}`);
+    }
+  };
+
+  const handleMoveFiscalPlanningActivity = async (activity: PlanningActivity, direction: 'up' | 'down') => {
+    const sortedActivities = [...fiscalPlanningActivities].sort((a, b) => a.order - b.order);
+    const currentIndex = sortedActivities.findIndex(a => a.id === activity.id);
+    
+    if (direction === 'up' && currentIndex > 0) {
+      const prevActivity = sortedActivities[currentIndex - 1];
+      try {
+        await updateDoc(doc(db, 'fiscalPlanningActivities', activity.id), { order: prevActivity.order });
+        await updateDoc(doc(db, 'fiscalPlanningActivities', prevActivity.id), { order: activity.order });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `fiscalPlanningActivities/${activity.id}`);
+      }
+    } else if (direction === 'down' && currentIndex < sortedActivities.length - 1) {
+      const nextActivity = sortedActivities[currentIndex + 1];
+      try {
+        await updateDoc(doc(db, 'fiscalPlanningActivities', activity.id), { order: nextActivity.order });
+        await updateDoc(doc(db, 'fiscalPlanningActivities', nextActivity.id), { order: activity.order });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `fiscalPlanningActivities/${activity.id}`);
       }
     }
   };
@@ -864,7 +1183,7 @@ export default function App() {
     if (planningRef.current) {
       try {
         const numMonths = planningTimelineData?.numMonths || 12;
-        const exportWidth = 450 + (numMonths * MONTH_WIDTH) + 120;
+        const exportWidth = 450 + (numMonths * PLANNING_MONTH_WIDTH) + 120;
 
         const canvas = await html2canvas(planningRef.current, {
           scale: 3,
@@ -1072,7 +1391,7 @@ export default function App() {
 
     try {
       const numMonths = planningTimelineData?.numMonths || 12;
-      const exportWidth = 450 + (numMonths * MONTH_WIDTH) + 120;
+      const exportWidth = 450 + (numMonths * PLANNING_MONTH_WIDTH) + 120;
 
       const canvas = await html2canvas(element, { 
         scale: 3,
@@ -1886,6 +2205,16 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'planningActivities');
     });
 
+    const unsubFiscalPlanning = onSnapshot(query(collection(db, 'fiscalPlanningActivities'), orderBy('order', 'asc')), (snapshot) => {
+      setFiscalPlanningActivities(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlanningActivity)));
+    }, (error) => {
+      if (error.message.includes('Quota exceeded')) {
+        localStorage.setItem('firestore_quota_extrapolated', 'true');
+        setQuotaExceeded(true);
+      }
+      handleFirestoreError(error, OperationType.LIST, 'fiscalPlanningActivities');
+    });
+
     const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
       setRegisteredUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as UserProfile)));
     }, (error) => {
@@ -1926,6 +2255,7 @@ export default function App() {
       unsubAddendums();
       unsubActivities();
       unsubPlanning();
+      unsubFiscalPlanning();
       unsubUsers();
       unsubRCRequests();
     };
@@ -1977,7 +2307,7 @@ export default function App() {
   };
 
   // Dashboard Data Calculations
-  const projectsByClient = projects.reduce((acc: any, project) => {
+  const projectsByClient = projectsWithTotals.reduce((acc: any, project) => {
     acc[project.client] = (acc[project.client] || 0) + 1;
     return acc;
   }, {});
@@ -1987,8 +2317,8 @@ export default function App() {
     value: projectsByClient[client]
   }));
 
-  const budgetByClient = projects.reduce((acc: any, project) => {
-    acc[project.client] = (acc[project.client] || 0) + project.budget;
+  const budgetByClient = projectsWithTotals.reduce((acc: any, project) => {
+    acc[project.client] = (acc[project.client] || 0) + (project.totalBudget || 0);
     return acc;
   }, {});
 
@@ -1998,11 +2328,11 @@ export default function App() {
   }));
 
   const statusCounts = {
-    'not-started': projects.filter(p => p.status === 'not-started').length,
-    'preliminary-study': projects.filter(p => p.status === 'preliminary-study').length,
-    'in-progress': projects.filter(p => p.status === 'in-progress').length,
-    'paused': projects.filter(p => p.status === 'paused').length,
-    'finished': projects.filter(p => p.status === 'finished').length,
+    'not-started': projectsWithTotals.filter(p => p.status === 'not-started').length,
+    'preliminary-study': projectsWithTotals.filter(p => p.status === 'preliminary-study').length,
+    'in-progress': projectsWithTotals.filter(p => p.status === 'in-progress').length,
+    'paused': projectsWithTotals.filter(p => p.status === 'paused').length,
+    'finished': projectsWithTotals.filter(p => p.status === 'finished').length,
   };
 
   const totalPendingRCValue = useMemo(() => {
@@ -2741,6 +3071,13 @@ export default function App() {
     doc.line(20, 60, pageWidth - 20, 60);
     
     // Details Table
+    const projectAddendumsSum = addendums
+      .filter(a => a.projectId === project.id)
+      .reduce((sum, a) => sum + (Number(a.value) || 0), 0);
+    const totalBudget = (Number(project.budget) || 0) + projectAddendumsSum;
+    const balance = totalBudget - (project.spent || 0);
+    const usagePercent = totalBudget > 0 ? (project.spent || 0) / totalBudget : 0;
+
     const detailsData = [
       ['Cliente', project.client],
       ['Responsável', project.responsible || project.creatorName || 'Sistema'],
@@ -2754,10 +3091,12 @@ export default function App() {
         project.status === 'finished' ? 'Concluído' : 
         project.status === 'paused' ? 'Paralisado' : 'Não Iniciado'
       ],
-      ['Orçamento Total', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget || 0)],
+      ['Orçamento Base', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(project.budget) || 0)],
+      ['Total de Aditivos', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(projectAddendumsSum)],
+      ['Orçamento Total Geral', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalBudget)],
       ['Total Medido', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.spent || 0)],
-      ['Saldo Disponível', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((project.budget || 0) - (project.spent || 0))],
-      ['Percentual Executado', `${Math.round(((project.spent || 0) / (project.budget || 1)) * 100)}%`]
+      ['Saldo Disponível', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(balance)],
+      ['Percentual Executado', `${Math.round(usagePercent * 100)}%`]
     ];
     
     autoTable(doc, {
@@ -2929,7 +3268,7 @@ export default function App() {
       return;
     }
 
-    projects.forEach((project, index) => {
+    projectsWithTotals.forEach((project, index) => {
       if (index > 0) {
         doc.addPage();
       }
@@ -3001,10 +3340,12 @@ export default function App() {
       doc.text('Resumo Financeiro', 15, financialStartY);
       
       const financialInfo = [
-        ['Orçamento Total', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget || 0)],
+        ['Orçamento Base', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(project.budget) || 0)],
+        ['Total de Aditivos', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.addendumsSum || 0)],
+        ['Orçamento Total Geral', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.totalBudget || 0)],
         ['Total Medido', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.spent || 0)],
-        ['Saldo Disponível', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((project.budget || 0) - (project.spent || 0))],
-        ['Utilização', `${Math.round(((project.spent || 0) / (project.budget || 1)) * 100)}%`]
+        ['Saldo Disponível', new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.balance || 0)],
+        ['Utilização', `${Math.round(project.usage)}%`]
       ];
 
       autoTable(doc, {
@@ -3788,148 +4129,390 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Timeline / Schedule */}
-                <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-                  <h3 className="text-lg font-bold mb-6 flex items-center gap-2 dark:text-white">
-                    <Calendar size={20} className="text-axia-primary" />
-                    Cronograma Global de Obras
-                  </h3>
-                  <div className="space-y-6">
-                    {timelineData.length > 0 && timelineWindow ? (
-                      <div className="relative pt-6">
-                        {/* Timeline Labels */}
-                        <div className="absolute top-0 left-0 right-0 flex justify-between px-1 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 dark:border-slate-800 pb-1">
-                          <span>{new Date(timelineWindow.minStart).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })}</span>
-                          <span>{new Date(timelineWindow.minStart + (timelineWindow.totalDuration / 2)).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })}</span>
-                          <span>{new Date(timelineWindow.maxEnd).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })}</span>
-                        </div>
-                        
-                        <div className="space-y-4 pt-4">
-                          {timelineData.map((item, index) => (
-                            <div key={index} className="space-y-1.5 group">
-                              <div className="flex justify-between text-[10px] font-bold text-slate-500 dark:text-slate-400 px-1">
-                                <span className="group-hover:text-axia-primary transition-colors">{item.name}</span>
-                                <span className="opacity-0 group-hover:opacity-100 transition-opacity">
-                                  {item.start} - {item.end}
-                                </span>
-                              </div>
-                              <div className="h-3 w-full bg-slate-50 dark:bg-slate-800/50 rounded-full relative overflow-hidden">
-                                <motion.div 
-                                  initial={{ width: 0, opacity: 0 }}
-                                  animate={{ width: `${item.width}%`, left: `${item.left}%`, opacity: 1 }}
-                                  transition={{ duration: 1, delay: index * 0.1 }}
-                                  className={`absolute h-full rounded-full shadow-sm shadow-black/5 ${
-                                    item.status === 'finished' ? 'bg-axia-accent' : 
-                                    item.status === 'paused' ? 'bg-axia-secondary' : 
-                                    item.status === 'delayed' ? 'bg-red-500' :
-                                    'bg-axia-primary'
-                                  }`}
-                                />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                        
-                        {/* Today Marker if within window */}
-                        {(() => {
-                          const today = new Date().getTime();
-                          if (today >= timelineWindow.minStart && today <= timelineWindow.maxEnd) {
-                            const left = ((today - timelineWindow.minStart) / timelineWindow.totalDuration) * 100;
-                            return (
-                              <div 
-                                className="absolute top-0 bottom-0 border-l border-dashed border-red-500/50 z-10 pointer-events-none"
-                                style={{ left: `${left}%` }}
-                              />
-                            );
-                          }
-                          return null;
-                        })()}
+                {/* Planejamento Anual do Fiscal (Cronograma Anual) */}
+                <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border-2 border-axia-primary/30 dark:border-axia-primary/45 shadow-xl shadow-axia-primary/5 overflow-hidden space-y-6">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-2xl bg-axia-primary/10 flex items-center justify-center text-axia-primary shadow-inner">
+                        <TrendingUp size={24} />
                       </div>
-                    ) : (
-                      <div className="py-12 text-center text-slate-400">
-                        <Calendar size={48} className="mx-auto mb-4 opacity-20" />
-                        <p>Nenhuma data de início/fim definida para as obras.</p>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">Planejamento Anual do Fiscal</h3>
+                          <span className="px-2.5 py-1 bg-axia-primary/10 text-axia-primary text-[10px] font-black uppercase tracking-widest rounded-full animate-pulse border border-axia-primary/20">Cronograma Destaque</span>
+                        </div>
+                        <p className="text-slate-500 dark:text-slate-400 text-xs font-semibold mt-0.5">Cronograma de obras e atividades anuais do fiscal</p>
                       </div>
-                    )}
-                  </div>
-                </div>
+                    </div>
+                    
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-xl p-1 shadow-inner">
+                        <button
+                          onClick={() => setFiscalPlanningViewScale('month')}
+                          className={`px-4 py-1.5 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${
+                            fiscalPlanningViewScale === 'month' 
+                              ? 'bg-white dark:bg-slate-700 text-axia-primary shadow-sm' 
+                              : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
+                          }`}
+                        >
+                          Meses
+                        </button>
+                        <button
+                          onClick={() => setFiscalPlanningViewScale('week')}
+                          className={`px-4 py-1.5 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${
+                            fiscalPlanningViewScale === 'week' 
+                              ? 'bg-white dark:bg-slate-700 text-axia-primary shadow-sm' 
+                              : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
+                          }`}
+                        >
+                          Semanas
+                        </button>
+                      </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                  {/* Projects Table */}
-                  <div className="lg:col-span-3 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-                      <h3 className="text-lg font-bold">Projetos Recentes</h3>
-                      <button 
-                        onClick={() => setActiveTab('projects')}
-                        className="text-axia-primary text-sm font-semibold hover:underline"
+                      <select 
+                        value={fiscalPlanningViewMonths}
+                        onChange={(e) => setFiscalPlanningViewMonths(e.target.value === 'auto' ? 'auto' : Number(e.target.value))}
+                        className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all cursor-pointer shadow-sm"
                       >
-                        Ver todos
+                        <option value="auto">Automático (Todas)</option>
+                        <option value="6">06 Meses</option>
+                        <option value="12">12 Meses</option>
+                        <option value="18">18 Meses</option>
+                        <option value="24">24 Meses</option>
+                        <option value="36">36 Meses</option>
+                      </select>
+
+                      <button 
+                        onClick={() => {
+                          setIsAddingFiscalPlanningActivity(true);
+                          setEditingFiscalPlanningActivity(null);
+                          setUseSpecificFiscalDates(false);
+                          setNewFiscalPlanningActivity({
+                            projectId: '',
+                            name: '',
+                            startMonth: new Date().getMonth(),
+                            startYear: new Date().getFullYear(),
+                            endMonth: (new Date().getMonth() + 1) % 12,
+                            endYear: new Date().getMonth() === 11 ? new Date().getFullYear() + 1 : new Date().getFullYear(),
+                            startDate: '',
+                            endDate: '',
+                            color: '#0033FF',
+                            order: fiscalPlanningActivities.length,
+                            category: '',
+                            description: '',
+                            isHidden: false
+                          });
+                        }}
+                        className="bg-axia-primary text-white px-5 py-2.5 rounded-xl font-bold text-xs hover:shadow-lg hover:shadow-axia-primary/25 transition-all flex items-center gap-2 shadow-md shadow-axia-primary/10"
+                      >
+                        <Plus size={16} />
+                        Nova Atividade do Fiscal
                       </button>
                     </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left">
-                        <thead>
-                          <tr className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
-                            <th className="px-6 py-4 font-semibold">Projeto</th>
-                            <th className="px-6 py-4 font-semibold text-center italic text-axia-primary">Incluído por</th>
-                            <th className="px-6 py-4 font-semibold">Status</th>
-                            <th className="px-6 py-4 font-semibold">Progresso</th>
-                            <th className="px-6 py-4 font-semibold">Ações</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {projects.slice(0, 3).map((project) => (
-                            <tr key={project.id} className="hover:bg-slate-50 transition-colors group">
-                              <td className="px-6 py-4">
-                                <div>
-                                  <p className="font-bold text-slate-900">{project.name}</p>
-                                  <p className="text-xs text-slate-500 flex items-center gap-1">
-                                    <MapPin size={12} /> {project.location}
-                                  </p>
-                                </div>
-                              </td>
-                              <td className="px-6 py-4 text-center">
-                                <span className="text-xs font-medium text-slate-600 truncate max-w-[100px] inline-block">{project.creatorName || 'Sistema'}</span>
-                              </td>
-                              <td className="px-6 py-4">
-                                <span className={`px-3 py-1 rounded-full text-xs font-bold border ${getStatusColor(project.status)}`}>
-                                  {getStatusLabel(project.status)}
+                  </div>
+
+                  <div className="relative border border-slate-100 dark:border-slate-800 rounded-[2rem] overflow-hidden bg-slate-50/10 dark:bg-slate-800/15 shadow-inner">
+                    <div className="flex">
+                      {/* Left Header - Activities column */}
+                      <div className="w-[280px] flex-shrink-0 border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 z-20">
+                        <div className="h-16 border-b border-slate-200 dark:border-slate-700 flex flex-col justify-center px-6 bg-slate-50/50 dark:bg-slate-800/20">
+                          <span className="text-[10px] font-black text-slate-800 dark:text-slate-200 uppercase tracking-widest italic">Obras & Atividades</span>
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Planejamento do Fiscal</span>
+                        </div>
+                        {fiscalPlanningActivities.length === 0 ? (
+                          <div className="py-12 px-6 text-center text-slate-400 text-xs italic">
+                            Nenhuma atividade cadastrada. Toque em "Nova Atividade" para iniciar o cronograma.
+                          </div>
+                        ) : (
+                          fiscalPlanningActivities.map((activity) => (
+                            <div 
+                              key={activity.id} 
+                              className="h-14 border-b border-slate-100 dark:border-slate-800 flex items-center px-4 group cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800"
+                              onClick={() => {
+                                setEditingFiscalPlanningActivity(activity);
+                                setIsAddingFiscalPlanningActivity(true);
+                              }}
+                            >
+                              <div className="flex flex-col truncate w-full pr-1">
+                                <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 leading-tight group-hover:text-axia-primary transition-colors truncate">
+                                  {activity.name}
                                 </span>
-                              </td>
-                              <td className="px-6 py-4">
-                                <div className="w-full max-w-[120px]">
-                                  <div className="flex items-center justify-between mb-1">
-                                    <span className="text-xs font-bold text-slate-700">{(project.progress || 0)}%</span>
-                                  </div>
-                                  <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                                    <motion.div 
-                                      initial={{ width: 0 }}
-                                      animate={{ width: `${(project.progress || 0)}%` }}
-                                      className={`h-full rounded-full ${
-                                        project.status === 'delayed' ? 'bg-red-500' : 'bg-axia-primary'
-                                      }`}
-                                    />
-                                  </div>
-                                </div>
-                              </td>
-                              <td className="px-6 py-4">
+                                {activity.category && (
+                                  <span className="text-[8px] font-bold text-axia-primary/70 uppercase tracking-widest leading-none mt-1">
+                                    {activity.category}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="ml-auto opacity-0 group-hover:opacity-100 flex items-center gap-1">
                                 <button 
-                                  onClick={() => {
-                                    setViewingProject(project);
-                                    setActiveTab('projects');
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleToggleFiscalPlanningActivityVisibility(activity);
                                   }}
-                                  className="p-2 hover:bg-slate-200 rounded-lg text-slate-400 group-hover:text-slate-600 transition-colors"
+                                  className={`p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors ${activity.isHidden ? 'text-amber-500' : 'text-slate-400'}`}
+                                  title={activity.isHidden ? "Mostrar atividade" : "Ocultar atividade"}
                                 >
-                                  <ChevronRight size={18} />
+                                  {activity.isHidden ? <Eye size={12} /> : <EyeOff size={12} />}
                                 </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                        {fiscalPlanningActivities.length > 0 && (
+                          <div className="h-14 bg-slate-50/30 dark:bg-slate-800/10" />
+                        )}
+                      </div>
+
+                      {/* Right Header/Bars - Scrollable Gantt */}
+                      <div className="flex-grow overflow-x-auto overflow-y-hidden border-l border-slate-200 dark:border-slate-700 custom-scrollbar">
+                        <div className="relative" style={{ width: fiscalPlanningTimelineData ? fiscalPlanningTimelineData.numMonths * (fiscalPlanningViewScale === 'month' ? 100 : 160) : '100%' }}>
+                          {/* Year / Calendar Row Headers */}
+                          <div className="bg-slate-50/80 dark:bg-slate-800/80 sticky top-0 z-30">
+                            <div className="h-6 flex border-b border-slate-200 dark:border-slate-700">
+                              {fiscalPlanningTimelineData?.years.map((y, i) => (
+                                <div 
+                                  key={`year-${y.year}-${i}`} 
+                                  className="flex items-center justify-center border-r border-slate-200 dark:border-slate-700 text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-100/50 dark:bg-slate-900/50"
+                                  style={{ width: y.monthsCount * (fiscalPlanningViewScale === 'month' ? 100 : 160) }}
+                                >
+                                  {y.year}
+                                </div>
+                              ))}
+                            </div>
+                            <div className={`${fiscalPlanningViewScale === 'month' ? 'h-10' : 'h-14'} flex border-b border-slate-200 dark:border-slate-700`}>
+                              {fiscalPlanningTimelineData && fiscalPlanningTimelineData.visibleMonths.map((m) => {
+                                const monthNamesShort = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+                                return (
+                                  <div 
+                                    key={`month-header-fiscal-${m.absMonth}`} 
+                                    className="flex flex-col items-center justify-center border-r border-slate-100 dark:border-slate-800 text-[9px] font-bold text-slate-400 group relative"
+                                    style={{ width: fiscalPlanningViewScale === 'month' ? 100 : 160, minWidth: fiscalPlanningViewScale === 'month' ? 100 : 160 }}
+                                  >
+                                    <div className="flex-grow flex items-center justify-center w-full">
+                                      {monthNamesShort[m.month]}
+                                    </div>
+                                    {fiscalPlanningViewScale === 'week' && (
+                                      <div className="flex w-full border-t border-slate-100 dark:border-slate-800 h-6">
+                                        {[1, 2, 3, 4].map(w => (
+                                          <div key={`w-${w}`} className="flex-1 border-r last:border-r-0 border-slate-50 dark:border-slate-800/50 flex items-center justify-center text-[7px] font-black text-slate-300">
+                                            S{w}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Bars & Grid Lines */}
+                          <div className="relative min-h-[160px]">
+                            {/* Grid vertical markers */}
+                            <div className="absolute inset-0 flex pointer-events-none">
+                              {fiscalPlanningTimelineData && fiscalPlanningTimelineData.visibleMonths.map((m) => (
+                                <div 
+                                  key={`grid-fiscal-${m.absMonth}`} 
+                                  className="border-r border-slate-200 dark:border-slate-700 h-full flex" 
+                                  style={{ width: fiscalPlanningViewScale === 'month' ? 100 : 160, minWidth: fiscalPlanningViewScale === 'month' ? 100 : 160 }}
+                                >
+                                  {fiscalPlanningViewScale === 'week' && (
+                                    <>
+                                      <div className="flex-1 border-r border-slate-100 dark:border-slate-800/30 h-full" />
+                                      <div className="flex-1 border-r border-slate-100 dark:border-slate-800/30 h-full" />
+                                      <div className="flex-1 border-r border-slate-100 dark:border-slate-800/30 h-full" />
+                                      <div className="flex-1 h-full" />
+                                    </>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* Today marker */}
+                            {showTodayLine && fiscalPlanningTimelineData && fiscalPlanningTimelineData.exactTodayAbs >= fiscalPlanningTimelineData.startAbs && fiscalPlanningTimelineData.exactTodayAbs <= (fiscalPlanningTimelineData.endAbs + 1) && !hiddenMonths.includes(`${Math.floor(fiscalPlanningTimelineData.exactTodayAbs / 12)}-${Math.floor(fiscalPlanningTimelineData.exactTodayAbs % 12)}`) && (
+                              <div 
+                                className="absolute top-0 bottom-0 w-px border-l-2 border-dashed border-red-500/40 z-20 pointer-events-none"
+                                style={{ 
+                                  left: getMonthPosition(Math.floor(fiscalPlanningTimelineData.exactTodayAbs), fiscalPlanningTimelineData.visibleMonths, fiscalPlanningViewScale === 'month' ? 100 : 160) + (fiscalPlanningTimelineData.exactTodayAbs % 1) * (fiscalPlanningViewScale === 'month' ? 100 : 160),
+                                }}
+                              >
+                                <div className="absolute top-2 -left-[18px] px-1.5 py-0.5 bg-red-500 text-white text-[7px] font-black rounded-sm uppercase tracking-tighter shadow-md z-30 flex items-center gap-1">
+                                  <Calendar className="w-2 h-2" />
+                                  HOJE
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Render Fiscal Bars */}
+                            {fiscalPlanningActivities.map((activity) => {
+                              if (!fiscalPlanningTimelineData) return null;
+                              
+                              let absStart = activity.startYear * 12 + activity.startMonth;
+                              let absEnd = activity.endYear * 12 + activity.endMonth;
+                              
+                              let startOffset = 0;
+                              let endOffset = 0;
+
+                              if (activity.startDate) {
+                                const d = new Date(activity.startDate);
+                                const day = d.getDate();
+                                const daysInMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+                                startOffset = (day - 1) / daysInMonth;
+                              }
+
+                              if (activity.endDate) {
+                                const d = new Date(activity.endDate);
+                                const day = d.getDate();
+                                const daysInMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+                                endOffset = day / daysInMonth;
+                              } else {
+                                endOffset = 1;
+                              }
+                              
+                              const GRID_WIDTH = fiscalPlanningViewScale === 'month' ? 100 : 160;
+                              const left = getMonthPosition(Math.floor(absStart), fiscalPlanningTimelineData.visibleMonths, GRID_WIDTH) + startOffset * GRID_WIDTH;
+                              const width = (getMonthPosition(Math.floor(absEnd), fiscalPlanningTimelineData.visibleMonths, GRID_WIDTH) + endOffset * GRID_WIDTH) - left;
+
+                              if (width <= 0) return null;
+
+                              return (
+                                <div key={activity.id} className="h-14 border-b border-slate-50 dark:border-slate-800/50 relative group px-1">
+                                  <motion.div 
+                                    initial={{ opacity: 0, x: -20 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    className="absolute h-8 top-3 rounded-lg shadow-sm cursor-pointer hover:brightness-110 active:scale-[0.98] transition-all z-10 flex items-center gap-2 px-3 group/bar overflow-hidden"
+                                    style={{ 
+                                      left,
+                                      width,
+                                      backgroundColor: activity.color,
+                                      boxShadow: `0 4px 14px ${activity.color}44`
+                                    }}
+                                    onClick={() => {
+                                      setEditingFiscalPlanningActivity(activity);
+                                      setIsAddingFiscalPlanningActivity(true);
+                                    }}
+                                  >
+                                    <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent opacity-0 group-hover/bar:opacity-100 transition-opacity pointer-events-none" />
+                                    <span className="text-[10px] font-black text-white truncate drop-shadow-[0_1px_2px_rgba(0,0,0,0.3)]">
+                                      {activity.name}
+                                    </span>
+                                  </motion.div>
+                                </div>
+                              );
+                            })}
+                            {fiscalPlanningActivities.length > 0 && (
+                              <div className="h-14 border-b border-slate-50 dark:border-slate-800/50" />
+                            )}
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
+
+                  {/* Drag and manage list underneath grid inside dashboard for incredible completeness */}
+                  {fiscalPlanningActivities.length > 0 && (
+                    <div className="border border-slate-100 dark:border-slate-850 rounded-2xl overflow-hidden bg-white dark:bg-slate-900 shadow-sm mt-4">
+                      <div className="p-4 bg-slate-50/50 dark:bg-slate-800/30 border-b border-slate-150 dark:border-slate-800 flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200">Gerenciar Ordens & Atividades do Cronograma</span>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead>
+                            <tr className="border-b border-slate-100 dark:border-slate-800 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50/20 dark:bg-slate-900/10">
+                              <th className="px-6 py-3">Obra / Atividade</th>
+                              <th className="px-6 py-3">Período</th>
+                              <th className="px-5 py-3">Cor</th>
+                              <th className="px-6 py-3 text-right">Ações</th>
+                            </tr>
+                          </thead>
+                          <Reorder.Group 
+                            as="tbody" 
+                            axis="y" 
+                            values={fiscalPlanningActivities} 
+                            onReorder={handleReorderFiscalPlanningActivities}
+                            className="divide-y divide-slate-100 dark:divide-slate-800"
+                          >
+                            {fiscalPlanningActivities.map((activity) => (
+                              <Reorder.Item 
+                                key={activity.id} 
+                                value={activity} 
+                                as="tr"
+                                className="hover:bg-slate-50/30 dark:hover:bg-slate-800/30 transition-colors group"
+                              >
+                                <td className="px-6 py-3">
+                                  <div className="flex items-center gap-3">
+                                    <div className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 transition-colors">
+                                      <GripVertical size={14} />
+                                    </div>
+                                    <div className="flex flex-col">
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: activity.color }} />
+                                        <span className="font-bold text-slate-800 dark:text-slate-200">{activity.name}</span>
+                                      </div>
+                                      {activity.category && (
+                                        <span className="text-[9px] font-bold text-axia-primary uppercase tracking-widest mt-1 ml-4">{activity.category}</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-6 py-3 font-semibold text-slate-600 dark:text-slate-400">
+                                  {MONTHS[activity.startMonth]} / {activity.startYear} - {MONTHS[activity.endMonth]} / {activity.endYear}
+                                </td>
+                                <td className="px-5 py-3">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-5 h-5 rounded border border-slate-200 dark:border-slate-705 shadow-sm" style={{ backgroundColor: activity.color }} />
+                                    <span className="text-[10px] font-mono text-slate-400">{activity.color}</span>
+                                  </div>
+                                </td>
+                                <td className="px-6 py-3 text-right">
+                                  <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button 
+                                      type="button"
+                                      onClick={() => handleMoveFiscalPlanningActivity(activity, 'up')}
+                                      className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400"
+                                      title="Mover para cima"
+                                    >
+                                      <ChevronUp size={14} />
+                                    </button>
+                                    <button 
+                                      type="button"
+                                      onClick={() => handleMoveFiscalPlanningActivity(activity, 'down')}
+                                      className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400"
+                                      title="Mover para baixo"
+                                    >
+                                      <ChevronDown size={14} />
+                                    </button>
+                                    <button 
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingFiscalPlanningActivity(activity);
+                                        setIsAddingFiscalPlanningActivity(true);
+                                      }}
+                                      className="p-1 text-slate-400 hover:text-axia-primary transition-colors"
+                                      title="Editar"
+                                    >
+                                      <Pencil size={12} />
+                                    </button>
+                                    <button 
+                                      type="button"
+                                      onClick={() => handleDeleteFiscalPlanningActivity(activity.id)}
+                                      className="p-1 text-slate-400 hover:text-red-500 transition-colors"
+                                      title="Excluir"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  </div>
+                                </td>
+                              </Reorder.Item>
+                            ))}
+                          </Reorder.Group>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                 </div>
+
+
             </motion.div>
           )}
 
@@ -4067,9 +4650,15 @@ export default function App() {
                                 <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-6">
                                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                                     <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
-                                      <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Orçamento Total</p>
+                                      <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Orçamento Total Geral</p>
                                       <p className="text-2xl font-bold text-axia-accent">
-                                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingProject.budget || 0)}
+                                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingProjectStats.totalBudget)}
+                                      </p>
+                                      <p className="text-[10px] text-slate-400 mt-1 font-medium italic">
+                                        Contrato: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(viewingProject.budget) || 0)}
+                                        {viewingProjectStats.addendumsSum > 0 && (
+                                          <> + Aditivos: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingProjectStats.addendumsSum)}</>
+                                        )}
                                       </p>
                                     </div>
                                     <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
@@ -4077,6 +4666,7 @@ export default function App() {
                                       <p className="text-2xl font-bold text-axia-primary">
                                         {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingProject.spent || 0)}
                                       </p>
+                                      <p className="text-[10px] text-slate-400 mt-1 font-medium italic invisible">placeholder</p>
                                     </div>
                                   </div>
                                   
@@ -4084,19 +4674,19 @@ export default function App() {
                                     <div className="flex justify-between items-center">
                                       <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Utilização do Orçamento</span>
                                       <span className="text-sm font-bold text-axia-primary bg-axia-primary/10 px-2 py-0.5 rounded-lg">
-                                        {Math.round(((viewingProject.spent || 0) / (viewingProject.budget || 1)) * 100)}%
+                                        {Math.round(viewingProjectStats.usage)}%
                                       </span>
                                     </div>
                                     <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-200">
                                       <motion.div 
                                         initial={{ width: 0 }}
-                                        animate={{ width: `${((viewingProject.spent || 0) / (viewingProject.budget || 1)) * 100}%` }}
+                                        animate={{ width: `${viewingProjectStats.usage}%` }}
                                         className="h-full bg-axia-accent rounded-full shadow-inner"
                                       />
                                     </div>
                                     <div className="flex justify-between text-[11px] font-bold text-slate-400">
-                                      <span>Saldo: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((viewingProject.budget || 0) - (viewingProject.spent || 0))}</span>
-                                      <span>Total: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingProject.budget || 0)}</span>
+                                      <span>Saldo: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingProjectStats.balance)}</span>
+                                      <span>Total: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingProjectStats.totalBudget)}</span>
                                     </div>
                                   </div>
                                 </div>
@@ -4530,7 +5120,7 @@ export default function App() {
                                               {addendum.isApproved ? <Clock size={20} /> : <CheckCircle2 size={20} />}
                                             </button>
                                             <button 
-                                              onClick={() => handleDeleteAddendum(addendum.id)}
+                                              onClick={() => handleDeleteAddendum(addendum)}
                                               title="Excluir aditivo"
                                               className="p-2 bg-red-50 text-red-500 rounded-xl hover:bg-red-100 transition-all shadow-sm"
                                             >
@@ -4747,6 +5337,105 @@ export default function App() {
                       </div>
                     </div>
 
+                    {/* Collapsible Global Timeline Section */}
+                    <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden transition-all">
+                      <button 
+                        onClick={() => setIsGlobalTimelineExpanded(!isGlobalTimelineExpanded)}
+                        className="w-full text-left p-6 flex items-center justify-between hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors focus:outline-none"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-axia-primary/10 flex items-center justify-center text-axia-primary">
+                            <Calendar size={20} />
+                          </div>
+                          <div>
+                            <h3 className="font-bold text-base text-slate-800 dark:text-white flex items-center gap-2">
+                              Cronograma Global de Obras
+                              {timelineData.length > 0 && (
+                                <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] font-black uppercase tracking-widest rounded-full border border-slate-200 dark:border-slate-700">
+                                  {timelineData.length} {timelineData.length === 1 ? 'Obra' : 'Obras'}
+                                </span>
+                              )}
+                            </h3>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium">Toque para {isGlobalTimelineExpanded ? 'recolher' : 'visualizar o cronograma em linha do tempo'}</p>
+                          </div>
+                        </div>
+                        <div className={`p-2 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 transition-transform duration-300 ${isGlobalTimelineExpanded ? 'rotate-180' : ''}`}>
+                          <ChevronDown size={18} />
+                        </div>
+                      </button>
+
+                      <AnimatePresence initial={false}>
+                        {isGlobalTimelineExpanded && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.3, ease: 'easeInOut' }}
+                            className="border-t border-slate-100 dark:border-slate-800/50"
+                          >
+                            <div className="p-8 space-y-6">
+                              {timelineData.length > 0 && timelineWindow ? (
+                                <div className="relative pt-6">
+                                  {/* Timeline Labels */}
+                                  <div className="absolute top-0 left-0 right-0 flex justify-between px-1 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 dark:border-slate-800 pb-1">
+                                    <span>{new Date(timelineWindow.minStart).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })}</span>
+                                    <span>{new Date(timelineWindow.minStart + (timelineWindow.totalDuration / 2)).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })}</span>
+                                    <span>{new Date(timelineWindow.maxEnd).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })}</span>
+                                  </div>
+                                  
+                                  <div className="space-y-4 pt-4">
+                                    {timelineData.map((item, index) => (
+                                      <div key={index} className="space-y-1.5 group">
+                                        <div className="flex justify-between text-[11px] font-bold text-slate-550 dark:text-slate-400 px-1">
+                                          <span className="group-hover:text-axia-primary transition-colors">{item.name}</span>
+                                          <span className="opacity-0 group-hover:opacity-100 transition-opacity">
+                                            {item.start} - {item.end}
+                                          </span>
+                                        </div>
+                                        <div className="h-3 w-full bg-slate-50 dark:bg-slate-800/50 rounded-full relative overflow-hidden">
+                                          <motion.div 
+                                            initial={{ width: 0, opacity: 0 }}
+                                            animate={{ width: `${item.width}%`, left: `${item.left}%`, opacity: 1 }}
+                                            transition={{ duration: 1, delay: index * 0.1 }}
+                                            className={`absolute h-full rounded-full shadow-sm shadow-black/5 ${
+                                              item.status === 'finished' ? 'bg-axia-accent' : 
+                                              item.status === 'paused' ? 'bg-axia-secondary' : 
+                                              item.status === 'delayed' ? 'bg-red-500' :
+                                              'bg-axia-primary'
+                                            }`}
+                                          />
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  
+                                  {/* Today Marker if within window */}
+                                  {(() => {
+                                    const today = new Date().getTime();
+                                    if (today >= timelineWindow.minStart && today <= timelineWindow.maxEnd) {
+                                      const left = ((today - timelineWindow.minStart) / timelineWindow.totalDuration) * 100;
+                                      return (
+                                        <div 
+                                          className="absolute top-0 bottom-0 border-l border-dashed border-red-500/50 z-10 pointer-events-none"
+                                          style={{ left: `${left}%` }}
+                                        />
+                                      );
+                                    }
+                                    return null;
+                                  })()}
+                                </div>
+                              ) : (
+                                <div className="py-12 text-center text-slate-400">
+                                  <Calendar size={48} className="mx-auto mb-4 opacity-20" />
+                                  <p>Nenhuma data de início/fim definida para as obras.</p>
+                                </div>
+                              )}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+
                     {showAddProject && (
                       <motion.div 
                         initial={{ opacity: 0, height: 0 }}
@@ -4927,7 +5616,7 @@ export default function App() {
                     )}
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-4 lg:gap-8">
-                      {projects.map((project) => (
+                      {projectsWithTotals.map((project) => (
                         <motion.div 
                           layout
                           key={project.id}
@@ -4960,9 +5649,9 @@ export default function App() {
                                 <h3 className="text-lg lg:text-xl font-bold text-slate-900 dark:text-white leading-tight truncate">{project.name}</h3>
                               </div>
                               <div className="xl:text-right shrink-0">
-                                <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase">Valor</p>
+                                <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase">Orçado Total</p>
                                 <p className="text-base lg:text-lg font-bold text-axia-accent">
-                                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.budget || 0)}
+                                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.totalBudget || 0)}
                                 </p>
                               </div>
                             </div>
@@ -4989,18 +5678,18 @@ export default function App() {
                               <div className="flex items-center justify-between mb-1.5">
                                 <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase">Financ.</span>
                                 <span className="text-[9px] font-bold text-axia-accent">
-                                  {Math.round(((project.spent || 0) / (project.budget || 1)) * 100)}%
+                                  {Math.round(project.usage)}%
                                 </span>
                               </div>
                               <div className="h-1 w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden mb-1.5">
                                 <motion.div 
                                   initial={{ width: 0 }}
-                                  animate={{ width: `${((project.spent || 0) / (project.budget || 1)) * 100}%` }}
+                                  animate={{ width: `${project.usage}%` }}
                                   className="h-full bg-axia-accent rounded-full"
                                 />
                               </div>
                               <div className="flex justify-between text-[9px] font-bold gap-2">
-                                <div className="text-slate-400 dark:text-slate-500 truncate italic">Saldo: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((project.budget || 0) - (project.spent || 0))}</div>
+                                <div className="text-slate-400 dark:text-slate-500 truncate italic">Saldo: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.balance)}</div>
                                 <div className="text-axia-primary shrink-0">Medido: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(project.spent || 0)}</div>
                               </div>
                             </div>
@@ -5094,7 +5783,7 @@ export default function App() {
                       className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2 text-sm font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all shadow-sm"
                     >
                       <option value="">Projeto...</option>
-                      {projects.map(p => (
+                      {projectsWithTotals.map(p => (
                         <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
                     </select>
@@ -5103,6 +5792,7 @@ export default function App() {
                       onClick={() => {
                         setIsAddingPlanningActivity(true);
                         setEditingPlanningActivity(null);
+                        setUseSpecificPlanningDates(false);
                         setNewPlanningActivity({
                           id: '',
                           projectId: selectedPlanningProjectId,
@@ -5111,12 +5801,14 @@ export default function App() {
                           startYear: new Date().getFullYear(),
                           endMonth: (new Date().getMonth() + 1) % 12,
                           endYear: new Date().getMonth() === 11 ? new Date().getFullYear() + 1 : new Date().getFullYear(),
+                          startDate: '',
+                          endDate: '',
                           color: '#0033FF',
                           order: planningActivities.filter(a => a.projectId === selectedPlanningProjectId).length,
                           category: '',
                           description: '',
                           isHidden: false
-                        });
+                        } as any);
                       }}
                       className="bg-axia-primary text-white px-6 py-2 rounded-xl font-bold text-sm hover:shadow-lg hover:shadow-axia-primary/25 transition-all flex items-center gap-2"
                     >
@@ -5188,21 +5880,49 @@ export default function App() {
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2 export-hide">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Exibir:</span>
-                          <select 
-                            value={planningViewMonths}
-                            onChange={(e) => setPlanningViewMonths(e.target.value === 'auto' ? 'auto' : Number(e.target.value))}
-                            className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-[11px] font-bold text-slate-600 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all cursor-pointer"
-                          >
-                            <option value="auto">Automático (Todas)</option>
-                            <option value="6">06 Meses</option>
-                            <option value="12">12 Meses</option>
-                            <option value="18">18 Meses</option>
-                            <option value="24">24 Meses</option>
-                            <option value="36">36 Meses</option>
-                            <option value="48">48 Meses</option>
-                          </select>
+                        <div className="flex items-center gap-4 export-hide">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Escala:</span>
+                            <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5">
+                              <button
+                                onClick={() => setPlanningViewScale('month')}
+                                className={`px-3 py-1 rounded-md text-[10px] font-black uppercase tracking-widest transition-all ${
+                                  planningViewScale === 'month' 
+                                    ? 'bg-white dark:bg-slate-700 text-axia-primary shadow-sm' 
+                                    : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
+                                }`}
+                              >
+                                Meses
+                              </button>
+                              <button
+                                onClick={() => setPlanningViewScale('week')}
+                                className={`px-3 py-1 rounded-md text-[10px] font-black uppercase tracking-widest transition-all ${
+                                  planningViewScale === 'week' 
+                                    ? 'bg-white dark:bg-slate-700 text-axia-primary shadow-sm' 
+                                    : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
+                                }`}
+                              >
+                                Semanas
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Exibir:</span>
+                            <select 
+                              value={planningViewMonths}
+                              onChange={(e) => setPlanningViewMonths(e.target.value === 'auto' ? 'auto' : Number(e.target.value))}
+                              className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-[11px] font-bold text-slate-600 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all cursor-pointer"
+                            >
+                              <option value="auto">Automático (Todas)</option>
+                              <option value="6">06 Meses</option>
+                              <option value="12">12 Meses</option>
+                              <option value="18">18 Meses</option>
+                              <option value="24">24 Meses</option>
+                              <option value="36">36 Meses</option>
+                              <option value="48">48 Meses</option>
+                            </select>
+                          </div>
                         </div>
                       </div>
 
@@ -5266,7 +5986,7 @@ export default function App() {
 
                           {/* Chart Grid */}
                           <div className="flex-grow overflow-x-auto overflow-y-hidden border-l border-slate-200 dark:border-slate-700 custom-scrollbar">
-                            <div className="relative" style={{ width: planningTimelineData ? planningTimelineData.numMonths * MONTH_WIDTH : '100%' }}>
+                            <div className="relative" style={{ width: planningTimelineData ? planningTimelineData.numMonths * PLANNING_MONTH_WIDTH : '100%' }}>
                               {/* Header Year/Months */}
                               <div className="bg-slate-50/80 dark:bg-slate-800/80 sticky top-0 z-30">
                                 {/* Year Row */}
@@ -5275,33 +5995,45 @@ export default function App() {
                                     <div 
                                       key={`year-${y.year}-${i}`} 
                                       className="flex items-center justify-center border-r border-slate-200 dark:border-slate-700 text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-100/50 dark:bg-slate-900/50"
-                                      style={{ width: y.monthsCount * MONTH_WIDTH }}
+                                      style={{ width: y.monthsCount * PLANNING_MONTH_WIDTH }}
                                     >
                                       {y.year}
                                     </div>
                                   ))}
                                 </div>
                                 {/* Month Row */}
-                                <div className="h-10 flex border-b border-slate-200 dark:border-slate-700">
+                                <div className={`${planningViewScale === 'month' ? 'h-10' : 'h-14'} flex border-b border-slate-200 dark:border-slate-700`}>
                                   {planningTimelineData && planningTimelineData.visibleMonths.map((m) => {
                                     const monthNamesShort = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
                                     return (
                                       <div 
                                         key={`month-header-${m.absMonth}`} 
                                         className="flex flex-col items-center justify-center border-r border-slate-100 dark:border-slate-800 text-[9px] font-bold text-slate-400 group relative"
-                                        style={{ width: MONTH_WIDTH, minWidth: MONTH_WIDTH }}
+                                        style={{ width: PLANNING_MONTH_WIDTH, minWidth: PLANNING_MONTH_WIDTH }}
                                       >
-                                        {monthNamesShort[m.month]}
-                                        <div 
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            toggleMonthVisibility(`${m.year}-${m.month}`);
-                                          }}
-                                          className="absolute top-0 right-1 opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-500 cursor-pointer pointer-events-auto"
-                                          title="Ocultar mês"
-                                        >
-                                          <X size={10} />
+                                        <div className="flex-grow flex items-center justify-center w-full relative">
+                                          {monthNamesShort[m.month]}
+                                          <div 
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              toggleMonthVisibility(`${m.year}-${m.month}`);
+                                            }}
+                                            className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-500 cursor-pointer pointer-events-auto z-40"
+                                            title="Ocultar mês"
+                                          >
+                                            <X size={10} />
+                                          </div>
                                         </div>
+                                        
+                                        {planningViewScale === 'week' && (
+                                          <div className="flex w-full border-t border-slate-100 dark:border-slate-800 h-6">
+                                            {[1, 2, 3, 4].map(w => (
+                                              <div key={`w-${w}`} className="flex-1 border-r last:border-r-0 border-slate-50 dark:border-slate-800/50 flex items-center justify-center text-[7px] font-black text-slate-300">
+                                                S{w}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
                                       </div>
                                     );
                                   })}
@@ -5315,9 +6047,18 @@ export default function App() {
                                   {planningTimelineData && planningTimelineData.visibleMonths.map((m) => (
                                     <div 
                                       key={`grid-${m.absMonth}`} 
-                                      className="border-r border-slate-100 dark:border-slate-800/50 h-full" 
-                                      style={{ width: MONTH_WIDTH, minWidth: MONTH_WIDTH }}
-                                    />
+                                      className="border-r border-slate-200 dark:border-slate-700 h-full flex" 
+                                      style={{ width: PLANNING_MONTH_WIDTH, minWidth: PLANNING_MONTH_WIDTH }}
+                                    >
+                                      {planningViewScale === 'week' && (
+                                        <>
+                                          <div className="flex-1 border-r border-slate-100 dark:border-slate-800/30 h-full" />
+                                          <div className="flex-1 border-r border-slate-100 dark:border-slate-800/30 h-full" />
+                                          <div className="flex-1 border-r border-slate-100 dark:border-slate-800/30 h-full" />
+                                          <div className="flex-1 h-full" />
+                                        </>
+                                      )}
+                                    </div>
                                   ))}
                                 </div>
 
@@ -5326,7 +6067,7 @@ export default function App() {
                                   <div 
                                     className="absolute top-0 bottom-0 w-px border-l-2 border-dashed border-red-500/40 z-20 pointer-events-none"
                                     style={{ 
-                                      left: getMonthPosition(Math.floor(planningTimelineData.exactTodayAbs), planningTimelineData.visibleMonths) + (planningTimelineData.exactTodayAbs % 1) * MONTH_WIDTH,
+                                      left: getMonthPosition(Math.floor(planningTimelineData.exactTodayAbs), planningTimelineData.visibleMonths, PLANNING_MONTH_WIDTH) + (planningTimelineData.exactTodayAbs % 1) * PLANNING_MONTH_WIDTH,
                                     }}
                                   >
                                     <div 
@@ -5343,11 +6084,30 @@ export default function App() {
                                 {currentProjectPlanningActivities.map((activity) => {
                                   if (!planningTimelineData) return null;
                                   
-                                  const absStart = activity.startYear * 12 + activity.startMonth;
-                                  const absEnd = activity.endYear * 12 + activity.endMonth;
+                                  let absStart = activity.startYear * 12 + activity.startMonth;
+                                  let absEnd = activity.endYear * 12 + activity.endMonth;
                                   
-                                  const left = getMonthPosition(absStart, planningTimelineData.visibleMonths);
-                                  const width = getMonthPosition(absEnd + 1, planningTimelineData.visibleMonths) - left;
+                                  let startOffset = 0;
+                                  let endOffset = 0;
+
+                                  if (activity.startDate) {
+                                    const d = new Date(activity.startDate);
+                                    const day = d.getDate();
+                                    const daysInMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+                                    startOffset = (day - 1) / daysInMonth;
+                                  }
+
+                                  if (activity.endDate) {
+                                    const d = new Date(activity.endDate);
+                                    const day = d.getDate();
+                                    const daysInMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+                                    endOffset = day / daysInMonth;
+                                  } else {
+                                    endOffset = 1; // Default to end of month if no specific date
+                                  }
+                                  
+                                  const left = getMonthPosition(Math.floor(absStart), planningTimelineData.visibleMonths, PLANNING_MONTH_WIDTH) + startOffset * PLANNING_MONTH_WIDTH;
+                                  const width = (getMonthPosition(Math.floor(absEnd), planningTimelineData.visibleMonths, PLANNING_MONTH_WIDTH) + endOffset * PLANNING_MONTH_WIDTH) - left;
 
                                   if (width <= 0) return null;
 
@@ -7240,6 +8000,264 @@ export default function App() {
           </div>
         )}
 
+        {/* Fiscal Planning Activity Modal */}
+        {isAddingFiscalPlanningActivity && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-xl rounded-[2.5rem] shadow-2xl border border-slate-100 dark:border-slate-800 overflow-hidden"
+            >
+              <div className="p-8">
+                <div className="flex items-center justify-between mb-8">
+                  <div>
+                    <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">
+                      {editingFiscalPlanningActivity ? 'Editar Planejamento Fiscal' : 'Novo Planejamento Fiscal'}
+                    </h3>
+                    <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wider">
+                      {editingFiscalPlanningActivity ? 'Atualizar atividade fiscal' : 'Adicionar ao cronograma fiscal'}
+                    </p>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setIsAddingFiscalPlanningActivity(false);
+                      setEditingFiscalPlanningActivity(null);
+                    }}
+                    className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-400 transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSaveFiscalPlanningActivity} className="space-y-5">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Vincular a Obra (Opcional)</label>
+                    <select 
+                      value={newFiscalPlanningActivity.projectId || ''}
+                      onChange={(e) => {
+                        const pId = e.target.value;
+                        const matchedProj = projects.find(p => p.id === pId);
+                        setNewFiscalPlanningActivity({ 
+                          ...newFiscalPlanningActivity, 
+                          projectId: pId,
+                          name: matchedProj ? matchedProj.name : newFiscalPlanningActivity.name
+                        });
+                      }}
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-medium text-slate-700 dark:text-slate-200"
+                    >
+                      <option value="">Nenhuma (Atividade Geral do Fiscal)</option>
+                      {projects.map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Nome da Atividade / Obra</label>
+                    <input 
+                      type="text" 
+                      placeholder="Ex: Execução de Pavimento..."
+                      value={newFiscalPlanningActivity.name}
+                      onChange={(e) => setNewFiscalPlanningActivity({ ...newFiscalPlanningActivity, name: e.target.value })}
+                      required
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-medium text-slate-700 dark:text-slate-200"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Categoria (Opcional)</label>
+                      <input 
+                        type="text" 
+                        placeholder="Ex: Pavimentação"
+                        value={newFiscalPlanningActivity.category || ''}
+                        onChange={(e) => setNewFiscalPlanningActivity({ ...newFiscalPlanningActivity, category: e.target.value })}
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Descrição</label>
+                      <input 
+                        type="text" 
+                        placeholder="Breve descrição"
+                        value={newFiscalPlanningActivity.description || ''}
+                        onChange={(e) => setNewFiscalPlanningActivity({ ...newFiscalPlanningActivity, description: e.target.value })}
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 mb-4 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-2xl border border-slate-100 dark:border-slate-800">
+                    <div 
+                      className={`w-10 h-5 rounded-full relative cursor-pointer transition-colors ${useSpecificFiscalDates ? 'bg-axia-primary' : 'bg-slate-300 dark:bg-slate-700'}`}
+                      onClick={() => setUseSpecificFiscalDates(!useSpecificFiscalDates)}
+                    >
+                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${useSpecificFiscalDates ? 'left-6' : 'left-1'}`} />
+                    </div>
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest col">Usar datas específicas (Dia/Mês/Ano)</span>
+                  </div>
+
+                  {useSpecificFiscalDates ? (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Data Início</label>
+                        <div className="relative">
+                          <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                          <input 
+                            type="date" 
+                            value={newFiscalPlanningActivity.startDate || ''}
+                            onChange={(e) => {
+                              const dt = e.target.value;
+                              if (dt) {
+                                const d = new Date(dt);
+                                setNewFiscalPlanningActivity({ 
+                                  ...newFiscalPlanningActivity, 
+                                  startDate: dt,
+                                  startMonth: d.getMonth(),
+                                  startYear: d.getFullYear()
+                                });
+                              }
+                            }}
+                            required
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Data Fim</label>
+                        <div className="relative">
+                          <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                          <input 
+                            type="date" 
+                            value={newFiscalPlanningActivity.endDate || ''}
+                            onChange={(e) => {
+                              const dt = e.target.value;
+                              if (dt) {
+                                const d = new Date(dt);
+                                setNewFiscalPlanningActivity({ 
+                                  ...newFiscalPlanningActivity, 
+                                  endDate: dt,
+                                  endMonth: d.getMonth(),
+                                  endYear: d.getFullYear()
+                                });
+                              }
+                            }}
+                            required
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Mês Início</label>
+                          <select 
+                            value={newFiscalPlanningActivity.startMonth}
+                            onChange={(e) => setNewFiscalPlanningActivity({ ...newFiscalPlanningActivity, startMonth: parseInt(e.target.value), startDate: '' })}
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
+                          >
+                            {MONTHS.map((m, i) => (
+                              <option key={i} value={i}>{m}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Ano Início</label>
+                          <input 
+                            type="number"
+                            value={newFiscalPlanningActivity.startYear}
+                            onChange={(e) => setNewFiscalPlanningActivity({ ...newFiscalPlanningActivity, startYear: parseInt(e.target.value), startDate: '' })}
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Mês Fim</label>
+                          <select 
+                            value={newFiscalPlanningActivity.endMonth}
+                            onChange={(e) => setNewFiscalPlanningActivity({ ...newFiscalPlanningActivity, endMonth: parseInt(e.target.value), endDate: '' })}
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
+                          >
+                            {MONTHS.map((m, i) => (
+                              <option key={i} value={i}>{m}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Ano Fim</label>
+                          <input 
+                            type="number"
+                            value={newFiscalPlanningActivity.endYear}
+                            onChange={(e) => setNewFiscalPlanningActivity({ ...newFiscalPlanningActivity, endYear: parseInt(e.target.value), endDate: '' })}
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
+                          />
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Cor da Barra</label>
+                      <div className="flex items-center gap-3">
+                        <input 
+                          type="color" 
+                          value={newFiscalPlanningActivity.color}
+                          onChange={(e) => setNewFiscalPlanningActivity({ ...newFiscalPlanningActivity, color: e.target.value })}
+                          className="w-12 h-12 rounded-xl border-0 cursor-pointer overflow-hidden p-0"
+                        />
+                        <input 
+                          type="text" 
+                          value={newFiscalPlanningActivity.color}
+                          onChange={(e) => setNewFiscalPlanningActivity({ ...newFiscalPlanningActivity, color: e.target.value })}
+                          className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm font-mono"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Selecione uma Paleta</label>
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {['#0033FF', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#64748B'].map(c => (
+                          <button 
+                            key={c}
+                            type="button"
+                            onClick={() => setNewFiscalPlanningActivity({ ...newFiscalPlanningActivity, color: c })}
+                            className={`w-8 h-8 rounded-full border-2 transition-transform hover:scale-110 ${newFiscalPlanningActivity.color === c ? 'border-axia-primary' : 'border-transparent'}`}
+                            style={{ backgroundColor: c }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4 mt-10">
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setIsAddingFiscalPlanningActivity(false);
+                        setEditingFiscalPlanningActivity(null);
+                      }}
+                      className="flex-1 py-4 px-6 text-slate-500 font-bold rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
+                    >
+                      Cancelar
+                    </button>
+                    <button 
+                      type="submit"
+                      className="flex-[2] py-4 px-6 bg-axia-primary text-white font-bold rounded-2xl hover:shadow-xl hover:shadow-axia-primary/25 transition-all shadow-lg shadow-axia-primary/20"
+                    >
+                      {editingFiscalPlanningActivity ? 'Salvar Alterações' : 'Adicionar Atividade'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
         {/* Planning Activity Modal */}
         {isAddingPlanningActivity && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
@@ -7305,53 +8323,118 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Mês Início</label>
-                      <select 
-                        value={newPlanningActivity.startMonth}
-                        onChange={(e) => setNewPlanningActivity({ ...newPlanningActivity, startMonth: parseInt(e.target.value) })}
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
-                      >
-                        {MONTHS.map((m, i) => (
-                          <option key={i} value={i}>{m}</option>
-                        ))}
-                      </select>
+                  <div className="flex items-center gap-3 mb-4 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-2xl border border-slate-100 dark:border-slate-800">
+                    <div 
+                      className={`w-10 h-5 rounded-full relative cursor-pointer transition-colors ${useSpecificPlanningDates ? 'bg-axia-primary' : 'bg-slate-300 dark:bg-slate-700'}`}
+                      onClick={() => setUseSpecificPlanningDates(!useSpecificPlanningDates)}
+                    >
+                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${useSpecificPlanningDates ? 'left-6' : 'left-1'}`} />
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Ano Início</label>
-                      <input 
-                        type="number"
-                        value={newPlanningActivity.startYear}
-                        onChange={(e) => setNewPlanningActivity({ ...newPlanningActivity, startYear: parseInt(e.target.value) })}
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
-                      />
-                    </div>
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Usar datas específicas (Dia/Mês/Ano)</span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Mês Fim</label>
-                      <select 
-                        value={newPlanningActivity.endMonth}
-                        onChange={(e) => setNewPlanningActivity({ ...newPlanningActivity, endMonth: parseInt(e.target.value) })}
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
-                      >
-                        {MONTHS.map((m, i) => (
-                          <option key={i} value={i}>{m}</option>
-                        ))}
-                      </select>
+                  {useSpecificPlanningDates ? (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Data Início</label>
+                        <div className="relative">
+                          <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                          <input 
+                            type="date" 
+                            value={newPlanningActivity.startDate || ''}
+                            onChange={(e) => {
+                              const date = e.target.value;
+                              if (date) {
+                                const d = new Date(date);
+                                setNewPlanningActivity({ 
+                                  ...newPlanningActivity, 
+                                  startDate: date,
+                                  startMonth: d.getMonth(),
+                                  startYear: d.getFullYear()
+                                });
+                              }
+                            }}
+                            required
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Data Fim</label>
+                        <div className="relative">
+                          <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                          <input 
+                            type="date" 
+                            value={newPlanningActivity.endDate || ''}
+                            onChange={(e) => {
+                              const date = e.target.value;
+                              if (date) {
+                                const d = new Date(date);
+                                setNewPlanningActivity({ 
+                                  ...newPlanningActivity, 
+                                  endDate: date,
+                                  endMonth: d.getMonth(),
+                                  endYear: d.getFullYear()
+                                });
+                              }
+                            }}
+                            required
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
+                          />
+                        </div>
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Ano Fim</label>
-                      <input 
-                        type="number"
-                        value={newPlanningActivity.endYear}
-                        onChange={(e) => setNewPlanningActivity({ ...newPlanningActivity, endYear: parseInt(e.target.value) })}
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
-                      />
-                    </div>
-                  </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Mês Início</label>
+                          <select 
+                            value={newPlanningActivity.startMonth}
+                            onChange={(e) => setNewPlanningActivity({ ...newPlanningActivity, startMonth: parseInt(e.target.value), startDate: '' })}
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
+                          >
+                            {MONTHS.map((m, i) => (
+                              <option key={i} value={i}>{m}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Ano Início</label>
+                          <input 
+                            type="number"
+                            value={newPlanningActivity.startYear}
+                            onChange={(e) => setNewPlanningActivity({ ...newPlanningActivity, startYear: parseInt(e.target.value), startDate: '' })}
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Mês Fim</label>
+                          <select 
+                            value={newPlanningActivity.endMonth}
+                            onChange={(e) => setNewPlanningActivity({ ...newPlanningActivity, endMonth: parseInt(e.target.value), endDate: '' })}
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
+                          >
+                            {MONTHS.map((m, i) => (
+                              <option key={i} value={i}>{m}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Ano Fim</label>
+                          <input 
+                            type="number"
+                            value={newPlanningActivity.endYear}
+                            onChange={(e) => setNewPlanningActivity({ ...newPlanningActivity, endYear: parseInt(e.target.value), endDate: '' })}
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none font-bold text-slate-700 dark:text-slate-200"
+                          />
+                        </div>
+                      </div>
+                    </>
+                  )}
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
@@ -7654,7 +8737,7 @@ export default function App() {
                         className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl pl-12 pr-5 py-4 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
                       >
                         <option value="">Selecione a Obra</option>
-                        {projects.map(p => (
+                        {projectsWithTotals.map(p => (
                           <option key={p.id} value={p.id}>{p.name}</option>
                         ))}
                       </select>

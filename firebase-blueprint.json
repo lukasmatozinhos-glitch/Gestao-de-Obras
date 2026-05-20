@@ -182,6 +182,28 @@
       },
       "required": ["id", "projectId", "name", "startMonth", "startYear", "endMonth", "endYear", "color", "order"]
     },
+    "FiscalPlanningActivity": {
+      "title": "FiscalPlanningActivity",
+      "description": "Annual planning activity of the fiscal",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "name": { "type": "string" },
+        "startMonth": { "type": "number", "description": "0-indexed month (0=Jan, 11=Dec)" },
+        "startYear": { "type": "number" },
+        "endMonth": { "type": "number" },
+        "endYear": { "type": "number" },
+        "color": { "type": "string" },
+        "order": { "type": "number" },
+        "category": { "type": "string" },
+        "description": { "type": "string" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "isHidden": { "type": "boolean" }
+      },
+      "required": ["id", "name", "startMonth", "startYear", "endMonth", "endYear", "color", "order"]
+    },
     "ConsumptionRCRequest": {
       "title": "Consumption RC Request",
       "description": "A request for consumption RC to enable measurements",
@@ -269,6 +291,10 @@
     "/planningActivities/{activityId}": {
       "schema": "PlanningActivity",
       "description": "Planning activity documents"
+    },
+    "/fiscalPlanningActivities/{activityId}": {
+      "schema": "FiscalPlanningActivity",
+      "description": "Fiscal annual planning activity documents"
     },
     "/consumptionRCRequests/{requestId}": {
       "schema": "ConsumptionRCRequest",

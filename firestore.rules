@@ -94,6 +94,14 @@ service cloud.firestore {
              data.color is string && data.order is number;
     }
 
+    function isValidFiscalPlanningActivity(data) {
+      return data.id is string && 
+             data.name is string &&
+             data.startMonth is number && data.startYear is number &&
+             data.endMonth is number && data.endYear is number &&
+             data.color is string && data.order is number;
+    }
+
     function isValidRCRequest(data) {
       return data.projectId is string && 
              data.projectName is string &&
@@ -174,6 +182,13 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create, update: if isAuthenticated() && isValidId(activityId) && 
                               isValidPlanningActivity(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /fiscalPlanningActivities/{activityId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidId(activityId) && 
+                              isValidFiscalPlanningActivity(request.resource.data);
       allow delete: if isAdmin();
     }
 
