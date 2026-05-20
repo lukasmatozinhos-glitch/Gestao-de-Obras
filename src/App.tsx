@@ -2337,7 +2337,7 @@ export default function App() {
 
   const totalPendingRCValue = useMemo(() => {
     return consumptionRCRequests
-      .filter(r => r.status !== 'received')
+      .filter(r => r.status !== 'received' && r.status !== 'canceled')
       .reduce((acc, r) => acc + (r.value || 0), 0);
   }, [consumptionRCRequests]);
 
@@ -2779,6 +2779,7 @@ export default function App() {
       if (newStatus === 'pending') observationText = 'Status alterado para Pendente.';
       if (newStatus === 'requested') observationText = 'Status alterado para Solicitado.';
       if (newStatus === 'returned') observationText = 'RC Devolvida para correção/ajuste.';
+      if (newStatus === 'canceled') observationText = 'Solicitação de RC Cancelada.';
       if (newStatus === 'received') {
         observationText = `RC Recebida. Número: ${rcNumber}`;
         updateData.rcNumber = rcNumber;
@@ -4019,9 +4020,9 @@ export default function App() {
                     onClickReport={handleGenerateGeneralReport}
                     isGeneratingReport={isGeneratingReport}
                   />
-                  <StatCard 
+                   <StatCard 
                     title="RC Pendentes" 
-                    value={consumptionRCRequests.filter(r => r.status !== 'received').length.toString()} 
+                    value={consumptionRCRequests.filter(r => r.status !== 'received' && r.status !== 'canceled').length.toString()} 
                     secondaryValue={new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalPendingRCValue)}
                     change="Controle de RC" 
                     icon={<ShieldCheck className="text-axia-secondary" />} 
@@ -4032,7 +4033,7 @@ export default function App() {
                   >
                     <div className="space-y-1.5">
                       {consumptionRCRequests
-                        .filter(r => r.status !== 'received')
+                        .filter(r => r.status !== 'received' && r.status !== 'canceled')
                         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
                         .slice(0, 3)
                         .map(rc => (
@@ -4043,9 +4044,9 @@ export default function App() {
                             </span>
                           </div>
                       ))}
-                      {consumptionRCRequests.filter(r => r.status !== 'received').length > 3 && (
+                      {consumptionRCRequests.filter(r => r.status !== 'received' && r.status !== 'canceled').length > 3 && (
                         <p className="text-[8px] font-bold text-slate-400 uppercase text-center mt-1">
-                          + {consumptionRCRequests.filter(r => r.status !== 'received').length - 3} outras pendentes
+                          + {consumptionRCRequests.filter(r => r.status !== 'received' && r.status !== 'canceled').length - 3} outras pendentes
                         </p>
                       )}
                     </div>
@@ -6910,6 +6911,7 @@ export default function App() {
                               <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
                                 request.status === 'received' ? 'bg-green-100 dark:bg-green-900/30 text-green-600' :
                                 request.status === 'pending' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600' :
+                                request.status === 'canceled' ? 'bg-slate-100 dark:bg-slate-800/50 text-slate-500' :
                                 'bg-blue-100 dark:bg-blue-900/30 text-blue-600'
                               }`}>
                                 <FileText size={24} />
@@ -6960,11 +6962,13 @@ export default function App() {
                                     request.status === 'received' ? 'bg-green-100 text-green-700 border border-green-200' :
                                     request.status === 'returned' ? 'bg-red-100 text-red-700 border border-red-200' :
                                     request.status === 'pending' ? 'bg-amber-100 text-amber-700 border border-amber-200' :
+                                    request.status === 'canceled' ? 'bg-slate-100 text-slate-600 border border-slate-350 dark:border-slate-700' :
                                     'bg-blue-100 text-blue-700 border border-blue-200'
                                   }`}>
                                     {request.status === 'received' ? 'Recebido' : 
                                      request.status === 'returned' ? 'Devolvido' : 
-                                     request.status === 'pending' ? 'Pendente' : 'Solicitado'}
+                                     request.status === 'pending' ? 'Pendente' : 
+                                     request.status === 'canceled' ? 'Cancelado' : 'Solicitado'}
                                   </span>
                                   <button 
                                     onClick={(e) => { e.stopPropagation(); setRequestToDelete(request.id); }}
@@ -7014,7 +7018,7 @@ export default function App() {
                           <div>
                             <p className="text-[10px] uppercase font-black text-slate-400 tracking-wider mb-1">Status Atual</p>
                             <div className="flex flex-wrap gap-2 mt-2">
-                              {['requested', 'pending', 'returned', 'received'].map((s) => (
+                              {['requested', 'pending', 'returned', 'received', 'canceled'].map((s) => (
                                 <button
                                   key={s}
                                   onClick={() => {
@@ -7030,13 +7034,16 @@ export default function App() {
                                   }}
                                   className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
                                     viewingRCRequest.status === s 
-                                      ? s === 'returned' ? 'bg-red-600 text-white border-red-600 shadow-sm' : 'bg-axia-primary text-white border-axia-primary shadow-sm' 
+                                      ? s === 'returned' ? 'bg-red-600 text-white border-red-600 shadow-sm' 
+                                        : s === 'canceled' ? 'bg-slate-500 text-white border-slate-500 shadow-sm'
+                                        : 'bg-axia-primary text-white border-axia-primary shadow-sm' 
                                       : 'bg-white dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700 hover:border-axia-primary/30'
                                   }`}
                                 >
                                   {s === 'requested' ? 'Solicitado' : 
                                    s === 'pending' ? 'Pendente' : 
-                                   s === 'returned' ? 'Devolvido' : 'Recebido'}
+                                   s === 'returned' ? 'Devolvido' : 
+                                   s === 'canceled' ? 'Cancelado' : 'Recebido'}
                                 </button>
                               ))}
                             </div>

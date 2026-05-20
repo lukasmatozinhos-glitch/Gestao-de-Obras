@@ -153,7 +153,7 @@ export interface ConsumptionRCRequest {
   projectId: string;
   projectName: string;
   requestDate: string;
-  status: 'requested' | 'pending' | 'received' | 'returned';
+  status: 'requested' | 'pending' | 'received' | 'returned' | 'canceled';
   rcNumber?: string;
   value: number;
   signedBulletin?: {
