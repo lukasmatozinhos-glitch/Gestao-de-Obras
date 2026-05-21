@@ -269,6 +269,7 @@ export default function App() {
   const [travels, setTravels] = useState<Travel[]>([]);
   const [isAddingTravel, setIsAddingTravel] = useState(false);
   const [editingTravel, setEditingTravel] = useState<Travel | null>(null);
+  const [travelToDelete, setTravelToDelete] = useState<Travel | null>(null);
   const [newTravel, setNewTravel] = useState({
     name: '',
     cost: 0,
@@ -1290,14 +1291,15 @@ export default function App() {
     }
   };
 
-  const handleDeleteTravel = async (id: string) => {
-    if (!window.confirm('Deseja realmente excluir esta viagem?')) return;
+  const confirmDeleteTravel = async () => {
+    if (!travelToDelete) return;
     try {
-      await deleteDoc(doc(db, 'travels', id));
+      await deleteDoc(doc(db, 'travels', travelToDelete.id));
       showNotification('Viagem excluída com sucesso!');
+      setTravelToDelete(null);
     } catch (error) {
       console.error('Error deleting travel:', error);
-      handleFirestoreError(error, OperationType.DELETE, `travels/${id}`);
+      handleFirestoreError(error, OperationType.DELETE, `travels/${travelToDelete.id}`);
     }
   };
 
@@ -7589,7 +7591,7 @@ export default function App() {
                                             <Pencil size={14} />
                                           </button>
                                           <button 
-                                            onClick={() => handleDeleteTravel(travel.id)}
+                                            onClick={() => setTravelToDelete(travel)}
                                             className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-400 hover:text-red-500 transition-colors"
                                             title="Excluir"
                                           >
@@ -9451,6 +9453,73 @@ export default function App() {
                     </button>
                   </div>
                 </form>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {travelToDelete && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[32px] overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800"
+            >
+              <div className="p-8">
+                <div className="flex items-start gap-4 mb-6">
+                  <div className="w-12 h-12 rounded-full bg-red-50 dark:bg-red-950/30 flex items-center justify-center flex-shrink-0 text-red-500">
+                    <AlertCircle size={24} />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-xl font-display font-bold text-slate-900 dark:text-white leading-snug">
+                      Excluir Registro de Viagem
+                    </h3>
+                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                      Tem certeza que deseja excluir esta viagem? Esta ação não pode ser desfeita e removerá os custos associados do relatório do mês.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 dark:bg-slate-800/50 rounded-2xl p-4 mb-6 border border-slate-100 dark:border-slate-800/80 text-sm space-y-2.5">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400 dark:text-slate-500 font-semibold">Viagem:</span>
+                    <span className="font-bold text-slate-700 dark:text-slate-200">{travelToDelete.name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400 dark:text-slate-500 font-semibold">Fiscal:</span>
+                    <span className="font-bold text-slate-700 dark:text-slate-200">{travelToDelete.inspector}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400 dark:text-slate-500 font-semibold">Valor gasto:</span>
+                    <span className="font-extrabold text-slate-900 dark:text-white">
+                      {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(travelToDelete.cost)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400 dark:text-slate-500 font-semibold">Período:</span>
+                    <span className="font-bold text-slate-600 dark:text-slate-300">
+                      {formatInputDate(travelToDelete.startDate)} - {formatInputDate(travelToDelete.endDate)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-4">
+                  <button 
+                    type="button"
+                    onClick={() => setTravelToDelete(null)}
+                    className="flex-1 py-3.5 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800 font-bold rounded-2xl transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={confirmDeleteTravel}
+                    className="flex-1 py-3.5 bg-red-500 hover:bg-red-650 text-white font-bold rounded-2xl transition-all shadow-lg shadow-red-500/10 hover:shadow-red-500/20"
+                  >
+                    Confirmar Exclusão
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>
