@@ -245,6 +245,23 @@
         "userName": { "type": "string" }
       },
       "required": ["id", "text", "date", "userName"]
+    },
+    "Travel": {
+      "title": "Travel",
+      "description": "Travel records for monthly control",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "cost": { "type": "number" },
+        "inspector": { "type": "string" },
+        "origin": { "type": "string" },
+        "destination": { "type": "string" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "monthYear": { "type": "string" }
+      },
+      "required": ["id", "name", "cost", "inspector", "origin", "destination", "startDate", "endDate", "monthYear"]
     }
   },
   "firestore": {
@@ -299,6 +316,10 @@
     "/consumptionRCRequests/{requestId}": {
       "schema": "ConsumptionRCRequest",
       "description": "Consumption RC request documents"
+    },
+    "/travels/{travelId}": {
+      "schema": "Travel",
+      "description": "Travel control records"
     }
   }
 }

@@ -173,3 +173,17 @@ export interface RCHistoryEntry {
   date: string;
   userName: string;
 }
+
+export interface Travel {
+  id: string;
+  name: string;
+  cost: number;
+  inspector: string;
+  origin: string;
+  destination: string;
+  startDate: string;
+  endDate: string;
+  monthYear: string; // "YYYY-MM" format for easy monthly grouping
+  createdAt?: any;
+}
+

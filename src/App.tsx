@@ -98,7 +98,7 @@ import {
 } from 'recharts';
 import { MOCK_PROJECTS, MOCK_RESOURCES, MOCK_REPORTS, MOCK_MEASUREMENTS, MOCK_ATTACHMENTS, MOCK_STATUS_UPDATES } from './constants';
 import html2canvas from 'html2canvas';
-import { Project, WeeklyReport, Measurement, UserProfile, Attachment, StatusUpdate, PhotoReportItem, MeasurementBulletin, ProjectAddendum, ScheduleActivity, PlanningActivity, ConsumptionRCRequest, RCHistoryEntry } from './types';
+import { Project, WeeklyReport, Measurement, UserProfile, Attachment, StatusUpdate, PhotoReportItem, MeasurementBulletin, ProjectAddendum, ScheduleActivity, PlanningActivity, ConsumptionRCRequest, RCHistoryEntry, Travel } from './types';
 
 const MONTHS = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -265,6 +265,21 @@ export default function App() {
   const [addendums, setAddendums] = useState<ProjectAddendum[]>([]);
   const [activities, setActivities] = useState<ScheduleActivity[]>([]);
   const [planningActivities, setPlanningActivities] = useState<PlanningActivity[]>([]);
+
+  const [travels, setTravels] = useState<Travel[]>([]);
+  const [isAddingTravel, setIsAddingTravel] = useState(false);
+  const [editingTravel, setEditingTravel] = useState<Travel | null>(null);
+  const [newTravel, setNewTravel] = useState({
+    name: '',
+    cost: 0,
+    inspector: '',
+    origin: '',
+    destination: '',
+    startDate: new Date().toISOString().split('T')[0],
+    endDate: new Date().toISOString().split('T')[0],
+  });
+  const [searchTravelQuery, setSearchTravelQuery] = useState('');
+  const [filterInspector, setFilterInspector] = useState('');
 
   const [consumptionRCRequests, setConsumptionRCRequests] = useState<ConsumptionRCRequest[]>([]);
   const [isAddingRCRequest, setIsAddingRCRequest] = useState(false);
@@ -991,6 +1006,298 @@ export default function App() {
       showNotification('Atividade removida do planejamento.');
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `planningActivities/${id}`);
+    }
+  };
+
+  const handleAddTravel = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const monthYear = newTravel.startDate.substring(0, 7); // e.g. "2026-05"
+      const travelRef = doc(collection(db, 'travels'));
+      const travelData = {
+        id: travelRef.id,
+        name: newTravel.name,
+        cost: Number(newTravel.cost) || 0,
+        inspector: newTravel.inspector,
+        origin: newTravel.origin,
+        destination: newTravel.destination,
+        startDate: newTravel.startDate,
+        endDate: newTravel.endDate,
+        monthYear,
+      };
+
+      await setDoc(travelRef, travelData);
+      showNotification('Viagem salva com sucesso!');
+      setIsAddingTravel(false);
+      setNewTravel({
+        name: '',
+        cost: 0,
+        inspector: '',
+        origin: '',
+        destination: '',
+        startDate: new Date().toISOString().split('T')[0],
+        endDate: new Date().toISOString().split('T')[0],
+      });
+    } catch (error) {
+      console.error('Error adding travel:', error);
+      handleFirestoreError(error, OperationType.WRITE, 'travels');
+    }
+  };
+
+  const handleEditTravel = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTravel) return;
+    try {
+      const monthYear = newTravel.startDate.substring(0, 7);
+      const travelRef = doc(db, 'travels', editingTravel.id);
+      await updateDoc(travelRef, {
+        id: editingTravel.id,
+        name: newTravel.name,
+        cost: Number(newTravel.cost) || 0,
+        inspector: newTravel.inspector,
+        origin: newTravel.origin,
+        destination: newTravel.destination,
+        startDate: newTravel.startDate,
+        endDate: newTravel.endDate,
+        monthYear,
+      });
+      showNotification('Viagem atualizada com sucesso!');
+      setEditingTravel(null);
+      setIsAddingTravel(false);
+      setNewTravel({
+        name: '',
+        cost: 0,
+        inspector: '',
+        origin: '',
+        destination: '',
+        startDate: new Date().toISOString().split('T')[0],
+        endDate: new Date().toISOString().split('T')[0],
+      });
+    } catch (error) {
+      console.error('Error updating travel:', error);
+      handleFirestoreError(error, OperationType.WRITE, `travels/${editingTravel.id}`);
+    }
+  };
+
+  const exportTravelsToPDF = () => {
+    try {
+      showNotification('Iniciando geração do PDF de viagens...');
+      const doc = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+
+      // Apply watermark first
+      addWatermark(doc);
+
+      // Header representing company brand
+      doc.setFillColor(248, 250, 252);
+      doc.rect(0, 0, pageWidth, 35, 'F');
+      doc.setDrawColor(226, 232, 240);
+      doc.line(0, 35, pageWidth, 35);
+      
+      // Logo "Axia Energia"
+      drawPDFLogo(doc, 20, 15);
+      
+      doc.setTextColor(15, 23, 42);
+      doc.setFontSize(18);
+      doc.setFont('helvetica', 'bold');
+      doc.text('CONTROLE DE VIAGENS', pageWidth - 15, 15, { align: 'right' });
+      
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, pageWidth - 15, 22, { align: 'right' });
+      
+      let filterDetails = '';
+      if (searchTravelQuery) filterDetails += `Busca: "${searchTravelQuery}"`;
+      if (filterInspector) filterDetails += (filterDetails ? ' | ' : '') + `Fiscal: ${filterInspector}`;
+      if (filterDetails) {
+        doc.text(`Filtros ativos: ${filterDetails}`, pageWidth - 15, 27, { align: 'right' });
+      }
+
+      // Filter travels following same logic as UI
+      const filteredTravels = travels.filter(t => {
+        const matchesSearch = 
+          (t.name?.toLowerCase().includes(searchTravelQuery.toLowerCase()) || false) ||
+          (t.origin?.toLowerCase().includes(searchTravelQuery.toLowerCase()) || false) ||
+          (t.destination?.toLowerCase().includes(searchTravelQuery.toLowerCase()) || false);
+        
+        const matchesInspector = !filterInspector || t.inspector === filterInspector;
+        
+        return matchesSearch && matchesInspector;
+      });
+
+      if (filteredTravels.length === 0) {
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(15, 23, 42);
+        doc.text('Nenhuma viagem registrada ou correspondente aos filtros.', 20, 55);
+        doc.save(`controle_viagens_${new Date().toISOString().split('T')[0]}.pdf`);
+        showNotification('PDF gerado com aviso de lista vazia.');
+        return;
+      }
+
+      const totalCost = filteredTravels.reduce((acc, curr) => acc + (Number(curr.cost) || 0), 0);
+      const travelCount = filteredTravels.length;
+      const averageCost = travelCount > 0 ? totalCost / travelCount : 0;
+
+      const formatBRL = (val: number) => {
+        return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
+      };
+
+      // Summary indicators inside PDF (elegant card)
+      doc.setFillColor(241, 245, 249); // slate-100 fallback
+      doc.rect(15, 42, pageWidth - 30, 22, 'F');
+      doc.setDrawColor(226, 232, 240);
+      doc.rect(15, 42, pageWidth - 30, 22, 'S');
+
+      // Visual dividers for columns in the summary card
+      doc.line(75, 45, 75, 61);
+      doc.line(135, 45, 135, 61);
+
+      doc.setFontSize(8);
+      doc.setTextColor(100, 116, 139);
+      doc.setFont('helvetica', 'normal');
+      doc.text('TOTAL DE VIAGENS', 25, 49);
+      doc.text('CUSTO ACUMULADO', 85, 49);
+      doc.text('MÉDIA POR VIAGEM', 145, 49);
+
+      doc.setFontSize(12);
+      doc.setTextColor(15, 23, 42);
+      doc.setFont('helvetica', 'bold');
+      doc.text(String(travelCount), 25, 57);
+      doc.text(formatBRL(totalCost), 85, 57);
+      doc.text(formatBRL(averageCost), 145, 57);
+
+      // Group by Month Year
+      const grouped: { [key: string]: Travel[] } = {};
+      filteredTravels.forEach(t => {
+        const key = t.monthYear || 'Sem data';
+        if (!grouped[key]) grouped[key] = [];
+        grouped[key].push(t);
+      });
+
+      const sortedMonthKeys = Object.keys(grouped).sort((a, b) => b.localeCompare(a));
+      
+      const formatMonthYearStr = (myStr: string) => {
+        if (myStr === 'Sem data') return 'Sem data';
+        const [year, month] = myStr.split('-');
+        const monthNames = [
+          'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+          'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+        ];
+        const monthIndex = parseInt(month, 10) - 1;
+        if (monthIndex >= 0 && monthIndex < 12) {
+          return `${monthNames[monthIndex]} de ${year}`;
+        }
+        return myStr;
+      };
+
+      const formatDateBR = (dateStr: string) => {
+        if (!dateStr) return '';
+        const parts = dateStr.split('-');
+        if (parts.length === 3) {
+          return `${parts[2]}/${parts[1]}/${parts[0]}`;
+        }
+        return dateStr;
+      };
+
+      let currentY = 72;
+
+      sortedMonthKeys.forEach((monthYearKey) => {
+        const monthTravels = grouped[monthYearKey].sort((a,b) => a.startDate.localeCompare(b.startDate));
+        const monthTotalCost = monthTravels.reduce((acc, curr) => acc + (Number(curr.cost) || 0), 0);
+
+        // Check if we need a new page for this month header + table. If Y is very low on page, add page
+        if (currentY > pageHeight - 50) {
+          doc.addPage();
+          addWatermark(doc);
+          currentY = 20;
+        }
+
+        // Section Title
+        doc.setFillColor(248, 250, 252);
+        doc.rect(15, currentY, pageWidth - 30, 8, 'F');
+        doc.setDrawColor(226, 232, 240);
+        doc.line(15, currentY, pageWidth - 15, currentY);
+        doc.line(15, currentY + 8, pageWidth - 15, currentY + 8);
+
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(15, 23, 42);
+        doc.text(`${formatMonthYearStr(monthYearKey).toUpperCase()}`, 18, currentY + 6);
+        
+        doc.setFontSize(9);
+        doc.setTextColor(16, 185, 129); // emerald-500 equivalent color green
+        doc.text(`Total do Mês: ${formatBRL(monthTotalCost)}`, pageWidth - 18, currentY + 5.5, { align: 'right' });
+
+        currentY += 12;
+
+        const tableBody = monthTravels.map(travel => [
+          travel.name || '',
+          `${travel.origin || ''} -> ${travel.destination || ''}`,
+          travel.inspector || '',
+          `${formatDateBR(travel.startDate)} - ${formatDateBR(travel.endDate)}`,
+          formatBRL(travel.cost)
+        ]);
+
+        autoTable(doc, {
+          startY: currentY,
+          head: [['NOME DA VIAGEM', 'ROTEIRO', 'FISCAL', 'PERÍODO', 'CUSTO']],
+          body: tableBody,
+          theme: 'striped',
+          styles: { 
+            fontSize: 8.5, 
+            cellPadding: 4, 
+            font: 'helvetica', 
+            valign: 'middle',
+            overflow: 'linebreak'
+          },
+          headStyles: { 
+            fillColor: [15, 23, 42], // Elegante Slate-900 corporativo para cabeçalho
+            textColor: [255, 255, 255], 
+            fontStyle: 'bold',
+            fontSize: 9,
+            cellPadding: 4
+          },
+          alternateRowStyles: {
+            fillColor: [250, 251, 253] // Fundo alternado sutil para leitura profissional
+          },
+          columnStyles: {
+            0: { cellWidth: 40 },
+            1: { cellWidth: 45 },
+            2: { cellWidth: 35 },
+            3: { cellWidth: 32 },
+            4: { cellWidth: 28, halign: 'right' }
+          },
+          margin: { left: 15, right: 15 },
+          didDrawPage: (data) => {
+            // Apply watermark on dynamically generated pages
+            if (data.pageNumber > 1) {
+              addWatermark(doc);
+            }
+          }
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 12;
+      });
+
+      doc.save(`Controle_Viagens_${new Date().toISOString().split('T')[0]}.pdf`);
+      showNotification('PDF de Controle de Viagens gerado com sucesso!');
+    } catch (e) {
+      console.error('Error creating Travels PDF:', e);
+      showNotification('Erro ao gerar PDF. Verifique os dados.');
+    }
+  };
+
+  const handleDeleteTravel = async (id: string) => {
+    if (!window.confirm('Deseja realmente excluir esta viagem?')) return;
+    try {
+      await deleteDoc(doc(db, 'travels', id));
+      showNotification('Viagem excluída com sucesso!');
+    } catch (error) {
+      console.error('Error deleting travel:', error);
+      handleFirestoreError(error, OperationType.DELETE, `travels/${id}`);
     }
   };
 
@@ -2468,6 +2775,23 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'consumptionRCRequests');
     });
 
+    const unsubTravels = onSnapshot(collection(db, 'travels'), (snapshot) => {
+      setTravels(snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          cost: Number(data.cost) || 0,
+        } as Travel;
+      }));
+    }, (error) => {
+      if (error.message.includes('Quota exceeded')) {
+        localStorage.setItem('firestore_quota_extrapolated', 'true');
+        setQuotaExceeded(true);
+      }
+      handleFirestoreError(error, OperationType.LIST, 'travels');
+    });
+
     return () => {
       unsubProjects();
       unsubReports();
@@ -2482,6 +2806,7 @@ export default function App() {
       unsubFiscalPlanning();
       unsubUsers();
       unsubRCRequests();
+      unsubTravels();
     };
   }, [isLoggedIn, isAuthReady]);
 
@@ -3089,7 +3414,7 @@ export default function App() {
     doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
     doc.setFontSize(7.5);
     doc.setFont('helvetica', 'bold');
-    doc.text('ENERGIA', x, y + 5, { charSpace: 1 });
+    doc.text('E N E R G I A', x, y + 5);
   };
 
   const addWatermark = (doc: jsPDF) => {
@@ -4093,6 +4418,13 @@ export default function App() {
             label="Controle de RC" 
             active={activeTab === 'rc-control'} 
             onClick={() => { setActiveTab('rc-control'); if(isMobile) setIsSidebarOpen(false); }}
+            collapsed={!isSidebarOpen && !isMobile}
+          />
+          <NavItem 
+            icon={<MapPin size={20} />} 
+            label="Controle de viagens" 
+            active={activeTab === 'travel-control'} 
+            onClick={() => { setActiveTab('travel-control'); if(isMobile) setIsSidebarOpen(false); }}
             collapsed={!isSidebarOpen && !isMobile}
           />
           <NavItem 
@@ -6996,6 +7328,289 @@ export default function App() {
               </motion.div>
             )}
 
+            {activeTab === 'travel-control' && (
+              <motion.div 
+                key="travel-control"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 1.05 }}
+                className="space-y-6"
+              >
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-3xl font-display font-bold text-slate-900 dark:text-white tracking-tight">Controle de Viagens</h2>
+                    <p className="text-slate-500 dark:text-slate-400">Gerenciamento e controle de custos de viagens realizadas, agrupadas por mês.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    <button 
+                      onClick={exportTravelsToPDF}
+                      className="border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 px-4 py-2 rounded-lg font-bold flex items-center gap-2 transition-all font-sans shadow-sm"
+                      title="Salvar controle de viagens atual como PDF"
+                    >
+                      <FileText size={20} />
+                      Exportar PDF
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setEditingTravel(null);
+                        setNewTravel({
+                          name: '',
+                          cost: 0,
+                          inspector: '',
+                          origin: '',
+                          destination: '',
+                          startDate: new Date().toISOString().split('T')[0],
+                          endDate: new Date().toISOString().split('T')[0],
+                        });
+                        setIsAddingTravel(true);
+                      }}
+                      className="bg-axia-primary text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 hover:bg-axia-primary/90 shadow-lg shadow-axia-primary/20 transition-all font-sans"
+                    >
+                      <Plus size={20} />
+                      Cadastrar Viagem
+                    </button>
+                  </div>
+                </div>
+
+                {/* KPI/Summary cards */}
+                {(() => {
+                  const totalCost = travels.reduce((acc, curr) => acc + (Number(curr.cost) || 0), 0);
+                  const travelCount = travels.length;
+                  const averageCost = travelCount > 0 ? totalCost / travelCount : 0;
+                  const maxTravel = travels.reduce((max, curr) => (Number(curr.cost) || 0) > (max ? (Number(max.cost) || 0) : 0) ? curr : max, null as Travel | null);
+
+                  const formatBRL = (val: number) => {
+                    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
+                  };
+
+                  return (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 animate-fade-in">
+                      <StatCard 
+                        title="Total de Viagens" 
+                        value={String(travelCount)} 
+                        change="Total acumulado das viagens realizadas"
+                        icon={<MapPin size={24} className="text-blue-600 dark:text-blue-400" />}
+                        color="blue"
+                      />
+                      <StatCard 
+                        title="Custo Acumulado" 
+                        value={formatBRL(totalCost)} 
+                        change="Soma total de despesas com viagens"
+                        icon={<DollarSign size={24} className="text-green-600 dark:text-green-400" />}
+                        color="green"
+                      />
+                      <StatCard 
+                        title="Média por Viagem" 
+                        value={formatBRL(averageCost)} 
+                        change="Média geral de custos por roteiro"
+                        icon={<TrendingUp size={24} className="text-orange-600 dark:text-orange-400" />}
+                        color="orange"
+                      />
+                      <StatCard 
+                        title="Maior Custo" 
+                        value={maxTravel ? formatBRL(maxTravel.cost) : 'R$ 0,00'} 
+                        change={maxTravel ? maxTravel.name : "Nenhuma viagem registrada"}
+                        icon={<AlertCircle size={24} className="text-slate-600 dark:text-slate-400" />}
+                        color="slate"
+                      />
+                    </div>
+                  );
+                })()}
+
+                {/* Filters Row */}
+                <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row gap-4">
+                  <div className="flex-1 relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <input 
+                      type="text"
+                      value={searchTravelQuery}
+                      onChange={(e) => setSearchTravelQuery(e.target.value)}
+                      placeholder="Buscar por nome da viagem, origem ou destino..."
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl py-2 pl-10 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20 text-slate-700 dark:text-slate-200 transition-colors"
+                    />
+                  </div>
+                  <div className="w-full md:w-64 relative">
+                    <select
+                      value={filterInspector}
+                      onChange={(e) => setFilterInspector(e.target.value)}
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl py-2 pl-3 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20 text-slate-700 dark:text-slate-200 transition-colors appearance-none"
+                    >
+                      <option value="">Todos os Fiscais</option>
+                      {Array.from(new Set(travels.map(t => t.inspector).filter(Boolean))).map(inspector => (
+                        <option key={inspector} value={inspector}>{inspector}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+                  </div>
+                </div>
+
+                {/* Grouped Monthly Display */}
+                {(() => {
+                  const formatDateBR = (dateStr: string) => {
+                    if (!dateStr) return '';
+                    const parts = dateStr.split('-');
+                    if (parts.length === 3) {
+                      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+                    }
+                    return dateStr;
+                  };
+
+                  const formatMonthYear = (myStr: string) => {
+                    if (myStr === 'Sem data') return 'Sem data';
+                    const [year, month] = myStr.split('-');
+                    const monthNames = [
+                      'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+                      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+                    ];
+                    const monthIndex = parseInt(month, 10) - 1;
+                    if (monthIndex >= 0 && monthIndex < 12) {
+                      return `${monthNames[monthIndex]} de ${year}`;
+                    }
+                    return myStr;
+                  };
+
+                  const filteredTravels = travels.filter(t => {
+                    const matchesSearch = 
+                      (t.name?.toLowerCase().includes(searchTravelQuery.toLowerCase()) || false) ||
+                      (t.origin?.toLowerCase().includes(searchTravelQuery.toLowerCase()) || false) ||
+                      (t.destination?.toLowerCase().includes(searchTravelQuery.toLowerCase()) || false);
+                    
+                    const matchesInspector = !filterInspector || t.inspector === filterInspector;
+                    
+                    return matchesSearch && matchesInspector;
+                  });
+
+                  if (filteredTravels.length === 0) {
+                    return (
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-20 text-center text-slate-400 dark:text-slate-600 shadow-sm">
+                        <MapPin size={64} className="mx-auto mb-4 opacity-10 text-slate-300" />
+                        <p className="text-lg font-semibold text-slate-700 dark:text-slate-300">Nenhuma viagem encontrada.</p>
+                        <p className="text-sm text-slate-400">Tente ajustar a busca ou clique em "Cadastrar Viagem".</p>
+                      </div>
+                    );
+                  }
+
+                  // Group by Month Year
+                  const grouped: { [key: string]: Travel[] } = {};
+                  filteredTravels.forEach(t => {
+                    const key = t.monthYear || 'Sem data';
+                    if (!grouped[key]) grouped[key] = [];
+                    grouped[key].push(t);
+                  });
+
+                  const sortedMonthKeys = Object.keys(grouped).sort((a, b) => b.localeCompare(a));
+
+                  return (
+                    <div className="space-y-8">
+                      {sortedMonthKeys.map(monthYearKey => {
+                        const monthTravels = grouped[monthYearKey].sort((a,b) => a.startDate.localeCompare(b.startDate));
+                        const monthTotalCost = monthTravels.reduce((acc, curr) => acc + (Number(curr.cost) || 0), 0);
+                        const formatBRL = (val: number) => {
+                          return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
+                        };
+
+                        return (
+                          <div key={monthYearKey} className="bg-white dark:bg-slate-900 rounded-[24px] border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden p-6 animate-fade-in">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4 mb-6">
+                              <div className="flex items-center gap-3">
+                                <div className="p-2 bg-axia-primary/10 rounded-lg text-axia-primary">
+                                  <Calendar size={18} />
+                                </div>
+                                <div>
+                                  <h3 className="text-xl font-display font-bold text-slate-900 dark:text-white">
+                                    {formatMonthYear(monthYearKey)}
+                                  </h3>
+                                  <p className="text-xs text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">{monthTravels.length} {monthTravels.length === 1 ? 'viagem registrada' : 'viagens registradas'}</p>
+                                </div>
+                              </div>
+                              <div className="bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 px-4 py-2 rounded-xl text-sm font-display font-extrabold shadow-sm border border-emerald-100/10">
+                                Total do Mês: {formatBRL(monthTotalCost)}
+                              </div>
+                            </div>
+
+                            <div className="overflow-x-auto rounded-xl">
+                              <table className="w-full text-left border-collapse min-w-[700px]">
+                                <thead>
+                                  <tr className="border-b border-slate-100 dark:border-slate-800 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest bg-slate-50/50 dark:bg-slate-800/20">
+                                    <th className="py-3 px-4">Nome da Viagem</th>
+                                    <th className="py-3 px-4">Roteiro (Origem ➔ Destino)</th>
+                                    <th className="py-3 px-4">Fiscal Responsável</th>
+                                    <th className="py-3 px-4">Período</th>
+                                    <th className="py-3 px-4 text-right">Custo</th>
+                                    <th className="py-3 px-4 text-center">Ações</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/40 text-sm">
+                                  {monthTravels.map(travel => (
+                                    <tr key={travel.id} className="hover:bg-slate-50/40 dark:hover:bg-slate-800/10 transition-colors group">
+                                      <td className="py-4 px-4">
+                                        <p className="font-bold text-slate-900 dark:text-white">{travel.name}</p>
+                                      </td>
+                                      <td className="py-4 px-4">
+                                        <div className="flex items-center gap-2">
+                                          <span className="font-medium text-slate-600 dark:text-slate-300">{travel.origin}</span>
+                                          <ChevronRight size={14} className="text-slate-400 group-hover:translate-x-0.5 transition-transform" />
+                                          <span className="font-bold text-slate-800 dark:text-slate-200">{travel.destination}</span>
+                                        </div>
+                                      </td>
+                                      <td className="py-4 px-4 text-slate-600 dark:text-slate-400">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                                            {travel.inspector ? travel.inspector.substring(0, 2).toUpperCase() : 'FI'}
+                                          </div>
+                                          <span className="font-medium">{travel.inspector}</span>
+                                        </div>
+                                      </td>
+                                      <td className="py-4 px-4 text-xs text-slate-500 dark:text-slate-400 font-mono">
+                                        {formatDateBR(travel.startDate)} - {formatDateBR(travel.endDate)}
+                                      </td>
+                                      <td className="py-4 px-4 text-right font-display font-bold text-slate-900 dark:text-white">
+                                        {formatBRL(travel.cost)}
+                                      </td>
+                                      <td className="py-4 px-4">
+                                        <div className="flex items-center justify-center gap-1">
+                                          <button 
+                                            onClick={() => {
+                                              setEditingTravel(travel);
+                                              setNewTravel({
+                                                name: travel.name,
+                                                cost: travel.cost,
+                                                inspector: travel.inspector,
+                                                origin: travel.origin,
+                                                destination: travel.destination,
+                                                startDate: travel.startDate,
+                                                endDate: travel.endDate
+                                              });
+                                              setIsAddingTravel(true);
+                                            }}
+                                            className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-400 hover:text-axia-primary transition-colors"
+                                            title="Editar"
+                                          >
+                                            <Pencil size={14} />
+                                          </button>
+                                          <button 
+                                            onClick={() => handleDeleteTravel(travel.id)}
+                                            className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-400 hover:text-red-500 transition-colors"
+                                            title="Excluir"
+                                          >
+                                            <Trash2 size={14} />
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </motion.div>
+            )}
+
             {activeTab === 'reports' && (
               <motion.div 
                 key="reports"
@@ -8671,6 +9286,171 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {isAddingTravel && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[32px] overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800"
+            >
+              <div className="p-8">
+                <div className="flex items-center justify-between mb-8">
+                  <div>
+                    <h3 className="text-2xl font-display font-bold text-slate-900 dark:text-white tracking-tight">
+                      {editingTravel ? 'Editar Cadastro de Viagem' : 'Cadastrar Viagem Realizada'}
+                    </h3>
+                    <p className="text-sm text-slate-500">
+                      {editingTravel ? 'Atualize as informações desta viagem.' : 'Insira as informações da viagem realizada durante o mês.'}
+                    </p>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setIsAddingTravel(false);
+                      setEditingTravel(null);
+                    }}
+                    type="button"
+                    className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                  >
+                    <X size={24} className="text-slate-400" />
+                  </button>
+                </div>
+
+                <form onSubmit={editingTravel ? handleEditTravel : handleAddTravel} className="space-y-5">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Nome da Viagem</label>
+                    <div className="relative">
+                      <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                      <input 
+                        type="text" 
+                        required
+                        value={newTravel.name}
+                        onChange={(e) => setNewTravel({ ...newTravel, name: e.target.value })}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                        placeholder="Ex: Vistoria Tática Linha 1"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Custo da Viagem</label>
+                      <div className="relative">
+                        <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">R$</div>
+                        <input 
+                          type="number" 
+                          step="0.01"
+                          required
+                          value={newTravel.cost || ''}
+                          onChange={(e) => setNewTravel({ ...newTravel, cost: parseFloat(e.target.value) || 0 })}
+                          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                          placeholder="0,00"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Nome do Fiscal</label>
+                      <div className="relative">
+                        <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                        <input 
+                          type="text" 
+                          required
+                          value={newTravel.inspector}
+                          onChange={(e) => setNewTravel({ ...newTravel, inspector: e.target.value })}
+                          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                          placeholder="Ex: Eng. Ricardo Silva"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Origem</label>
+                      <div className="relative">
+                        <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                        <input 
+                          type="text" 
+                          required
+                          value={newTravel.origin}
+                          onChange={(e) => setNewTravel({ ...newTravel, origin: e.target.value })}
+                          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                          placeholder="Cidade / Estado de saída"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Destino</label>
+                      <div className="relative">
+                        <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                        <input 
+                          type="text" 
+                          required
+                          value={newTravel.destination}
+                          onChange={(e) => setNewTravel({ ...newTravel, destination: e.target.value })}
+                          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                          placeholder="Cidade / Estado de destino"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Data de Ida</label>
+                      <div className="relative">
+                        <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                        <input 
+                          type="date" 
+                          required
+                          value={newTravel.startDate}
+                          onChange={(e) => setNewTravel({ ...newTravel, startDate: e.target.value })}
+                          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Data de Volta</label>
+                      <div className="relative">
+                        <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                        <input 
+                          type="date" 
+                          required
+                          value={newTravel.endDate}
+                          onChange={(e) => setNewTravel({ ...newTravel, endDate: e.target.value })}
+                          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4 pt-4">
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setIsAddingTravel(false);
+                        setEditingTravel(null);
+                      }}
+                      className="flex-1 py-3.5 text-slate-500 font-bold hover:bg-slate-50 dark:hover:bg-slate-800 rounded-2xl transition-all"
+                    >
+                      Cancelar
+                    </button>
+                    <button 
+                      type="submit"
+                      className="flex-[2] py-3.5 bg-axia-primary text-white font-bold rounded-2xl hover:shadow-xl hover:shadow-axia-primary/20 transition-all shadow-lg shadow-axia-primary/20"
+                    >
+                      {editingTravel ? 'Salvar Alterações' : 'Salvar Viagem'}
+                    </button>
+                  </div>
+                </form>
               </div>
             </motion.div>
           </div>

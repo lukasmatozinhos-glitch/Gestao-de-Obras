@@ -114,6 +114,18 @@ service cloud.firestore {
              ));
     }
 
+    function isValidTravel(data) {
+      return data.id is string && 
+             data.name is string && 
+             data.cost is number && 
+             data.inspector is string && 
+             data.origin is string && 
+             data.destination is string && 
+             data.startDate is string && 
+             data.endDate is string && 
+             data.monthYear is string;
+    }
+
     // ===============================================================
     // Collection Rules
     // ===============================================================
@@ -197,6 +209,12 @@ service cloud.firestore {
       allow create: if isAuthenticated() && isValidRCRequest(request.resource.data);
       allow update: if isAuthenticated() && (isAdmin() || (isOwner(resource.data.createdBy) && isValidRCRequest(request.resource.data)));
       allow delete: if isAdmin() || isOwner(resource.data.createdBy);
+    }
+
+    match /travels/{travelId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidId(travelId) && isValidTravel(request.resource.data);
+      allow delete: if isAuthenticated();
     }
   }
 }
