@@ -283,6 +283,7 @@ export default function App() {
   const [selectedPlanningProjectId, setSelectedPlanningProjectId] = useState<string>('');
   const [planningViewMonths, setPlanningViewMonths] = useState<number | 'auto'>('auto');
   const [planningViewScale, setPlanningViewScale] = useState<'month' | 'week'>('month');
+  const [useRelativePlanningMonths, setUseRelativePlanningMonths] = useState(false);
   const [isAddingActivity, setIsAddingActivity] = useState(false);
   const [isAddingPlanningActivity, setIsAddingPlanningActivity] = useState(false);
   const [editingActivity, setEditingActivity] = useState<ScheduleActivity | null>(null);
@@ -1129,6 +1130,169 @@ export default function App() {
     }
   };
 
+  const oklchToRgb = (l: number, c: number, h: number, alpha: number = 1): string => {
+    const theta = (h * Math.PI) / 180;
+    const a = c * Math.cos(theta);
+    const b = c * Math.sin(theta);
+    return oklabToRgb(l, a, b, alpha);
+  };
+
+  const oklabToRgb = (L: number, a: number, b: number, alpha: number = 1): string => {
+    const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+    const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+    const s_ = L - 0.0894841775 * a - 1.291485548 * b;
+
+    const l = Math.max(0, l_ * l_ * l_);
+    const m = Math.max(0, m_ * m_ * m_);
+    const s = Math.max(0, s_ * s_ * s_);
+
+    const r = +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
+    const g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+    const bComp = -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s;
+
+    const f = (val: number) => {
+      if (val <= 0.0031308) return 12.92 * val;
+      return 1.055 * Math.pow(val, 1 / 2.4) - 0.055;
+    };
+
+    const R = Math.round(Math.max(0, Math.min(1, f(r))) * 255);
+    const G = Math.round(Math.max(0, Math.min(1, f(g))) * 255);
+    const B = Math.round(Math.max(0, Math.min(1, f(bComp))) * 255);
+
+    return alpha === 1 || alpha === undefined ? `rgb(${R}, ${G}, ${B})` : `rgba(${R}, ${G}, ${B}, ${alpha})`;
+  };
+
+  const parseAndConvertColor = (colorStr: string): string => {
+    if (typeof colorStr !== 'string') return colorStr;
+    
+    let result = colorStr;
+    
+    // Match oklch(...)
+    const oklchRegex = /oklch\(([^)]+)\)/gi;
+    result = result.replace(oklchRegex, (match, p1) => {
+      try {
+        const parts = p1.trim().split(/[\s,+/]+/);
+        if (parts.length >= 3) {
+          let l = parseFloat(parts[0]);
+          if (parts[0].includes('%')) l = parseFloat(parts[0]) / 100;
+          let c = parseFloat(parts[1]);
+          if (parts[1].includes('%')) c = parseFloat(parts[1]) / 100;
+          let h = parseFloat(parts[2]);
+          let alpha = 1;
+          if (parts.length >= 4) {
+            const aPart = parts[3];
+            if (aPart.includes('%')) {
+              alpha = parseFloat(aPart) / 100;
+            } else {
+              alpha = parseFloat(aPart);
+            }
+          }
+          return oklchToRgb(l, c, h, alpha);
+        }
+      } catch (e) {
+        console.warn('Error parsing oklch', match, e);
+      }
+      return 'rgb(71, 85, 105)';
+    });
+
+    // Match oklab(...)
+    const oklabRegex = /oklab\(([^)]+)\)/gi;
+    result = result.replace(oklabRegex, (match, p1) => {
+      try {
+        const parts = p1.trim().split(/[\s,+/]+/);
+        if (parts.length >= 3) {
+          let l = parseFloat(parts[0]);
+          if (parts[0].includes('%')) l = parseFloat(parts[0]) / 100;
+          let a = parseFloat(parts[1]);
+          let b = parseFloat(parts[2]);
+          let alpha = 1;
+          if (parts.length >= 4) {
+            const aPart = parts[3];
+            if (aPart.includes('%')) {
+              alpha = parseFloat(aPart) / 100;
+            } else {
+              alpha = parseFloat(aPart);
+            }
+          }
+          return oklabToRgb(l, a, b, alpha);
+        }
+      } catch (e) {
+        console.warn('Error parsing oklab', match, e);
+      }
+      return 'rgb(30, 41, 59)';
+    });
+
+    return result;
+  };
+
+  const patchGetComputedStyle = (win: any) => {
+    if (!win || win.__isStylePatched) return () => {};
+    const originalGetComputedStyle = win.getComputedStyle;
+    
+    win.getComputedStyle = function(el: any, pseudoElt?: any) {
+      const style = originalGetComputedStyle.call(win, el, pseudoElt);
+      if (!style) return style;
+      
+      return new Proxy(style, {
+        get(target, prop) {
+          if (prop === 'getPropertyValue') {
+            return function(propertyName: string) {
+              const val = target.getPropertyValue(propertyName);
+              if (typeof val === 'string' && (val.includes('oklch') || val.includes('oklab'))) {
+                return parseAndConvertColor(val);
+              }
+              return val;
+            };
+          }
+          const val = Reflect.get(target, prop);
+          if (typeof val === 'function') {
+            return val.bind(target);
+          }
+          if (typeof val === 'string' && (val.includes('oklch') || val.includes('oklab'))) {
+            return parseAndConvertColor(val);
+          }
+          return val;
+        }
+      });
+    };
+    
+    win.__isStylePatched = true;
+    
+    return () => {
+      win.getComputedStyle = originalGetComputedStyle;
+      delete win.__isStylePatched;
+    };
+  };
+
+  const getCleanedStyles = () => {
+    let combinedStyles = '';
+    
+    // Grab text content from all <style> tags
+    document.querySelectorAll('style').forEach((styleTag) => {
+      combinedStyles += (styleTag.textContent || '') + '\n';
+    });
+    
+    // Grab rules from linked stylesheets
+    for (let i = 0; i < document.styleSheets.length; i++) {
+      const sheet = document.styleSheets[i];
+      try {
+        const rules = sheet.cssRules || sheet.rules;
+        if (rules) {
+          for (let j = 0; j < rules.length; j++) {
+            combinedStyles += rules[j].cssText + '\n';
+          }
+        }
+      } catch (e) {
+        // Cross-origin rules might fail access, but relative stylesheets won't
+      }
+    }
+
+    // Replace all oklch / oklab values with safe neutral colors to prevent parser crashing
+    return combinedStyles
+      .replace(/oklch\([^)]+\)/gi, '#475569')
+      .replace(/oklab\([^)]+\)/gi, '#1e293b');
+  };
+
   const exportPlanningToPDF = async (projectId: string) => {
     const project = projects.find(p => p.id === projectId);
     if (!project) return;
@@ -1181,9 +1345,13 @@ export default function App() {
 
     // Add Planning Visual if Ref exists
     if (planningRef.current) {
+      const clearPatchWin = patchGetComputedStyle(window);
+      let clearPatchClone = () => {};
       try {
         const numMonths = planningTimelineData?.numMonths || 12;
         const exportWidth = 450 + (numMonths * PLANNING_MONTH_WIDTH) + 120;
+
+        const cleanedCSS = getCleanedStyles();
 
         const canvas = await html2canvas(planningRef.current, {
           scale: 3,
@@ -1192,6 +1360,20 @@ export default function App() {
           width: exportWidth,
           backgroundColor: '#FFFFFF',
           onclone: (clonedDoc) => {
+            const cloneWin = clonedDoc.defaultView;
+            if (cloneWin) {
+              clearPatchClone = patchGetComputedStyle(cloneWin);
+            }
+            // Remove all existing style and link tags to prevent html2canvas's own parser from reading the raw/broken style sheets
+            clonedDoc.querySelectorAll('style, link[rel="stylesheet"]').forEach((el) => {
+              el.remove();
+            });
+
+            // Create a single clean <style> tag with our sanitized CSS!
+            const styleEl = clonedDoc.createElement('style');
+            styleEl.textContent = cleanedCSS;
+            clonedDoc.head.appendChild(styleEl);
+
             const chartDiv = clonedDoc.getElementById('planning-chart');
             if (chartDiv) {
               // Add a beautiful logo header to the cloned document for the export
@@ -1263,8 +1445,9 @@ export default function App() {
               hideElements.forEach(el => (el as HTMLElement).style.display = 'none');
             }
 
-            const elements = clonedDoc.querySelectorAll('*');
+            const elements = chartDiv ? chartDiv.querySelectorAll('*') : [];
             const isModernColor = (val: any) => val && typeof val === 'string' && (val.includes('oklch') || val.includes('oklab'));
+            const targetColorProps = ['color', 'background-color', 'border-color', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color', 'outline-color', 'box-shadow'];
             
             elements.forEach((node) => {
               const el = node as HTMLElement;
@@ -1310,27 +1493,20 @@ export default function App() {
               }
 
               // Thoroughly strip modern colors
-              for (let k = 0; k < style.length; k++) {
-                const prop = style[k];
+              targetColorProps.forEach((prop) => {
                 const value = style.getPropertyValue(prop);
                 if (isModernColor(value)) {
-                  if (prop.includes('color')) {
-                    if (prop === 'color') {
-                      el.style.color = el.classList.contains('text-white') ? '#ffffff' : '#1e293b';
-                    } else if (prop === 'background-color') {
-                      el.style.backgroundColor = el.classList.contains('bg-white') ? '#ffffff' : 'transparent';
-                    } else {
-                      el.style.setProperty(prop, 'transparent', 'important');
-                    }
+                  if (prop === 'color') {
+                    el.style.color = el.classList.contains('text-white') ? '#ffffff' : '#1e293b';
+                  } else if (prop === 'background-color') {
+                    el.style.backgroundColor = el.classList.contains('bg-white') ? '#ffffff' : 'transparent';
                   } else if (prop === 'box-shadow') {
                     el.style.boxShadow = 'none';
-                  } else if (prop.includes('outline') || prop.includes('border')) {
-                    el.style.setProperty(prop, 'none', 'important');
                   } else {
-                    el.style.setProperty(prop, 'none', 'important');
+                    el.style.setProperty(prop, 'transparent', 'important');
                   }
                 }
-              }
+              });
 
               if (el.classList.contains('bg-hatched-red')) {
                 el.style.backgroundImage = 'repeating-linear-gradient(45deg, #ef4444, #ef4444 10px, #dc2626 10px, #dc2626 20px)';
@@ -1370,6 +1546,9 @@ export default function App() {
         doc.addImage(imgData, 'PNG', xPos, yPos, finalWidth, finalHeight, undefined, 'FAST');
       } catch (err) {
         console.error('Error capturing planning chart:', err);
+      } finally {
+        clearPatchWin();
+        clearPatchClone();
       }
     }
 
@@ -1389,9 +1568,13 @@ export default function App() {
     const element = planningRef.current;
     if (!element) return;
 
+    const clearPatchWin = patchGetComputedStyle(window);
+    let clearPatchClone = () => {};
     try {
       const numMonths = planningTimelineData?.numMonths || 12;
       const exportWidth = 450 + (numMonths * PLANNING_MONTH_WIDTH) + 120;
+
+      const cleanedCSS = getCleanedStyles();
 
       const canvas = await html2canvas(element, { 
         scale: 3,
@@ -1399,6 +1582,20 @@ export default function App() {
         width: exportWidth,
         backgroundColor: '#FFFFFF',
         onclone: (clonedDoc) => {
+          const cloneWin = clonedDoc.defaultView;
+          if (cloneWin) {
+            clearPatchClone = patchGetComputedStyle(cloneWin);
+          }
+          // Remove all existing style and link tags to prevent html2canvas's own parser from reading the raw/broken style sheets
+          clonedDoc.querySelectorAll('style, link[rel="stylesheet"]').forEach((el) => {
+            el.remove();
+          });
+
+          // Create a single clean <style> tag with our sanitized CSS!
+          const styleEl = clonedDoc.createElement('style');
+          styleEl.textContent = cleanedCSS;
+          clonedDoc.head.appendChild(styleEl);
+
           const chartDiv = clonedDoc.getElementById('planning-chart');
           if (chartDiv) {
             // Add a beautiful logo header to the cloned document for the export
@@ -1467,8 +1664,9 @@ export default function App() {
             chartDiv.style.overflow = 'visible';
           }
 
-          const elements = clonedDoc.querySelectorAll('*');
+          const elements = chartDiv ? chartDiv.querySelectorAll('*') : [];
           const isModernColor = (val: any) => val && typeof val === 'string' && (val.includes('oklch') || val.includes('oklab'));
+          const targetColorProps = ['color', 'background-color', 'border-color', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color', 'outline-color', 'box-shadow'];
           
           elements.forEach((node) => {
             const el = node as HTMLElement;
@@ -1514,27 +1712,20 @@ export default function App() {
             }
 
             // Thoroughly strip modern colors
-            for (let k = 0; k < style.length; k++) {
-              const prop = style[k];
+            targetColorProps.forEach((prop) => {
               const value = style.getPropertyValue(prop);
               if (isModernColor(value)) {
-                if (prop.includes('color')) {
-                  if (prop === 'color') {
-                    el.style.color = el.classList.contains('text-white') ? '#ffffff' : '#1e293b';
-                  } else if (prop === 'background-color') {
-                    el.style.backgroundColor = el.classList.contains('bg-white') ? '#ffffff' : 'transparent';
-                  } else {
-                    el.style.setProperty(prop, 'transparent', 'important');
-                  }
+                if (prop === 'color') {
+                  el.style.color = el.classList.contains('text-white') ? '#ffffff' : '#1e293b';
+                } else if (prop === 'background-color') {
+                  el.style.backgroundColor = el.classList.contains('bg-white') ? '#ffffff' : 'transparent';
                 } else if (prop === 'box-shadow') {
                   el.style.boxShadow = 'none';
-                } else if (prop.includes('outline') || prop.includes('border')) {
-                  el.style.setProperty(prop, 'none', 'important');
                 } else {
-                  el.style.setProperty(prop, 'none', 'important');
+                  el.style.setProperty(prop, 'transparent', 'important');
                 }
               }
-            }
+            });
 
             if (el.classList.contains('bg-hatched-red')) {
               el.style.backgroundImage = 'repeating-linear-gradient(45deg, #ef4444, #ef4444 10px, #dc2626 10px, #dc2626 20px)';
@@ -1551,6 +1742,9 @@ export default function App() {
     } catch (error) {
       console.error('Export error:', error);
       showNotification('Erro ao gerar PNG.');
+    } finally {
+      clearPatchWin();
+      clearPatchClone();
     }
   };
 
@@ -1609,9 +1803,13 @@ export default function App() {
 
     // Add Timeline Visual if Ref exists
     if (timelineRef.current) {
+      const clearPatchWin = patchGetComputedStyle(window);
+      let clearPatchClone = () => {};
       try {
         const numMonths = 12; // Execution is fixed to roughly 1 year or window
         const exportWidth = 450 + (numMonths * MONTH_WIDTH) + 120;
+
+        const cleanedCSS = getCleanedStyles();
 
         const canvas = await html2canvas(timelineRef.current, {
           scale: 3,
@@ -1620,6 +1818,20 @@ export default function App() {
           width: exportWidth,
           backgroundColor: '#FFFFFF',
           onclone: (clonedDoc) => {
+            const cloneWin = clonedDoc.defaultView;
+            if (cloneWin) {
+              clearPatchClone = patchGetComputedStyle(cloneWin);
+            }
+            // Remove all existing style and link tags to prevent html2canvas's own parser from reading the raw/broken style sheets
+            clonedDoc.querySelectorAll('style, link[rel="stylesheet"]').forEach((el) => {
+              el.remove();
+            });
+
+            // Create a single clean <style> tag with our sanitized CSS!
+            const styleEl = clonedDoc.createElement('style');
+            styleEl.textContent = cleanedCSS;
+            clonedDoc.head.appendChild(styleEl);
+
             const container = clonedDoc.getElementById('timeline-container');
             if (container) {
               // Add a beautiful logo header to the cloned document for the export
@@ -1688,8 +1900,9 @@ export default function App() {
               container.style.overflow = 'visible';
             }
 
-            const elements = clonedDoc.querySelectorAll('*');
+            const elements = container ? container.querySelectorAll('*') : [];
             const isModernColor = (val: any) => val && typeof val === 'string' && (val.includes('oklch') || val.includes('oklab'));
+            const targetColorProps = ['color', 'background-color', 'border-color', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color', 'outline-color', 'box-shadow'];
             
             elements.forEach((node) => {
               const el = node as HTMLElement;
@@ -1734,27 +1947,20 @@ export default function App() {
               }
 
               // Strip modern colors
-              for (let k = 0; k < style.length; k++) {
-                const prop = style[k];
+              targetColorProps.forEach((prop) => {
                 const value = style.getPropertyValue(prop);
                 if (isModernColor(value)) {
-                  if (prop.includes('color')) {
-                    if (prop === 'color') {
-                      el.style.color = el.classList.contains('text-white') ? '#ffffff' : '#1e293b';
-                    } else if (prop === 'background-color') {
-                      el.style.backgroundColor = el.classList.contains('bg-white') ? '#ffffff' : 'transparent';
-                    } else {
-                      el.style.setProperty(prop, 'transparent', 'important');
-                    }
+                  if (prop === 'color') {
+                    el.style.color = el.classList.contains('text-white') ? '#ffffff' : '#1e293b';
+                  } else if (prop === 'background-color') {
+                    el.style.backgroundColor = el.classList.contains('bg-white') ? '#ffffff' : 'transparent';
                   } else if (prop === 'box-shadow') {
                     el.style.boxShadow = 'none';
-                  } else if (prop.includes('outline') || prop.includes('border')) {
-                    el.style.setProperty(prop, 'none', 'important');
                   } else {
-                    el.style.setProperty(prop, 'none', 'important');
+                    el.style.setProperty(prop, 'transparent', 'important');
                   }
                 }
-              }
+              });
 
               if (el.classList.contains('bg-hatched-red')) {
                 el.style.backgroundImage = 'repeating-linear-gradient(45deg, #ef4444, #ef4444 10px, #dc2626 10px, #dc2626 20px)';
@@ -1798,6 +2004,9 @@ export default function App() {
         doc.addImage(imgData, 'PNG', xPos, yPos, finalWidth, finalHeight, undefined, 'FAST');
       } catch (err) {
         console.error('Error capturing timeline:', err);
+      } finally {
+        clearPatchWin();
+        clearPatchClone();
       }
     }
 
@@ -1817,9 +2026,13 @@ export default function App() {
     const project = projects.find(p => p.id === projectId);
     if (!project || !timelineRef.current) return;
 
+    const clearPatchWin = patchGetComputedStyle(window);
+    let clearPatchClone = () => {};
     try {
       const numMonths = 12;
       const exportWidth = 450 + (numMonths * MONTH_WIDTH) + 120;
+
+      const cleanedCSS = getCleanedStyles();
 
       const canvas = await html2canvas(timelineRef.current, {
         scale: 3,
@@ -1828,6 +2041,20 @@ export default function App() {
         width: exportWidth,
         backgroundColor: '#FFFFFF',
         onclone: (clonedDoc) => {
+          const cloneWin = clonedDoc.defaultView;
+          if (cloneWin) {
+            clearPatchClone = patchGetComputedStyle(cloneWin);
+          }
+          // Remove all existing style and link tags to prevent html2canvas's own parser from reading the raw/broken style sheets
+          clonedDoc.querySelectorAll('style, link[rel="stylesheet"]').forEach((el) => {
+            el.remove();
+          });
+
+          // Create a single clean <style> tag with our sanitized CSS!
+          const styleEl = clonedDoc.createElement('style');
+          styleEl.textContent = cleanedCSS;
+          clonedDoc.head.appendChild(styleEl);
+
           const container = clonedDoc.getElementById('timeline-container');
           if (container) {
             // Add a beautiful logo header to the cloned document for the export
@@ -1896,8 +2123,9 @@ export default function App() {
             container.style.overflow = 'visible';
           }
 
-          const elements = clonedDoc.querySelectorAll('*');
+          const elements = container ? container.querySelectorAll('*') : [];
           const isModernColor = (val: any) => val && typeof val === 'string' && (val.includes('oklch') || val.includes('oklab'));
+          const targetColorProps = ['color', 'background-color', 'border-color', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color', 'outline-color', 'box-shadow'];
           
           elements.forEach((node) => {
             const el = node as HTMLElement;
@@ -1942,27 +2170,20 @@ export default function App() {
             }
 
             // Strip modern colors
-            for (let k = 0; k < style.length; k++) {
-              const prop = style[k];
+            targetColorProps.forEach((prop) => {
               const value = style.getPropertyValue(prop);
               if (isModernColor(value)) {
-                if (prop.includes('color')) {
-                  if (prop === 'color') {
-                    el.style.color = el.classList.contains('text-white') ? '#ffffff' : '#1e293b';
-                  } else if (prop === 'background-color') {
-                    el.style.backgroundColor = el.classList.contains('bg-white') ? '#ffffff' : 'transparent';
-                  } else {
-                    el.style.setProperty(prop, 'transparent', 'important');
-                  }
+                if (prop === 'color') {
+                  el.style.color = el.classList.contains('text-white') ? '#ffffff' : '#1e293b';
+                } else if (prop === 'background-color') {
+                  el.style.backgroundColor = el.classList.contains('bg-white') ? '#ffffff' : 'transparent';
                 } else if (prop === 'box-shadow') {
                   el.style.boxShadow = 'none';
-                } else if (prop.includes('outline') || prop.includes('border')) {
-                  el.style.setProperty(prop, 'none', 'important');
                 } else {
-                  el.style.setProperty(prop, 'none', 'important');
+                  el.style.setProperty(prop, 'transparent', 'important');
                 }
               }
-            }
+            });
 
             if (el.classList.contains('bg-hatched-red')) {
               el.style.backgroundImage = 'repeating-linear-gradient(45deg, #ef4444, #ef4444 10px, #dc2626 10px, #dc2626 20px)';
@@ -1981,6 +2202,9 @@ export default function App() {
     } catch (err) {
       console.error('Error exporting PNG:', err);
       showNotification('Erro ao exportar PNG');
+    } finally {
+      clearPatchWin();
+      clearPatchClone();
     }
   };
 
@@ -3842,13 +4066,7 @@ export default function App() {
             onClick={() => { setActiveTab('projects'); if(isMobile) setIsSidebarOpen(false); }}
             collapsed={!isSidebarOpen && !isMobile}
           />
-          <NavItem 
-            icon={<Calendar size={20} />} 
-            label="Cronograma" 
-            active={activeTab === 'schedule'} 
-            onClick={() => { setActiveTab('schedule'); if(isMobile) setIsSidebarOpen(false); }}
-            collapsed={!isSidebarOpen && !isMobile}
-          />
+
           <NavItem 
             icon={<TrendingUp size={20} />} 
             label="Planejamento" 
@@ -5881,7 +6099,33 @@ export default function App() {
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-4 export-hide">
+                        <div className="flex flex-wrap items-center gap-4 export-hide">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Formato:</span>
+                            <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5">
+                              <button
+                                onClick={() => setUseRelativePlanningMonths(false)}
+                                className={`px-3 py-1 rounded-md text-[10px] font-black uppercase tracking-widest transition-all ${
+                                  !useRelativePlanningMonths 
+                                    ? 'bg-white dark:bg-slate-700 text-axia-primary shadow-sm' 
+                                    : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
+                                }`}
+                              >
+                                Calendário
+                              </button>
+                              <button
+                                onClick={() => setUseRelativePlanningMonths(true)}
+                                className={`px-3 py-1 rounded-md text-[10px] font-black uppercase tracking-widest transition-all ${
+                                  useRelativePlanningMonths 
+                                    ? 'bg-white dark:bg-slate-700 text-axia-primary shadow-sm' 
+                                    : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
+                                }`}
+                              >
+                                Relativo
+                              </button>
+                            </div>
+                          </div>
+
                           <div className="flex items-center gap-2">
                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Escala:</span>
                             <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5">
@@ -5901,7 +6145,7 @@ export default function App() {
                                   planningViewScale === 'week' 
                                     ? 'bg-white dark:bg-slate-700 text-axia-primary shadow-sm' 
                                     : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
-                                }`}
+                                  }`}
                               >
                                 Semanas
                               </button>
@@ -5992,19 +6236,27 @@ export default function App() {
                               <div className="bg-slate-50/80 dark:bg-slate-800/80 sticky top-0 z-30">
                                 {/* Year Row */}
                                 <div className="h-6 flex border-b border-slate-200 dark:border-slate-700">
-                                  {planningTimelineData?.years.map((y, i) => (
+                                  {useRelativePlanningMonths ? (
                                     <div 
-                                      key={`year-${y.year}-${i}`} 
-                                      className="flex items-center justify-center border-r border-slate-200 dark:border-slate-700 text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-100/50 dark:bg-slate-900/50"
-                                      style={{ width: y.monthsCount * PLANNING_MONTH_WIDTH }}
+                                      className="flex items-center justify-center border-b border-slate-200 dark:border-slate-700 text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-100/50 dark:bg-slate-900/50 w-full"
                                     >
-                                      {y.year}
+                                      PRAZO RELATIVO DE EXECUÇÃO
                                     </div>
-                                  ))}
+                                  ) : (
+                                    planningTimelineData?.years.map((y, i) => (
+                                      <div 
+                                        key={`year-${y.year}-${i}`} 
+                                        className="flex items-center justify-center border-r border-slate-200 dark:border-slate-700 text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-100/50 dark:bg-slate-900/50"
+                                        style={{ width: y.monthsCount * PLANNING_MONTH_WIDTH }}
+                                      >
+                                        {y.year}
+                                      </div>
+                                    ))
+                                  )}
                                 </div>
                                 {/* Month Row */}
                                 <div className={`${planningViewScale === 'month' ? 'h-10' : 'h-14'} flex border-b border-slate-200 dark:border-slate-700`}>
-                                  {planningTimelineData && planningTimelineData.visibleMonths.map((m) => {
+                                  {planningTimelineData && planningTimelineData.visibleMonths.map((m, index) => {
                                     const monthNamesShort = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
                                     return (
                                       <div 
@@ -6013,7 +6265,7 @@ export default function App() {
                                         style={{ width: PLANNING_MONTH_WIDTH, minWidth: PLANNING_MONTH_WIDTH }}
                                       >
                                         <div className="flex-grow flex items-center justify-center w-full relative">
-                                          {monthNamesShort[m.month]}
+                                          {useRelativePlanningMonths ? `Mês ${index + 1}` : monthNamesShort[m.month]}
                                           <div 
                                             onClick={(e) => {
                                               e.stopPropagation();
@@ -6040,7 +6292,7 @@ export default function App() {
                                   })}
                                 </div>
                               </div>
-
+ 
                               {/* Bars Area */}
                               <div className="relative min-h-[400px]">
                                  {/* Vertical Grid Lines */}
@@ -6062,9 +6314,9 @@ export default function App() {
                                     </div>
                                   ))}
                                 </div>
-
+ 
                                 {/* Today Marker Line */}
-                                {showTodayLine && planningTimelineData && planningTimelineData.exactTodayAbs >= planningTimelineData.startAbs && planningTimelineData.exactTodayAbs <= (planningTimelineData.endAbs + 1) && !hiddenMonths.includes(`${Math.floor(planningTimelineData.exactTodayAbs / 12)}-${Math.floor(planningTimelineData.exactTodayAbs % 12)}`) && (
+                                {showTodayLine && !useRelativePlanningMonths && planningTimelineData && planningTimelineData.exactTodayAbs >= planningTimelineData.startAbs && planningTimelineData.exactTodayAbs <= (planningTimelineData.endAbs + 1) && !hiddenMonths.includes(`${Math.floor(planningTimelineData.exactTodayAbs / 12)}-${Math.floor(planningTimelineData.exactTodayAbs % 12)}`) && (
                                   <div 
                                     className="absolute top-0 bottom-0 w-px border-l-2 border-dashed border-red-500/40 z-20 pointer-events-none"
                                     style={{ 
@@ -6282,434 +6534,6 @@ export default function App() {
                 )}
               </motion.div>
             )}
-
-            {activeTab === 'schedule' && (
-              <motion.div 
-                key="schedule"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                className="space-y-8"
-              >
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div>
-                    <h2 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">Cronograma de Obras</h2>
-                    <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">Gestão de prazos e atividades</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <button 
-                      onClick={() => setShowTodayLine(!showTodayLine)}
-                      className={`p-2 rounded-xl border transition-all flex items-center gap-2 text-xs font-bold ${
-                        showTodayLine 
-                          ? 'bg-red-50 border-red-200 text-red-600 dark:bg-red-900/20 dark:border-red-800' 
-                          : 'bg-slate-50 border-slate-200 text-slate-500 dark:bg-slate-800 dark:border-slate-700'
-                      }`}
-                      title={showTodayLine ? "Ocultar Hoje" : "Mostrar Hoje"}
-                    >
-                      <Calendar size={14} />
-                      {isMobile ? "" : "Hoje"}
-                    </button>
-                    <select 
-                      value={selectedScheduleProjectId}
-                      onChange={(e) => setSelectedScheduleProjectId(e.target.value)}
-                      className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2 text-sm font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all shadow-sm"
-                    >
-                      <option value="">Selecione um Projeto</option>
-                      {projects.map(p => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
-                    <button 
-                      onClick={() => setIsAddingActivity(true)}
-                      className="bg-axia-primary text-white px-6 py-2 rounded-xl font-bold text-sm hover:shadow-lg hover:shadow-axia-primary/25 transition-all flex items-center gap-2"
-                    >
-                      <Plus size={18} />
-                      Nova Atividade
-                    </button>
-                    <button 
-                      onClick={() => selectedScheduleProjectId && exportScheduleToPDF(selectedScheduleProjectId)}
-                      disabled={!selectedScheduleProjectId}
-                      className="bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 px-6 py-2 rounded-xl font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-all flex items-center gap-2 disabled:opacity-50"
-                    >
-                      <Download size={18} className="text-red-500" />
-                      Exportar PDF
-                    </button>
-                    <button 
-                      onClick={() => selectedScheduleProjectId && exportScheduleToPNG(selectedScheduleProjectId)}
-                      disabled={!selectedScheduleProjectId}
-                      className="bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 px-6 py-2 rounded-xl font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-all flex items-center gap-2 disabled:opacity-50"
-                    >
-                      <Download size={18} className="text-blue-500" />
-                      Exportar PNG
-                    </button>
-                    <button 
-                      onClick={() => setShowHiddenActivities(!showHiddenActivities)}
-                      className={`px-4 py-2 rounded-xl font-bold text-sm transition-all flex items-center gap-2 border ${
-                        showHiddenActivities 
-                          ? 'bg-amber-50 text-amber-600 border-amber-200' 
-                          : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800'
-                      }`}
-                      title={showHiddenActivities ? "Ocultar atividades marcadas como invisíveis" : "Mostrar atividades marcadas como invisíveis"}
-                    >
-                      {showHiddenActivities ? <Eye size={18} /> : <EyeOff size={18} />}
-                      {showHiddenActivities ? 'Ver Ocultas' : 'Escondidas'}
-                    </button>
-                  </div>
-                </div>
-
-                {!selectedScheduleProjectId ? (
-                  <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 p-12 text-center">
-                    <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-400">
-                      <Calendar size={32} />
-                    </div>
-                    <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">Nenhum projeto selecionado</h3>
-                    <p className="text-slate-500 dark:text-slate-400 text-sm max-w-sm mx-auto mb-6">Selecione um projeto acima para visualizar ou criar seu cronograma de atividades.</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                    {(() => {
-                      const project = projects.find(p => p.id === selectedScheduleProjectId);
-                      if (!project) return null;
-                      return (
-                        <div className="lg:col-span-12 space-y-6">
-                          <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 overflow-hidden shadow-sm">
-                        <div className="p-6 border-b border-slate-50 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50 flex items-center justify-between">
-                          <h3 className="font-bold text-slate-800 dark:text-white">Lista de Atividades</h3>
-                          <div className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-4">
-                             <span>Início: {projects.find(p => p.id === selectedScheduleProjectId)?.startDate || '-'}</span>
-                             <span>Fim: {projects.find(p => p.id === selectedScheduleProjectId)?.endDate || '-'}</span>
-                          </div>
-                        </div>
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left border-collapse">
-                            <thead>
-                              <tr className="border-b border-slate-50 dark:border-slate-800">
-                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Atividade</th>
-                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Responsável</th>
-                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Período</th>
-                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Status</th>
-                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Ordem</th>
-                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-right">Ações</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
-                              {activities.filter(a => a.projectId === selectedScheduleProjectId).length === 0 ? (
-                                <tr>
-                                  <td colSpan={6} className="px-6 py-12 text-center text-slate-400 italic">Nenhuma atividade cadastrada.</td>
-                                </tr>
-                              ) : (
-                                (() => {
-                                  const filtered = activities.filter(a => a.projectId === selectedScheduleProjectId);
-                                  const grouped = filtered.reduce((acc, activity) => {
-                                    const cat = activity.category || 'Sem categoria';
-                                    if (!acc[cat]) acc[cat] = [];
-                                    acc[cat].push(activity);
-                                    return acc;
-                                  }, {} as Record<string, ScheduleActivity[]>);
-
-                                  return (Object.entries(grouped) as [string, ScheduleActivity[]][]).map(([category, items]) => (
-                                    <React.Fragment key={category}>
-                                      <tr 
-                                        className="bg-slate-50/50 dark:bg-slate-800/50 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                                        onClick={() => {
-                                          setCollapsedGroups(prev => 
-                                            prev.includes(category) 
-                                              ? prev.filter(c => c !== category) 
-                                              : [...prev, category]
-                                          );
-                                        }}
-                                      >
-                                        <td colSpan={6} className="px-6 py-3">
-                                          <div className="flex items-center gap-2">
-                                            <div className={`p-1 rounded bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 transition-all duration-200 ${collapsedGroups.includes(category) ? '' : 'rotate-180'}`}>
-                                              <ChevronDown size={14} />
-                                            </div>
-                                            <span className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">{category}</span>
-                                            <span className="text-[11px] text-slate-400 font-bold ml-1">({items.length} {items.length === 1 ? 'item' : 'itens'})</span>
-                                          </div>
-                                        </td>
-                                      </tr>
-                                      {!collapsedGroups.includes(category) && items.map(activity => {
-                                        if (activity.isHidden && !showHiddenActivities) return null;
-                                        
-                                        return (
-                                          <tr key={activity.id} className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group ${activity.isHidden ? 'bg-slate-50/50 dark:bg-slate-900/50 italic opacity-60' : ''}`}>
-                                            <td className="px-6 py-4">
-                                              <div className={`font-bold ${activity.isHidden ? 'text-slate-400' : 'text-slate-800 dark:text-white'}`}>
-                                                {activity.name} {activity.isHidden && '(Oculta)'}
-                                              </div>
-                                              <div className="text-[10px] text-slate-400">{activity.category || 'Sem categoria'}</div>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                              <div className="flex items-center gap-2">
-                                                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${activity.isHidden ? 'bg-slate-100 text-slate-400' : 'bg-axia-primary/10 text-axia-primary'}`}>
-                                                  {activity.responsible.charAt(0)}
-                                                </div>
-                                                <span className={`text-sm font-medium ${activity.isHidden ? 'text-slate-400' : 'text-slate-600 dark:text-slate-400'}`}>{activity.responsible}</span>
-                                              </div>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                              <div className={`text-xs font-bold ${activity.isHidden ? 'text-slate-400' : 'text-slate-600 dark:text-slate-300'}`}>
-                                                {formatInputDate(activity.startDate)} - {formatInputDate(activity.endDate)}
-                                              </div>
-                                              {activity.status === 'delayed' && activity.predictedEndDate && (
-                                                <div className="text-[10px] font-black text-red-500 uppercase mt-1">
-                                                  Nova Previsão: {formatInputDate(activity.predictedEndDate)}
-                                                </div>
-                                              )}
-                                              <div className="text-[10px] text-slate-400">
-                                                {Math.ceil((new Date(activity.endDate).getTime() - new Date(activity.startDate).getTime()) / (1000 * 60 * 60 * 24))} dias
-                                              </div>
-                                            </td>
-                                             <td className="px-6 py-4">
-                                              <span className={`px-2 py-1 rounded-md text-[10px] font-black uppercase border ${
-                                                activity.isHidden ? 'bg-slate-50 text-slate-400 border-slate-100 grayscale' :
-                                                activity.status === 'completed' ? 'bg-green-50 text-green-600 border-green-100' :
-                                                activity.status === 'in-progress' ? 'bg-blue-50 text-blue-600 border-blue-100' :
-                                                activity.status === 'delayed' ? 'bg-red-50 text-red-600 border-red-100' :
-                                                activity.status === 'scheduled' ? 'bg-purple-50 text-purple-600 border-purple-100' :
-                                                'bg-slate-50 text-slate-600 border-slate-100'
-                                              }`}>
-                                                {activity.status === 'completed' ? 'Concluído' : 
-                                                 activity.status === 'in-progress' ? 'Em Andamento' : 
-                                                 activity.status === 'delayed' ? 'Atrasada' : 
-                                                 activity.status === 'scheduled' ? 'Programado' : 'Pendente'}
-                                              </span>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                              <div className="flex items-center gap-1">
-                                                <button 
-                                                  onClick={() => handleMoveActivity(activity, 'up')}
-                                                  className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-axia-primary transition-colors"
-                                                  title="Mover para cima"
-                                                >
-                                                  <ChevronUp size={14} />
-                                                </button>
-                                                <button 
-                                                  onClick={() => handleMoveActivity(activity, 'down')}
-                                                  className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-axia-primary transition-colors"
-                                                  title="Mover para baixo"
-                                                >
-                                                  <ChevronDown size={14} />
-                                                </button>
-                                              </div>
-                                            </td>
-                                            <td className="px-6 py-4 text-right">
-                                              <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button 
-                                                  onClick={() => handleToggleActivityVisibility(activity)}
-                                                  className={`p-1.5 transition-colors ${activity.isHidden ? 'text-amber-500 hover:text-amber-600' : 'text-slate-400 hover:text-axia-primary'}`}
-                                                  title={activity.isHidden ? "Mostrar na timeline" : "Ocultar da timeline"}
-                                                >
-                                                  {activity.isHidden ? <Eye size={14} /> : <EyeOff size={14} />}
-                                                </button>
-                                                <button 
-                                                  onClick={() => setEditingActivity(activity)}
-                                                  className="p-1.5 text-slate-400 hover:text-axia-primary transition-colors"
-                                                >
-                                                  <Pencil size={14} />
-                                                </button>
-                                                <button 
-                                                  onClick={() => handleDeleteActivity(activity.id)}
-                                                  className="p-1.5 text-slate-400 hover:text-red-500 transition-colors"
-                                                >
-                                                  <Trash2 size={14} />
-                                                </button>
-                                              </div>
-                                            </td>
-                                          </tr>
-                                        );
-                                      })}
-                                    </React.Fragment>
-                                  ));
-                                })()
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-
-                      {/* Visual Timeline (Basic Gantt) */}
-                    <div ref={timelineRef} id="timeline-container" className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 p-8 shadow-sm overflow-hidden">
-                        <div className="flex items-center justify-between mb-8">
-                          <div className="flex items-center gap-3">
-                                          <h3 className="text-xl font-black text-slate-800 dark:text-white tracking-tight">Cronograma em Barras</h3>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{project.name}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded bg-axia-primary" />
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Execução</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded bg-green-500" />
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Concluído</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded bg-purple-500" />
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Programado</span>
-                    </div>
-                  </div>
-
-                {/* Professional Gantt Layout */}
-                <div className="relative border border-slate-100 dark:border-slate-800 rounded-xl overflow-hidden bg-slate-50/30 dark:bg-slate-800/20">
-                  <div className="flex custom-scrollbar overflow-x-auto">
-                    {/* Y-AXIS Labels - FIXED POSITION */}
-                    <div className="w-[320px] flex-shrink-0 border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 sticky left-0 z-20">
-                      <div className="h-12 border-b border-slate-200 dark:border-slate-700 flex items-center justify-center">
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Atividades</span>
-                      </div>
-                      {activities.filter(a => a.projectId === selectedScheduleProjectId && (showHiddenActivities || !a.isHidden)).map((activity) => (
-                        <div key={activity.id} className="h-14 border-b border-slate-100 dark:border-slate-800 flex items-center justify-end px-4">
-                          <span className={`text-[10px] font-bold text-right leading-[1.1] ${activity.isHidden ? 'text-slate-300 italic' : 'text-slate-600 dark:text-slate-400'}`}>
-                            {activity.name} {activity.isHidden && '(Oculta)'}
-                          </span>
-                        </div>
-                      ))}
-                      {/* Bottom Axis Label */}
-                      <div className="h-12 border-t border-slate-200 dark:border-slate-700 flex items-center justify-center bg-slate-50 dark:bg-slate-800/50">
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Data</span>
-                      </div>
-                    </div>
-
-                    {/* TIMELINE AREA - SCROLLABLE */}
-                    <div className="flex-grow relative bg-white dark:bg-slate-900" style={{ minWidth: scheduleTimelineData ? scheduleTimelineData.numMonths * MONTH_WIDTH : '100%' }}>
-                      {/* X-AXIS Grid (Years/Months) */}
-                      <div className="h-12 border-b border-slate-200 dark:border-slate-700 flex relative overflow-hidden">
-                        {scheduleTimelineData?.years.map((y, i) => (
-                          <div 
-                            key={`year-${y.year}`}
-                            className={`absolute top-0 bottom-0 border-r border-slate-200 dark:border-slate-700 flex items-start pt-1 justify-center ${i % 2 === 0 ? 'bg-slate-50/10' : 'bg-slate-100/10'}`}
-                            style={{ 
-                              left: scheduleTimelineData.years.slice(0, i).reduce((acc, curr) => acc + curr.monthsCount * MONTH_WIDTH, 0),
-                              width: y.monthsCount * MONTH_WIDTH
-                            }}
-                          >
-                            <span className="text-[9px] font-black text-slate-300 dark:text-slate-600 uppercase tracking-tighter">
-                              {y.year}
-                            </span>
-                          </div>
-                        ))}
-                        {scheduleTimelineData && Array.from({ length: scheduleTimelineData.numMonths }).map((_, i) => {
-                           const monthDate = new Date(Math.floor((scheduleTimelineData.startAbs + i) / 12), (scheduleTimelineData.startAbs + i) % 12, 1);
-                           return (
-                            <div 
-                              key={i} 
-                              className="absolute border-r border-slate-100 dark:border-slate-800 flex items-end justify-center pb-2 h-full"
-                              style={{ 
-                                left: i * MONTH_WIDTH,
-                                width: MONTH_WIDTH
-                              }}
-                            >
-                              <span className="text-[9px] font-black text-slate-400 uppercase">
-                                {monthDate.toLocaleDateString('pt-BR', { month: 'short' })}
-                              </span>
-                            </div>
-                           );
-                        })}
-                      </div>
-
-                      {/* Rows and Bars */}
-                      <div className="relative">
-                        {/* Horizontal Grid Lines */}
-                        {activities.filter(a => a.projectId === selectedScheduleProjectId && (showHiddenActivities || !a.isHidden)).map((activity) => (
-                          <div key={`grid-${activity.id}`} className={`h-14 border-b border-slate-50 dark:border-slate-800 w-full ${activity.isHidden ? 'bg-slate-50/30' : ''}`} />
-                        ))}
-
-                        {/* Vertical "Hoje" Line */}
-                        {showTodayLine && scheduleTimelineData && scheduleTimelineData.exactTodayAbs >= scheduleTimelineData.startAbs && scheduleTimelineData.exactTodayAbs <= (scheduleTimelineData.endAbs + 1) && (
-                          <div 
-                            className="absolute top-0 bottom-0 border-l-2 border-dashed border-red-500 z-30 pointer-events-none"
-                            style={{ left: (scheduleTimelineData.exactTodayAbs - scheduleTimelineData.startAbs) * MONTH_WIDTH }}
-                          >
-                            <div 
-                              onClick={() => setShowTodayLine(false)}
-                              className="absolute -top-7 -left-1/2 bg-red-500 text-white text-[8px] px-2 py-0.5 rounded-full font-black whitespace-nowrap shadow-sm cursor-pointer pointer-events-auto hover:scale-110 active:scale-95 transition-transform flex items-center gap-1.5"
-                              title="Clique para ocultar"
-                            >
-                              <Calendar className="w-2.5 h-2.5" />
-                              HOJE ({new Date().toLocaleDateString('pt-BR')})
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Bars Overlay */}
-                        <div className="absolute top-0 left-0 right-0 bottom-0 pointer-events-none">
-                          {activities.filter(a => a.projectId === selectedScheduleProjectId && (showHiddenActivities || !a.isHidden)).map((activity) => {
-                             if (!scheduleTimelineData) return null;
-                             
-                             const start = new Date(activity.startDate);
-                             const end = new Date(activity.endDate);
-                             
-                             const absStart = start.getFullYear() * 12 + start.getMonth() + (start.getDate() - 1) / 30;
-                             const absEnd = end.getFullYear() * 12 + end.getMonth() + (end.getDate()) / 30;
-                             
-                             const left = (absStart - scheduleTimelineData.startAbs) * MONTH_WIDTH;
-                             const width = (absEnd - absStart) * MONTH_WIDTH;
-
-                             const hasDelay = activity.status === 'delayed' && activity.predictedEndDate;
-                             const predictedEnd = hasDelay ? new Date(activity.predictedEndDate!) : end;
-                             const absPredictedEnd = predictedEnd.getFullYear() * 12 + predictedEnd.getMonth() + (predictedEnd.getDate()) / 30;
-                             const delayedWidth = Math.max((absPredictedEnd - absEnd) * MONTH_WIDTH, 0);
-
-                             return (
-                               <div key={`bar-group-${activity.id}`} className="h-14 relative px-0 pointer-events-none">
-                                {/* Main Bar */}
-                                <motion.div 
-                                  initial={{ width: 0, opacity: 0 }}
-                                  animate={{ width: `${Math.max(width, 2)}px`, opacity: activity.isHidden ? 0.4 : 1 }}
-                                  className={`absolute h-8 top-3 shadow-sm flex items-center justify-center px-3 cursor-pointer pointer-events-auto transition-all hover:brightness-110 z-20 ${
-                                    activity.isHidden ? 'bg-slate-300 dark:bg-slate-700 grayscale italic border border-slate-400/30' :
-                                    activity.status === 'completed' ? 'bg-green-500 text-white rounded' : 
-                                    activity.status === 'scheduled' ? 'bg-purple-500 text-white rounded' :
-                                    'bg-axia-primary text-white rounded-l ' + (!hasDelay ? 'rounded-r' : '')
-                                  }`}
-                                  style={{ left: `${left}px` }}
-                                  onClick={() => {
-                                    setEditingActivity(activity);
-                                    setIsAddingActivity(true);
-                                  }}
-                                >
-                                  <span className={`text-[10px] font-black uppercase truncate drop-shadow-sm filter ${activity.isHidden ? 'text-slate-500' : ''}`}>
-                                    {activity.name} {activity.isHidden && '(Oculta)'}
-                                  </span>
-                                  {activity.status === 'completed' && !activity.isHidden && <CheckCircle2 size={12} className="shrink-0 ml-1" />}
-                                </motion.div>
-
-                                {/* Delayed (Hatched) Segment */}
-                                {hasDelay && delayedWidth > 0 && (
-                                  <motion.div
-                                    initial={{ width: 0, opacity: 0 }}
-                                    animate={{ width: `${delayedWidth}px`, opacity: activity.isHidden ? 0.4 : 1 }}
-                                    className={`absolute h-8 top-3 bg-hatched-red border-t border-b border-r border-red-600 rounded-r shadow-sm z-10 cursor-pointer pointer-events-auto ${activity.isHidden ? 'grayscale opacity-50' : ''}`}
-                                    style={{ left: `${left + width}px` }}
-                                    onClick={() => {
-                                      setEditingActivity(activity);
-                                      setIsAddingActivity(true);
-                                    }}
-                                  >
-                                    <span className="absolute -right-16 text-[8px] font-bold text-slate-500 dark:text-slate-400">
-                                      {formatInputDate(activity.predictedEndDate!)}
-                                    </span>
-                                  </motion.div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-              )}
-            </motion.div>
-          )}
 
             {activeTab === 'measurements' && (
               <motion.div 
@@ -7873,13 +7697,7 @@ export default function App() {
             <HardHat size={20} />
             <span className="text-[10px] font-bold">Obras</span>
           </button>
-          <button 
-            onClick={() => setActiveTab('schedule')}
-            className={`flex flex-col items-center gap-1 flex-1 transition-all ${activeTab === 'schedule' ? 'text-axia-primary scale-110' : 'text-slate-400'}`}
-          >
-            <Calendar size={20} />
-            <span className="text-[10px] font-bold">Agenda</span>
-          </button>
+
           <button 
             onClick={() => setActiveTab('measurements')}
             className={`flex flex-col items-center gap-1 flex-1 transition-all ${activeTab === 'measurements' ? 'text-axia-primary scale-110' : 'text-slate-400'}`}
