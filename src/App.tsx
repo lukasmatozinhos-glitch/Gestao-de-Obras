@@ -1707,7 +1707,9 @@ export default function App() {
               logoTitle.style.fontSize = '48px';
               logoTitle.style.fontWeight = '900';
               logoTitle.style.margin = '0';
-              logoTitle.style.letterSpacing = '-2px';
+              logoTitle.style.fontFamily = 'Arial, Helvetica, sans-serif';
+              logoTitle.style.letterSpacing = 'normal';
+              logoTitle.style.wordSpacing = 'normal';
               
               const logoSub = clonedDoc.createElement('p');
               logoSub.innerText = 'ENERGIA';
@@ -1715,7 +1717,9 @@ export default function App() {
               logoSub.style.fontSize = '12px';
               logoSub.style.fontWeight = 'bold';
               logoSub.style.margin = '-5px 0 0 0';
-              logoSub.style.letterSpacing = '5px';
+              logoSub.style.fontFamily = 'Arial, Helvetica, sans-serif';
+              logoSub.style.letterSpacing = 'normal';
+              logoSub.style.wordSpacing = 'normal';
               
               logoContainer.appendChild(logoTitle);
               logoContainer.appendChild(logoSub);
@@ -1729,12 +1733,18 @@ export default function App() {
               docTitle.style.fontSize = '32px';
               docTitle.style.fontWeight = 'bold';
               docTitle.style.margin = '0';
+              docTitle.style.fontFamily = 'Arial, Helvetica, sans-serif';
+              docTitle.style.letterSpacing = 'normal';
+              docTitle.style.wordSpacing = 'normal';
               
               const projectTitle = clonedDoc.createElement('p');
               projectTitle.innerText = `PROJETO: ${project.name.toUpperCase()}`;
               projectTitle.style.color = '#64748b';
               projectTitle.style.fontSize = '16px';
               projectTitle.style.margin = '5px 0 0 0';
+              projectTitle.style.fontFamily = 'Arial, Helvetica, sans-serif';
+              projectTitle.style.letterSpacing = 'normal';
+              projectTitle.style.wordSpacing = 'normal';
               
               infoContainer.appendChild(docTitle);
               infoContainer.appendChild(projectTitle);
@@ -1929,7 +1939,9 @@ export default function App() {
             logoTitle.style.fontSize = '48px';
             logoTitle.style.fontWeight = '900';
             logoTitle.style.margin = '0';
-            logoTitle.style.letterSpacing = '-2px';
+            logoTitle.style.fontFamily = 'Arial, Helvetica, sans-serif';
+            logoTitle.style.letterSpacing = 'normal';
+            logoTitle.style.wordSpacing = 'normal';
             
             const logoSub = clonedDoc.createElement('p');
             logoSub.innerText = 'ENERGIA';
@@ -1937,7 +1949,9 @@ export default function App() {
             logoSub.style.fontSize = '12px';
             logoSub.style.fontWeight = 'bold';
             logoSub.style.margin = '-5px 0 0 0';
-            logoSub.style.letterSpacing = '5px';
+            logoSub.style.fontFamily = 'Arial, Helvetica, sans-serif';
+            logoSub.style.letterSpacing = 'normal';
+            logoSub.style.wordSpacing = 'normal';
             
             logoContainer.appendChild(logoTitle);
             logoContainer.appendChild(logoSub);
@@ -1951,12 +1965,18 @@ export default function App() {
             docTitle.style.fontSize = '32px';
             docTitle.style.fontWeight = 'bold';
             docTitle.style.margin = '0';
+            docTitle.style.fontFamily = 'Arial, Helvetica, sans-serif';
+            docTitle.style.letterSpacing = 'normal';
+            docTitle.style.wordSpacing = 'normal';
             
             const projectTitleText = clonedDoc.createElement('p');
             projectTitleText.innerText = `PROJETO: ${(projects.find(p => p.id === projectId)?.name || '').toUpperCase()}`;
             projectTitleText.style.color = '#64748b';
             projectTitleText.style.fontSize = '16px';
             projectTitleText.style.margin = '5px 0 0 0';
+            projectTitleText.style.fontFamily = 'Arial, Helvetica, sans-serif';
+            projectTitleText.style.letterSpacing = 'normal';
+            projectTitleText.style.wordSpacing = 'normal';
             
             infoContainer.appendChild(docTitle);
             infoContainer.appendChild(projectTitleText);
@@ -2165,7 +2185,9 @@ export default function App() {
               logoTitle.style.fontSize = '48px';
               logoTitle.style.fontWeight = '900';
               logoTitle.style.margin = '0';
-              logoTitle.style.letterSpacing = '-2px';
+              logoTitle.style.fontFamily = 'Arial, Helvetica, sans-serif';
+              logoTitle.style.letterSpacing = 'normal';
+              logoTitle.style.wordSpacing = 'normal';
               
               const logoSub = clonedDoc.createElement('p');
               logoSub.innerText = 'ENERGIA';
@@ -2173,7 +2195,9 @@ export default function App() {
               logoSub.style.fontSize = '12px';
               logoSub.style.fontWeight = 'bold';
               logoSub.style.margin = '-5px 0 0 0';
-              logoSub.style.letterSpacing = '5px';
+              logoSub.style.fontFamily = 'Arial, Helvetica, sans-serif';
+              logoSub.style.letterSpacing = 'normal';
+              logoSub.style.wordSpacing = 'normal';
               
               logoContainer.appendChild(logoTitle);
               logoContainer.appendChild(logoSub);
@@ -2187,12 +2211,18 @@ export default function App() {
               docTitle.style.fontSize = '32px';
               docTitle.style.fontWeight = 'bold';
               docTitle.style.margin = '0';
+              docTitle.style.fontFamily = 'Arial, Helvetica, sans-serif';
+              docTitle.style.letterSpacing = 'normal';
+              docTitle.style.wordSpacing = 'normal';
               
               const projectTitle = clonedDoc.createElement('p');
               projectTitle.innerText = `PROJETO: ${project.name.toUpperCase()}`;
               projectTitle.style.color = '#64748b';
               projectTitle.style.fontSize = '16px';
               projectTitle.style.margin = '5px 0 0 0';
+              projectTitle.style.fontFamily = 'Arial, Helvetica, sans-serif';
+              projectTitle.style.letterSpacing = 'normal';
+              projectTitle.style.wordSpacing = 'normal';
               
               infoContainer.appendChild(docTitle);
               infoContainer.appendChild(projectTitle);
@@ -2388,7 +2418,9 @@ export default function App() {
             logoTitle.style.fontSize = '48px';
             logoTitle.style.fontWeight = '900';
             logoTitle.style.margin = '0';
-            logoTitle.style.letterSpacing = '-2px';
+            logoTitle.style.fontFamily = 'Arial, Helvetica, sans-serif';
+            logoTitle.style.letterSpacing = 'normal';
+            logoTitle.style.wordSpacing = 'normal';
             
             const logoSub = clonedDoc.createElement('p');
             logoSub.innerText = 'ENERGIA';
@@ -2396,7 +2428,9 @@ export default function App() {
             logoSub.style.fontSize = '12px';
             logoSub.style.fontWeight = 'bold';
             logoSub.style.margin = '-5px 0 0 0';
-            logoSub.style.letterSpacing = '5px';
+            logoSub.style.fontFamily = 'Arial, Helvetica, sans-serif';
+            logoSub.style.letterSpacing = 'normal';
+            logoSub.style.wordSpacing = 'normal';
             
             logoContainer.appendChild(logoTitle);
             logoContainer.appendChild(logoSub);
@@ -2410,12 +2444,18 @@ export default function App() {
             docTitle.style.fontSize = '32px';
             docTitle.style.fontWeight = 'bold';
             docTitle.style.margin = '0';
+            docTitle.style.fontFamily = 'Arial, Helvetica, sans-serif';
+            docTitle.style.letterSpacing = 'normal';
+            docTitle.style.wordSpacing = 'normal';
             
             const projectTitleText = clonedDoc.createElement('p');
             projectTitleText.innerText = `PROJETO: ${(project.name || '').toUpperCase()}`;
             projectTitleText.style.color = '#64748b';
             projectTitleText.style.fontSize = '16px';
             projectTitleText.style.margin = '5px 0 0 0';
+            projectTitleText.style.fontFamily = 'Arial, Helvetica, sans-serif';
+            projectTitleText.style.letterSpacing = 'normal';
+            projectTitleText.style.wordSpacing = 'normal';
             
             infoContainer.appendChild(docTitle);
             infoContainer.appendChild(projectTitleText);
@@ -6426,7 +6466,7 @@ export default function App() {
                             <TrendingUp size={20} />
                           </div>
                           <div>
-                            <h3 className="text-xl font-black text-slate-800 dark:text-white tracking-tight">Cronograma de Planejamento</h3>
+                            <h3 className="text-xl font-black text-slate-800 dark:text-white tracking-tight">CRONOGRAMA EXECUTIVO DE PLANEJAMENTO/EXECUÇÃO</h3>
                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                               {projects.find(p => p.id === selectedPlanningProjectId)?.name}
                             </p>
@@ -6574,7 +6614,7 @@ export default function App() {
                                     <div 
                                       className="flex items-center justify-center border-b border-slate-200 dark:border-slate-700 text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-100/50 dark:bg-slate-900/50 w-full"
                                     >
-                                      PRAZO RELATIVO DE EXECUÇÃO
+                                      CRONOGRAMA EXECUTIVO DE PLANEJAMENTO/EXECUÇÃO
                                     </div>
                                   ) : (
                                     planningTimelineData?.years.map((y, i) => (
