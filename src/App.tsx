@@ -3249,6 +3249,25 @@ export default function App() {
     }
   };
 
+  const handleToggleMeasurementStatus = async (measurement: Measurement) => {
+    try {
+      const measurementRef = doc(db, 'measurements', measurement.id);
+      let nextStatus: Measurement['status'] = 'approved';
+      if (measurement.status === 'pending') {
+        nextStatus = 'approved';
+      } else if (measurement.status === 'approved') {
+        nextStatus = 'paid';
+      } else if (measurement.status === 'paid') {
+        nextStatus = 'pending';
+      }
+      
+      await updateDoc(measurementRef, { status: nextStatus });
+      showNotification('Status da medição atualizado!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `measurements/${measurement.id}`);
+    }
+  };
+
   const handleAddBulletin = async (e: React.FormEvent) => {
     e.preventDefault();
     const project = projects.find(p => p.id === newBulletin.projectId);
@@ -4469,13 +4488,7 @@ export default function App() {
             onClick={() => { setActiveTab('travel-control'); if(isMobile) setIsSidebarOpen(false); }}
             collapsed={!isSidebarOpen && !isMobile}
           />
-          <NavItem 
-            icon={<BarChart3 size={20} />} 
-            label="Relatórios" 
-            active={activeTab === 'reports'} 
-            onClick={() => { setActiveTab('reports'); if(isMobile) setIsSidebarOpen(false); }}
-            collapsed={!isSidebarOpen && !isMobile}
-          />
+
           <NavItem 
             icon={<History size={20} />} 
             label="Atualizações" 
@@ -5871,12 +5884,16 @@ export default function App() {
                                         <p className="text-xs font-bold text-axia-primary">
                                           {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(measurement.value || 0)}
                                         </p>
-                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md uppercase ${
-                                          measurement.status === 'paid' ? 'bg-green-100 text-green-600' : 
-                                          measurement.status === 'approved' ? 'bg-blue-100 text-blue-600' : 
-                                          'bg-amber-100 text-amber-600'
-                                        }`}>
-                                          {measurement.status === 'paid' ? 'Pago' : measurement.status === 'approved' ? 'Aprovado' : 'Pendente'}
+                                        <span 
+                                          onClick={() => handleToggleMeasurementStatus(measurement)}
+                                          title="Clique para alterar o status"
+                                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md uppercase cursor-pointer hover:scale-105 active:scale-95 transition-all select-none ${
+                                            measurement.status === 'paid' ? 'bg-green-100 text-green-600' : 
+                                            measurement.status === 'approved' ? 'bg-blue-100 text-blue-600' : 
+                                            'bg-amber-100 text-amber-600'
+                                          }`}
+                                        >
+                                          {measurement.status === 'paid' ? 'Pago' : measurement.status === 'approved' ? 'Realizado' : 'Pendente'}
                                         </span>
                                       </div>
                                     </div>
@@ -7023,8 +7040,18 @@ export default function App() {
                                 <div>
                                   <div className="flex items-center gap-2 mb-1">
                                     <h4 className="font-bold text-slate-900 dark:text-white">{measurement.projectName}</h4>
-                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-900/30">
-                                      {measurement.status === 'paid' ? 'Pago' : measurement.status === 'approved' ? 'Aprovado' : 'Pendente'}
+                                    <span 
+                                      onClick={() => handleToggleMeasurementStatus(measurement)}
+                                      title="Clique para alterar o status"
+                                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold transition-all duration-200 cursor-pointer hover:scale-105 active:scale-95 select-none ${
+                                        measurement.status === 'paid' 
+                                          ? 'bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-900/30' 
+                                          : measurement.status === 'approved'
+                                          ? 'bg-blue-100 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-900/30'
+                                          : 'bg-amber-100 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/30'
+                                      }`}
+                                    >
+                                      {measurement.status === 'paid' ? 'Pago' : measurement.status === 'approved' ? 'Realizado' : 'Pendente'}
                                     </span>
                                   </div>
                                   <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
@@ -7650,162 +7677,6 @@ export default function App() {
                     </div>
                   );
                 })()}
-              </motion.div>
-            )}
-
-            {activeTab === 'reports' && (
-              <motion.div 
-                key="reports"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                className="space-y-8"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-3xl font-display font-bold text-slate-900 dark:text-white">Relatórios Semanais</h2>
-                    <p className="text-slate-500 dark:text-slate-400">Gerencie e anexe os relatórios de acompanhamento das obras.</p>
-                  </div>
-                  <div className="flex gap-3">
-                    <button 
-                      onClick={() => showNotification('Exportando todos os relatórios para PDF...')}
-                      className="bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 px-4 py-2 rounded-lg font-semibold flex items-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-                    >
-                      <Download size={18} />
-                      Exportar Tudo
-                    </button>
-                    <button 
-                      onClick={() => {
-                        const element = document.getElementById('upload-area');
-                        element?.scrollIntoView({ behavior: 'smooth' });
-                        showNotification('Preencha os dados abaixo para o novo relatório.');
-                      }}
-                      className="bg-axia-primary text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2 hover:bg-axia-primary/90 transition-colors shadow-lg shadow-axia-primary/20"
-                    >
-                      <FilePlus size={18} />
-                      Novo Relatório
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                  {/* Upload Area */}
-                  <div className="lg:col-span-1 space-y-6" id="upload-area">
-                    <div 
-                      onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-                      onDragLeave={() => setIsDragging(false)}
-                      onDrop={(e) => { e.preventDefault(); setIsDragging(false); }}
-                      className={`
-                        border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center text-center transition-all cursor-pointer
-                        ${isDragging 
-                          ? 'border-axia-primary bg-axia-primary/5 scale-[1.02]' 
-                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-axia-primary/50 hover:bg-slate-50 dark:hover:bg-slate-800/50'
-                        }
-                      `}
-                    >
-                      <div className="w-16 h-16 bg-axia-primary/10 rounded-full flex items-center justify-center mb-4 text-axia-primary">
-                        <Upload size={32} />
-                      </div>
-                      <h4 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Anexar Relatório Semanal</h4>
-                      <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">Arraste seu arquivo PDF aqui ou clique para selecionar do computador.</p>
-                      <div className="w-full space-y-4 text-left">
-                        <div>
-                          <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Projeto</label>
-                          <select 
-                            value={selectedProject}
-                            onChange={(e) => setSelectedProject(e.target.value)}
-                            className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20 dark:text-white"
-                          >
-                            <option value="">Selecione a obra...</option>
-                            {projects.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Semana de Referência</label>
-                          <input 
-                            type="date" 
-                            value={selectedDate}
-                            onChange={(e) => setSelectedDate(e.target.value)}
-                            className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20 dark:text-white" 
-                          />
-                        </div>
-                        <button 
-                          onClick={handleUpload}
-                          disabled={isUploadingReport}
-                          className="w-full bg-axia-primary text-white py-2.5 rounded-xl font-bold hover:bg-axia-primary/90 transition-all flex items-center justify-center gap-2 disabled:opacity-70"
-                        >
-                          {isUploadingReport ? (
-                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                          ) : (
-                            <Upload size={18} />
-                          )}
-                          {isUploadingReport ? 'Enviando...' : 'Fazer Upload'}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="bg-axia-secondary/10 border border-axia-secondary/20 rounded-2xl p-6">
-                      <div className="flex items-center gap-3 mb-3 text-axia-secondary">
-                        <AlertCircle size={20} />
-                        <h4 className="font-bold">Lembrete</h4>
-                      </div>
-                      <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
-                        Os relatórios semanais devem ser enviados até toda sexta-feira às 18h para aprovação da diretoria técnica.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Reports List */}
-                  <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-                    <div className="p-6 border-b border-slate-100 dark:border-slate-800">
-                      <h3 className="text-lg font-bold dark:text-white">Histórico de Envios</h3>
-                    </div>
-                    <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                      {reports.map((report) => (
-                        <div key={report.id} className="p-6 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors flex items-center gap-4">
-                          <div className="w-12 h-12 bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400 rounded-xl flex items-center justify-center flex-shrink-0">
-                            <FileText size={24} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <h4 className="font-bold text-slate-900 dark:text-white truncate">{report.fileName}</h4>
-                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${getReportStatusColor(report.status)}`}>
-                                {report.status === 'approved' ? 'Aprovado' : report.status === 'submitted' ? 'Em Análise' : 'Rascunho'}
-                              </span>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
-                              <span className="flex items-center gap-1 font-medium text-axia-primary">
-                                <HardHat size={12} /> {report.projectName}
-                              </span>
-                              <span className="flex items-center gap-1">
-                                <Calendar size={12} /> Final da Semana: {report.weekEnding}
-                              </span>
-                              <span className="flex items-center gap-1">
-                                <TrendingUp size={12} /> {report.fileSize}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <button 
-                              onClick={() => handleDownload(report.fileName)}
-                              className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-axia-primary transition-colors" 
-                              title="Download"
-                            >
-                              <Download size={18} />
-                            </button>
-                            <button 
-                              onClick={() => handleDelete(report.id)}
-                              className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-red-500 transition-colors" 
-                              title="Excluir"
-                            >
-                              <Trash2 size={18} />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
               </motion.div>
             )}
 
