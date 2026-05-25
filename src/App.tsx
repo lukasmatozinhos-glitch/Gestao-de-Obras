@@ -255,18 +255,18 @@ export default function App() {
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
-  const [reports, setReports] = useState<WeeklyReport[]>([]);
+  const [rawReports, setReports] = useState<WeeklyReport[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [measurements, setMeasurements] = useState<Measurement[]>([]);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [statusUpdates, setStatusUpdates] = useState<StatusUpdate[]>([]);
-  const [photoReports, setPhotoReports] = useState<PhotoReportItem[]>([]);
-  const [measurementBulletins, setMeasurementBulletins] = useState<MeasurementBulletin[]>([]);
-  const [addendums, setAddendums] = useState<ProjectAddendum[]>([]);
+  const [rawMeasurements, setMeasurements] = useState<Measurement[]>([]);
+  const [rawAttachments, setAttachments] = useState<Attachment[]>([]);
+  const [rawStatusUpdates, setStatusUpdates] = useState<StatusUpdate[]>([]);
+  const [rawPhotoReports, setPhotoReports] = useState<PhotoReportItem[]>([]);
+  const [rawMeasurementBulletins, setMeasurementBulletins] = useState<MeasurementBulletin[]>([]);
+  const [rawAddendums, setAddendums] = useState<ProjectAddendum[]>([]);
   const [activities, setActivities] = useState<ScheduleActivity[]>([]);
   const [planningActivities, setPlanningActivities] = useState<PlanningActivity[]>([]);
 
-  const [travels, setTravels] = useState<Travel[]>([]);
+  const [rawTravels, setTravels] = useState<Travel[]>([]);
   const [isAddingTravel, setIsAddingTravel] = useState(false);
   const [editingTravel, setEditingTravel] = useState<Travel | null>(null);
   const [travelToDelete, setTravelToDelete] = useState<Travel | null>(null);
@@ -282,7 +282,56 @@ export default function App() {
   const [searchTravelQuery, setSearchTravelQuery] = useState('');
   const [filterInspector, setFilterInspector] = useState('');
 
-  const [consumptionRCRequests, setConsumptionRCRequests] = useState<ConsumptionRCRequest[]>([]);
+  const [rawConsumptionRCRequests, setConsumptionRCRequests] = useState<ConsumptionRCRequest[]>([]);
+
+  const isManagerGlobal = useMemo(() => {
+    return currentUser?.accessLevel === 'Administrador de Sistema' || currentUser?.accessLevel === 'Gestor';
+  }, [currentUser]);
+
+  const reports = useMemo(() => {
+    if (isManagerGlobal) return rawReports;
+    return rawReports.filter(r => r.uploadedBy === currentUser?.id || projects.some(p => p.name === r.projectName));
+  }, [rawReports, currentUser, isManagerGlobal, projects]);
+
+  const measurements = useMemo(() => {
+    if (isManagerGlobal) return rawMeasurements;
+    return rawMeasurements.filter(m => m.createdBy === currentUser?.id || projects.some(p => p.id === m.projectId));
+  }, [rawMeasurements, currentUser, isManagerGlobal, projects]);
+
+  const attachments = useMemo(() => {
+    if (isManagerGlobal) return rawAttachments;
+    return rawAttachments.filter(att => projects.some(p => p.id === att.projectId));
+  }, [rawAttachments, isManagerGlobal, projects]);
+
+  const statusUpdates = useMemo(() => {
+    if (isManagerGlobal) return rawStatusUpdates;
+    return rawStatusUpdates.filter(su => su.createdBy === currentUser?.id || projects.some(p => p.id === su.projectId));
+  }, [rawStatusUpdates, currentUser, isManagerGlobal, projects]);
+
+  const photoReports = useMemo(() => {
+    if (isManagerGlobal) return rawPhotoReports;
+    return rawPhotoReports.filter(pr => projects.some(p => p.id === pr.projectId));
+  }, [rawPhotoReports, isManagerGlobal, projects]);
+
+  const measurementBulletins = useMemo(() => {
+    if (isManagerGlobal) return rawMeasurementBulletins;
+    return rawMeasurementBulletins.filter(b => b.createdBy === currentUser?.id || projects.some(p => p.id === b.projectId));
+  }, [rawMeasurementBulletins, currentUser, isManagerGlobal, projects]);
+
+  const addendums = useMemo(() => {
+    if (isManagerGlobal) return rawAddendums;
+    return rawAddendums.filter(a => a.createdBy === currentUser?.id || projects.some(p => p.id === a.projectId));
+  }, [rawAddendums, currentUser, isManagerGlobal, projects]);
+
+  const travels = useMemo(() => {
+    if (isManagerGlobal) return rawTravels;
+    return rawTravels.filter(t => t.createdBy === currentUser?.id);
+  }, [rawTravels, currentUser, isManagerGlobal]);
+
+  const consumptionRCRequests = useMemo(() => {
+    if (isManagerGlobal) return rawConsumptionRCRequests;
+    return rawConsumptionRCRequests.filter(rc => rc.createdBy === currentUser?.id || projects.some(p => p.id === rc.projectId));
+  }, [rawConsumptionRCRequests, currentUser, isManagerGlobal, projects]);
   const [isAddingRCRequest, setIsAddingRCRequest] = useState(false);
   const [isUpdatingRCStatus, setIsUpdatingRCStatus] = useState<string | null>(null);
   const [tempRCNumber, setTempRCNumber] = useState('');
@@ -617,7 +666,9 @@ export default function App() {
         rcNumber: newAddendum.rcNumber,
         value: parsedValue,
         isApproved: newAddendum.isApproved,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        createdBy: currentUser?.id || '',
+        creatorName: currentUser?.name || 'Sistema'
       };
 
       await setDoc(doc(db, 'projectAddendums', addendumId), addendum);
@@ -1025,6 +1076,8 @@ export default function App() {
         startDate: newTravel.startDate,
         endDate: newTravel.endDate,
         monthYear,
+        createdBy: currentUser?.id || '',
+        creatorName: currentUser?.name || 'Sistema'
       };
 
       await setDoc(travelRef, travelData);
@@ -3199,7 +3252,9 @@ export default function App() {
           date: newMeasurement.date,
           value: Number(newMeasurement.value),
           description: newMeasurement.description,
-          status: 'pending'
+          status: 'pending',
+          createdBy: currentUser?.id || '',
+          creatorName: currentUser?.name || 'Sistema'
         };
 
         await setDoc(doc(db, 'measurements', measurementId), measurement);
@@ -3287,7 +3342,9 @@ export default function App() {
         supplier: newBulletin.supplier,
         value: Number(newBulletin.value),
         date: newBulletin.date,
-        status: 'pending'
+        status: 'pending',
+        createdBy: currentUser?.id || '',
+        creatorName: currentUser?.name || 'Sistema'
       };
 
       await setDoc(doc(db, 'measurementBulletins', bulletinId), bulletin);
@@ -4141,7 +4198,9 @@ export default function App() {
         projectId: newStatusUpdate.projectId,
         date: new Date().toLocaleString('pt-BR'),
         message: newStatusUpdate.message,
-        author: currentUser.name
+        author: currentUser.name,
+        createdBy: currentUser?.id || '',
+        creatorName: currentUser?.name || ''
       };
 
       await setDoc(doc(db, 'statusUpdates', updateId), update);

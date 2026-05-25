@@ -7,6 +7,8 @@ export interface ProjectAddendum {
   value: number;
   isApproved: boolean;
   createdAt: string;
+  createdBy?: string;
+  creatorName?: string;
 }
 
 export interface ScheduleActivity {
@@ -84,6 +86,8 @@ export interface Measurement {
   value: number;
   description: string;
   status: 'pending' | 'approved' | 'paid';
+  createdBy?: string;
+  creatorName?: string;
 }
 
 export interface UserProfile {
@@ -114,6 +118,8 @@ export interface StatusUpdate {
   date: string;
   message: string;
   author: string;
+  createdBy?: string;
+  creatorName?: string;
 }
 
 export interface MeasurementBulletin {
@@ -129,6 +135,8 @@ export interface MeasurementBulletin {
   date: string;
   status: 'pending' | 'approved' | 'paid';
   archived?: boolean;
+  createdBy?: string;
+  creatorName?: string;
 }
 
 export interface PlanningActivity {
@@ -185,5 +193,7 @@ export interface Travel {
   endDate: string;
   monthYear: string; // "YYYY-MM" format for easy monthly grouping
   createdAt?: any;
+  createdBy?: string;
+  creatorName?: string;
 }
 
