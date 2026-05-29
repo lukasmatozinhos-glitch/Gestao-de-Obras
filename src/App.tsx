@@ -101,7 +101,7 @@ import {
 } from 'recharts';
 import { MOCK_PROJECTS, MOCK_RESOURCES, MOCK_REPORTS, MOCK_MEASUREMENTS, MOCK_ATTACHMENTS, MOCK_STATUS_UPDATES } from './constants';
 import html2canvas from 'html2canvas';
-import { Project, WeeklyReport, Measurement, UserProfile, Attachment, StatusUpdate, PhotoReportItem, MeasurementBulletin, ProjectAddendum, ScheduleActivity, PlanningActivity, ConsumptionRCRequest, RCHistoryEntry, Travel, FieldInspector, DailyWorkReport } from './types';
+import { Project, WeeklyReport, Measurement, UserProfile, Attachment, StatusUpdate, PhotoReportItem, MeasurementBulletin, ProjectAddendum, ScheduleActivity, PlanningActivity, ConsumptionRCRequest, RCHistoryEntry, Travel, FieldInspector, DailyWorkReport, AppNotification } from './types';
 
 const MONTHS = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -659,6 +659,36 @@ export default function App() {
   const [projectDetailTab, setProjectDetailTab] = useState<'details' | 'attachments' | 'history' | 'photos' | 'addendums'>('details');
   const [settingsTab, setSettingsTab] = useState<'general' | 'appearance' | 'security' | 'users'>('general');
   const [notification, setNotification] = useState<string | null>(null);
+  const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
+  const [notifications, setNotifications] = useState<AppNotification[]>([
+    {
+      id: 'notif-1',
+      title: 'Novo RDO Registrado',
+      description: 'O fiscal de campo registrou o diário RDO #42821.',
+      time: 'Há 10 min',
+      read: false,
+      type: 'rdo',
+      actionTab: 'field-inspection'
+    },
+    {
+      id: 'notif-2',
+      title: 'Medição Aprovada',
+      description: 'A medição do projeto Linha de Transmissão Sul foi paga.',
+      time: 'Há 1 hora',
+      read: false,
+      type: 'measurement',
+      actionTab: 'measurements'
+    },
+    {
+      id: 'notif-3',
+      title: 'Nova Obra Cadastrada',
+      description: 'A obra Subestação Oeste foi inserida no sistema.',
+      time: 'Há 5 horas',
+      read: true,
+      type: 'project',
+      actionTab: 'projects'
+    }
+  ]);
   const [imageEditingProjectId, setImageEditingProjectId] = useState<string | null>(null);
   const [showProfile, setShowProfile] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
@@ -890,6 +920,19 @@ export default function App() {
       };
       await setDoc(doc(db, 'dailyWorkReports', id), docData);
       showNotification(editingDailyReport ? 'RDO atualizado com sucesso!' : 'RDO cadastrado com sucesso!');
+      
+      if (!editingDailyReport) {
+        const newNotif: AppNotification = {
+          id: `notif-rdo-${Date.now()}`,
+          title: 'Novo RDO Registrado',
+          description: `O diário de obra RDO #${id.substring(4, 9) || id} para "${project ? project.name : ''}" foi cadastrado.`,
+          time: 'Agora mesmo',
+          read: false,
+          type: 'rdo',
+          actionTab: 'field-inspection'
+        };
+        setNotifications(prev => [newNotif, ...prev]);
+      }
       setIsAddingDailyReport(false);
       setEditingDailyReport(null);
       setNewDailyReport({
@@ -3410,6 +3453,18 @@ export default function App() {
         };
         await setDoc(doc(db, 'projects', projectId), project);
         showNotification('Novo projeto cadastrado com sucesso!');
+        
+        // Add dynamic notification
+        const newNotif: AppNotification = {
+          id: `notif-p-${Date.now()}`,
+          title: 'Nova Obra Cadastrada',
+          description: `A obra "${newProject.name}" foi inserida no sistema.`,
+          time: 'Agora mesmo',
+          read: false,
+          type: 'project',
+          actionTab: 'projects'
+        };
+        setNotifications(prev => [newNotif, ...prev]);
       }
       
       setShowAddProject(false);
@@ -3581,6 +3636,18 @@ export default function App() {
         await updateDoc(projectRef, { spent: project.spent + Number(newMeasurement.value) });
         
         showNotification('Medição registrada com sucesso!');
+
+        // Add dynamic notification
+        const newNotif: AppNotification = {
+          id: `notif-meas-${Date.now()}`,
+          title: 'Nova Medição Registrada',
+          description: `Uma medição de R$ ${Number(newMeasurement.value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} foi registrada para "${project.name}".`,
+          time: 'Agora mesmo',
+          read: false,
+          type: 'measurement',
+          actionTab: 'measurements'
+        };
+        setNotifications(prev => [newNotif, ...prev]);
       }
 
       setNewMeasurement({
@@ -5494,10 +5561,125 @@ export default function App() {
             >
               {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
             </button>
-            <button className="relative p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-500 dark:text-slate-400">
-              <Bell size={20} />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-axia-secondary rounded-full border-2 border-white dark:border-slate-900"></span>
-            </button>
+            <div className="relative">
+              <button 
+                onClick={() => setShowNotificationsDropdown(!showNotificationsDropdown)}
+                className="relative p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-500 dark:text-slate-400 transition-colors"
+                title="Notificações"
+              >
+                <Bell size={20} />
+                {notifications.some(n => !n.read) && (
+                  <span className="absolute top-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-axia-secondary text-[8px] font-bold text-white border-2 border-white dark:border-slate-900 px-0.5 min-w-[16px]">
+                    {notifications.filter(n => !n.read).length}
+                  </span>
+                )}
+              </button>
+
+              {showNotificationsDropdown && (
+                <>
+                  {/* Click outside backdrop overlay */}
+                  <div 
+                    className="fixed inset-0 z-30" 
+                    onClick={() => setShowNotificationsDropdown(false)} 
+                  />
+                  <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-850 shadow-2xl rounded-2xl p-4 z-40 animate-in fade-in slide-in-from-top-3 duration-200">
+                    <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm text-slate-800 dark:text-white">Central de Notificações</span>
+                        {notifications.some(n => !n.read) && (
+                          <span className="bg-axia-secondary/10 text-axia-secondary text-[10px] font-black px-2 py-0.5 rounded-full">
+                            {notifications.filter(n => !n.read).length} novas
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => {
+                            setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+                            showNotification('Todas as notificações marcadas como lidas.');
+                          }}
+                          className="text-[10px] text-axia-primary hover:underline font-bold"
+                        >
+                          Lidas
+                        </button>
+                        <span className="text-slate-300 dark:text-slate-700">|</span>
+                        <button 
+                          onClick={() => {
+                            setNotifications([]);
+                            showNotification('Histórico de notificações limpo.');
+                          }}
+                          className="text-[10px] text-red-500 hover:underline font-bold"
+                        >
+                          Limpar
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="max-h-[300px] overflow-y-auto divide-y divide-slate-50 dark:divide-slate-800/60 pr-1 select-none">
+                      {notifications.length === 0 ? (
+                        <div className="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
+                          <Bell size={24} className="mx-auto mb-2 opacity-45 animate-bounce" />
+                          <p className="font-medium">Nenhuma notificação nova por aqui.</p>
+                        </div>
+                      ) : (
+                        notifications.map((notif) => (
+                          <div 
+                            key={notif.id}
+                            onClick={() => {
+                              // Mark as read
+                              setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
+                              // Navigate
+                              if (notif.actionTab) {
+                                setActiveTab(notif.actionTab);
+                              }
+                              // Close dropdown
+                              setShowNotificationsDropdown(false);
+                            }}
+                            className={`py-2.5 px-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/30 rounded-xl transition-colors cursor-pointer flex gap-3 text-left relative ${!notif.read ? 'bg-blue-550/5 dark:bg-blue-950/20' : ''}`}
+                          >
+                            <div className="mt-0.5 flex-shrink-0">
+                              {notif.type === 'rdo' ? (
+                                <span className="w-8 h-8 rounded-full bg-blue-50 dark:bg-blue-950/30 flex items-center justify-center text-blue-500">
+                                  <ClipboardCheck size={16} />
+                                </span>
+                              ) : notif.type === 'measurement' ? (
+                                <span className="w-8 h-8 rounded-full bg-emerald-50 dark:bg-emerald-950/30 flex items-center justify-center text-emerald-500">
+                                  <TrendingUp size={16} />
+                                </span>
+                              ) : notif.type === 'project' ? (
+                                <span className="w-8 h-8 rounded-full bg-amber-50 dark:bg-amber-950/30 flex items-center justify-center text-amber-500">
+                                  <HardHat size={16} />
+                                </span>
+                              ) : (
+                                <span className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500">
+                                  <Bell size={16} />
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-1 mb-0.5">
+                                <p className={`truncate text-xs ${!notif.read ? 'font-black text-slate-900 dark:text-white' : 'font-semibold text-slate-700 dark:text-slate-300'}`}>
+                                  {notif.title}
+                                </p>
+                                {!notif.read && (
+                                  <span className="w-1.5 h-1.5 bg-axia-secondary rounded-full flex-shrink-0 animate-pulse" />
+                                )}
+                              </div>
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
+                                {notif.description}
+                              </p>
+                              <span className="text-[9px] text-slate-400 font-bold block mt-1">
+                                {notif.time}
+                              </span>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
             <div className="h-8 w-px bg-slate-200 dark:bg-slate-800 mx-2"></div>
             <button 
               onClick={() => setShowProfile(true)}

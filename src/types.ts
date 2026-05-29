@@ -250,3 +250,13 @@ export interface Travel {
   creatorName?: string;
 }
 
+export interface AppNotification {
+  id: string;
+  title: string;
+  description: string;
+  time: string;
+  read: boolean;
+  type: 'project' | 'rdo' | 'measurement' | 'general';
+  actionTab?: string;
+}
+
