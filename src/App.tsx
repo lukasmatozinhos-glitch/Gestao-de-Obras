@@ -49,7 +49,8 @@ import { GripVertical, LayoutDashboard,
   ChevronDown,
   DownloadCloud,
   UploadCloud,
-  EyeOff
+  EyeOff,
+  ClipboardCheck
 } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
 import { jsPDF } from 'jspdf';
@@ -64,6 +65,7 @@ import {
   doc, 
   setDoc, 
   getDoc,
+  getDocs,
   increment,
   query,
   where,
@@ -81,6 +83,7 @@ import {
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
   signOut,
+  signInAnonymously,
   User as FirebaseUser
 } from 'firebase/auth';
 import { 
@@ -98,7 +101,7 @@ import {
 } from 'recharts';
 import { MOCK_PROJECTS, MOCK_RESOURCES, MOCK_REPORTS, MOCK_MEASUREMENTS, MOCK_ATTACHMENTS, MOCK_STATUS_UPDATES } from './constants';
 import html2canvas from 'html2canvas';
-import { Project, WeeklyReport, Measurement, UserProfile, Attachment, StatusUpdate, PhotoReportItem, MeasurementBulletin, ProjectAddendum, ScheduleActivity, PlanningActivity, ConsumptionRCRequest, RCHistoryEntry, Travel } from './types';
+import { Project, WeeklyReport, Measurement, UserProfile, Attachment, StatusUpdate, PhotoReportItem, MeasurementBulletin, ProjectAddendum, ScheduleActivity, PlanningActivity, ConsumptionRCRequest, RCHistoryEntry, Travel, FieldInspector, DailyWorkReport } from './types';
 
 const MONTHS = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -332,6 +335,85 @@ export default function App() {
     if (isManagerGlobal) return rawConsumptionRCRequests;
     return rawConsumptionRCRequests.filter(rc => rc.createdBy === currentUser?.id || projects.some(p => p.id === rc.projectId));
   }, [rawConsumptionRCRequests, currentUser, isManagerGlobal, projects]);
+
+  const [rawFieldInspectors, setFieldInspectors] = useState<FieldInspector[]>([]);
+  const [rawDailyWorkReports, setDailyReports] = useState<DailyWorkReport[]>([]);
+
+  const fieldInspectors = useMemo(() => {
+    if (isManagerGlobal) return rawFieldInspectors;
+    return rawFieldInspectors.filter(fi => fi.createdBy === currentUser?.id);
+  }, [rawFieldInspectors, currentUser, isManagerGlobal]);
+
+  const dailyWorkReports = useMemo(() => {
+    if (isManagerGlobal) return rawDailyWorkReports;
+    return rawDailyWorkReports.filter(r => r.createdBy === currentUser?.id || projects.some(p => p.id === r.projectId));
+  }, [rawDailyWorkReports, currentUser, isManagerGlobal, projects]);
+
+  const [activeFieldInspectionSubTab, setActiveFieldInspectionSubTab] = useState<'reports' | 'inspectors'>('reports');
+  const [selectedRdoProjectId, setSelectedRdoProjectId] = useState<string>('');
+  const [isAddingFieldInspector, setIsAddingFieldInspector] = useState(false);
+  const [editingFieldInspector, setEditingFieldInspector] = useState<FieldInspector | null>(null);
+  const [newFieldInspector, setNewFieldInspector] = useState({
+    name: '',
+    phone: '',
+    email: '',
+    company: '',
+    projectId: ''
+  });
+  
+  const [isAddingDailyReport, setIsAddingDailyReport] = useState(false);
+  const [editingDailyReport, setEditingDailyReport] = useState<DailyWorkReport | null>(null);
+  const [viewingDailyReport, setViewingDailyReport] = useState<DailyWorkReport | null>(null);
+  const [newDailyReport, setNewDailyReport] = useState({
+    projectId: '',
+    date: new Date().toISOString().split('T')[0],
+    weatherMorning: 'Sol',
+    weatherAfternoon: 'Sol',
+    climaDetails: '',
+    workConditions: 'normal' as 'normal' | 'parcial' | 'suspenso',
+    servicesDone: '',
+    laborCount: '',
+    equipmentsActive: '',
+    occurrences: '',
+    inspectorId: '',
+    plannedProgress: 0,
+    executedProgress: 0,
+    activityPeriod: 'Integral',
+    projectStartDate: '',
+    projectEndDate: '',
+    ddsTheme: '',
+    ddsPhotoUrl: '',
+    workforceList: [] as { id: string; role: string; quantity: number }[],
+    companyLaborList: [] as { id: string; company: string; count: number; functions: string }[],
+    servicePhotos: [] as { id: string; url: string; caption: string }[]
+  });
+
+  useEffect(() => {
+    if (newDailyReport.projectId) {
+      const proj = projects.find(p => p.id === newDailyReport.projectId);
+      if (proj) {
+        setNewDailyReport(prev => ({
+          ...prev,
+          projectStartDate: proj.startDate || '',
+          projectEndDate: proj.endDate || ''
+        }));
+      }
+    }
+  }, [newDailyReport.projectId, projects]);
+
+  useEffect(() => {
+    if (isAddingDailyReport && !editingDailyReport) {
+      if (currentUser?.accessLevel === 'Fiscal de Campo') {
+        const targetProjId = currentUser.projectId || (projects[0]?.id || '');
+        setNewDailyReport(prev => ({
+          ...prev,
+          projectId: targetProjId,
+          inspectorId: currentUser.id || ''
+        }));
+      }
+    }
+  }, [isAddingDailyReport, editingDailyReport, currentUser, projects]);
+
   const [isAddingRCRequest, setIsAddingRCRequest] = useState(false);
   const [isUpdatingRCStatus, setIsUpdatingRCStatus] = useState<string | null>(null);
   const [tempRCNumber, setTempRCNumber] = useState('');
@@ -467,6 +549,17 @@ export default function App() {
   const [isGlobalTimelineExpanded, setIsGlobalTimelineExpanded] = useState(false);
   const [viewingProject, setViewingProject] = useState<Project | null>(null);
   useEffect(() => {
+    if (isLoggedIn && currentUser?.accessLevel === 'Fiscal de Campo') {
+      if (activeTab !== 'field-inspection') {
+        setActiveTab('field-inspection');
+      }
+      if (activeFieldInspectionSubTab !== 'reports') {
+        setActiveFieldInspectionSubTab('reports');
+      }
+    }
+  }, [isLoggedIn, currentUser?.accessLevel, activeTab, activeFieldInspectionSubTab]);
+
+  useEffect(() => {
     if (viewingProject) {
       const updatedProject = projects.find(p => p.id === viewingProject.id);
       if (updatedProject) {
@@ -576,6 +669,7 @@ export default function App() {
   const [tempProgress, setTempProgress] = useState(0);
   const [isAddingPhoto, setIsAddingPhoto] = useState(false);
   const [isAddingAddendum, setIsAddingAddendum] = useState(false);
+  const [editingAddendum, setEditingAddendum] = useState<ProjectAddendum | null>(null);
   const [showArchivedBulletins, setShowArchivedBulletins] = useState(false);
   const [isSubmittingPhoto, setIsSubmittingPhoto] = useState(false);
   const [newPhoto, setNewPhoto] = useState({ url: '', caption: '' });
@@ -644,7 +738,7 @@ export default function App() {
     }
 
     try {
-      const addendumId = `add-${Date.now()}`;
+      const addendumId = editingAddendum ? editingAddendum.id : `add-${Date.now()}`;
       
       // Safe parsing for Brazilian number formats (dots as thousands, comma as decimal)
       let cleanValue = newAddendum.value.toString()
@@ -666,18 +760,19 @@ export default function App() {
         rcNumber: newAddendum.rcNumber,
         value: parsedValue,
         isApproved: newAddendum.isApproved,
-        createdAt: new Date().toISOString(),
-        createdBy: currentUser?.id || '',
-        creatorName: currentUser?.name || 'Sistema'
+        createdAt: editingAddendum ? editingAddendum.createdAt : new Date().toISOString(),
+        createdBy: editingAddendum ? (editingAddendum.createdBy || '') : (currentUser?.id || ''),
+        creatorName: editingAddendum ? (editingAddendum.creatorName || '') : (currentUser?.name || 'Sistema')
       };
 
       await setDoc(doc(db, 'projectAddendums', addendumId), addendum);
       
       setNewAddendum({ number: '', description: '', rcNumber: '', value: '', isApproved: false });
+      setEditingAddendum(null);
       setIsAddingAddendum(false);
-      showNotification('Aditivo registrado e orçamento atualizado!');
+      showNotification(editingAddendum ? 'Aditivo atualizado com sucesso!' : 'Aditivo registrado e orçamento atualizado!');
     } catch (error) {
-      console.error('Error adding addendum:', error);
+      console.error('Error adding/editing addendum:', error);
       handleFirestoreError(error, OperationType.WRITE, 'projectAddendums');
     }
   };
@@ -706,6 +801,133 @@ export default function App() {
       showNotification(`Aditivo marcado como ${!addendum.isApproved ? 'Realizado' : 'Pendente'}.`);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `projectAddendums/${addendum.id}`);
+    }
+  };
+
+  const handleAddFieldInspector = async () => {
+    if (!newFieldInspector.name) {
+      showNotification('Por favor, informe o nome do fiscal.');
+      return;
+    }
+    try {
+      const id = editingFieldInspector ? editingFieldInspector.id : `insp_${Date.now()}`;
+      const projectObj = projects.find(p => p.id === newFieldInspector.projectId);
+      const docData: any = {
+        id,
+        name: newFieldInspector.name,
+        phone: newFieldInspector.phone || '',
+        email: (newFieldInspector.email || '').trim().toLowerCase(),
+        company: newFieldInspector.company || '',
+        projectId: newFieldInspector.projectId || '',
+        projectName: projectObj ? projectObj.name : '',
+        createdAt: editingFieldInspector ? editingFieldInspector.createdAt : new Date().toISOString(),
+        createdBy: editingFieldInspector ? (editingFieldInspector.createdBy || currentUser?.id || '') : (currentUser?.id || ''),
+        creatorName: editingFieldInspector ? (editingFieldInspector.creatorName || currentUser?.name || '') : (currentUser?.name || '')
+      };
+      await setDoc(doc(db, 'fieldInspectors', id), docData);
+      showNotification(editingFieldInspector ? 'Fiscal atualizado com sucesso!' : 'Fiscal cadastrado com sucesso!');
+      setIsAddingFieldInspector(false);
+      setEditingFieldInspector(null);
+      setNewFieldInspector({ name: '', phone: '', email: '', company: '', projectId: '' });
+    } catch (e: any) {
+      console.error(e);
+      handleFirestoreError(e, OperationType.WRITE, 'fieldInspectors');
+    }
+  };
+
+  const handleDeleteFieldInspector = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'fieldInspectors', id));
+      showNotification('Fiscal removido com sucesso!');
+    } catch (e) {
+      console.error(e);
+      handleFirestoreError(e, OperationType.DELETE, `fieldInspectors/${id}`);
+    }
+  };
+
+  const handleSaveDailyReport = async () => {
+    if (!newDailyReport.projectId || !newDailyReport.date || !newDailyReport.servicesDone) {
+      showNotification('Preencha os campos obrigatórios (Obra, Data e Serviços executados)');
+      return;
+    }
+    try {
+      const id = editingDailyReport ? editingDailyReport.id : `rdo_${Date.now()}`;
+      const project = projects.find(p => p.id === newDailyReport.projectId);
+      
+      const inspectorId = currentUser?.accessLevel === 'Fiscal de Campo' ? currentUser.id : newDailyReport.inspectorId;
+      const inspectorName = currentUser?.accessLevel === 'Fiscal de Campo' ? currentUser.name : (rawFieldInspectors.find(fi => fi.id === newDailyReport.inspectorId)?.name || '');
+
+      const docData: any = {
+        id,
+        projectId: newDailyReport.projectId,
+        projectName: project ? project.name : '',
+        date: newDailyReport.date,
+        weatherMorning: newDailyReport.weatherMorning,
+        weatherAfternoon: newDailyReport.weatherAfternoon,
+        climaDetails: newDailyReport.climaDetails || '',
+        workConditions: newDailyReport.workConditions,
+        servicesDone: newDailyReport.servicesDone,
+        laborCount: newDailyReport.laborCount || '',
+        equipmentsActive: newDailyReport.equipmentsActive || '',
+        occurrences: newDailyReport.occurrences || '',
+        inspectorId: inspectorId || '',
+        inspectorName: inspectorName || '',
+        createdAt: editingDailyReport ? editingDailyReport.createdAt : new Date().toISOString(),
+        createdBy: editingDailyReport ? (editingDailyReport.createdBy || currentUser?.id || '') : (currentUser?.id || ''),
+        creatorName: editingDailyReport ? (editingDailyReport.creatorName || currentUser?.name || '') : (currentUser?.name || ''),
+        
+        // Novos campos salvos no RDO:
+        plannedProgress: newDailyReport.plannedProgress || 0,
+        executedProgress: newDailyReport.executedProgress || 0,
+        activityPeriod: newDailyReport.activityPeriod || 'Integral',
+        projectStartDate: newDailyReport.projectStartDate || '',
+        projectEndDate: newDailyReport.projectEndDate || '',
+        ddsTheme: newDailyReport.ddsTheme || '',
+        ddsPhotoUrl: newDailyReport.ddsPhotoUrl || '',
+        workforceList: newDailyReport.workforceList || [],
+        companyLaborList: newDailyReport.companyLaborList || [],
+        servicePhotos: newDailyReport.servicePhotos || []
+      };
+      await setDoc(doc(db, 'dailyWorkReports', id), docData);
+      showNotification(editingDailyReport ? 'RDO atualizado com sucesso!' : 'RDO cadastrado com sucesso!');
+      setIsAddingDailyReport(false);
+      setEditingDailyReport(null);
+      setNewDailyReport({
+        projectId: '',
+        date: new Date().toISOString().split('T')[0],
+        weatherMorning: 'Sol',
+        weatherAfternoon: 'Sol',
+        climaDetails: '',
+        workConditions: 'normal',
+        servicesDone: '',
+        laborCount: '',
+        equipmentsActive: '',
+        occurrences: '',
+        inspectorId: '',
+        plannedProgress: 0,
+        executedProgress: 0,
+        activityPeriod: 'Integral',
+        projectStartDate: '',
+        projectEndDate: '',
+        ddsTheme: '',
+        ddsPhotoUrl: '',
+        workforceList: [],
+        companyLaborList: [],
+        servicePhotos: []
+      });
+    } catch (e: any) {
+      console.error(e);
+      handleFirestoreError(e, OperationType.WRITE, 'dailyWorkReports');
+    }
+  };
+
+  const handleDeleteDailyReport = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'dailyWorkReports', id));
+      showNotification('RDO excluído com sucesso!');
+    } catch (e) {
+      console.error(e);
+      handleFirestoreError(e, OperationType.DELETE, `dailyWorkReports/${id}`);
     }
   };
 
@@ -2656,6 +2878,20 @@ export default function App() {
           setIsAuthReady(true);
           return;
         }
+
+        const savedFiscalProfile = localStorage.getItem('fiscal_profile');
+        if (savedFiscalProfile) {
+          try {
+            const parsed = JSON.parse(savedFiscalProfile);
+            setCurrentUser(parsed);
+            setIsLoggedIn(true);
+            setIsAuthReady(true);
+            return;
+          } catch (e) {
+            console.error('Error parsing saved fiscal profile:', e);
+          }
+        }
+
         try {
           const userDoc = await getDoc(doc(db, 'users', user.uid));
           if (userDoc.exists()) {
@@ -2696,19 +2932,11 @@ export default function App() {
   useEffect(() => {
     if (!isLoggedIn || !isAuthReady || quotaExceeded) return;
 
-    const isManager = currentUser.accessLevel === 'Administrador de Sistema' || currentUser.accessLevel === 'Gestor';
-    const projectsQuery = isManager 
-      ? collection(db, 'projects') 
-      : query(
-          collection(db, 'projects'), 
-          or(
-            where('createdBy', '==', currentUser.id),
-            where('responsibleId', '==', currentUser.id)
-          )
-        );
+    const isManager = currentUser?.accessLevel === 'Administrador de Sistema' || currentUser?.accessLevel === 'Gestor';
+    const projectsQuery = collection(db, 'projects');
 
     const unsubProjects = onSnapshot(projectsQuery, (snapshot) => {
-      setProjects(snapshot.docs.map(doc => {
+      const allProjects = snapshot.docs.map(doc => {
         const data = doc.data();
         return { 
           id: doc.id, 
@@ -2721,9 +2949,24 @@ export default function App() {
           startDate: data.startDate || '',
           endDate: data.endDate || '',
           responsible: data.responsible || '',
-          responsibleId: data.responsibleId || ''
+          responsibleId: data.responsibleId || '',
+          fieldInspectorId: data.fieldInspectorId || '',
+          fieldInspectorName: data.fieldInspectorName || ''
         } as Project;
-      }));
+      });
+
+      const isManager = currentUser?.accessLevel === 'Administrador de Sistema' || currentUser?.accessLevel === 'Gestor';
+      const filtered = isManager 
+        ? allProjects 
+        : currentUser?.accessLevel === 'Fiscal de Campo'
+          ? allProjects.filter(p => 
+              p.fieldInspectorId === currentUser.id || 
+              p.id === currentUser.projectId ||
+              (p.fieldInspectorName && currentUser.name && p.fieldInspectorName.trim().toLowerCase() === currentUser.name.trim().toLowerCase())
+            )
+          : allProjects.filter(p => p.createdBy === currentUser?.id || p.responsibleId === currentUser?.id);
+
+      setProjects(filtered);
     }, (error) => {
       if (error.message.includes('Quota exceeded')) {
         localStorage.setItem('firestore_quota_extrapolated', 'true');
@@ -2841,15 +3084,17 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'fiscalPlanningActivities');
     });
 
-    const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
-      setRegisteredUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as UserProfile)));
-    }, (error) => {
-      if (error.message.includes('Quota exceeded')) {
-        localStorage.setItem('firestore_quota_extrapolated', 'true');
-        setQuotaExceeded(true);
-      }
-      handleFirestoreError(error, OperationType.LIST, 'users');
-    });
+    const unsubUsers = isManager 
+      ? onSnapshot(collection(db, 'users'), (snapshot) => {
+          setRegisteredUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as UserProfile)));
+        }, (error) => {
+          if (error.message.includes('Quota exceeded')) {
+            localStorage.setItem('firestore_quota_extrapolated', 'true');
+            setQuotaExceeded(true);
+          }
+          handleFirestoreError(error, OperationType.LIST, 'users');
+        })
+      : () => {};
 
     const unsubRCRequests = onSnapshot(collection(db, 'consumptionRCRequests'), (snapshot) => {
       setConsumptionRCRequests(snapshot.docs.map(doc => {
@@ -2887,6 +3132,65 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'travels');
     });
 
+    const unsubFieldInspectors = onSnapshot(collection(db, 'fieldInspectors'), (snapshot) => {
+      const inspectorsList = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+        } as unknown as FieldInspector;
+      });
+      setFieldInspectors(inspectorsList);
+
+      // Sincronização em tempo real do perfil do Fiscal de Campo logado
+      if (currentUser?.accessLevel === 'Fiscal de Campo' && currentUser?.email) {
+        const myEmail = currentUser.email.trim().toLowerCase();
+        const myDoc = inspectorsList.find(fi => (fi.email || '').trim().toLowerCase() === myEmail);
+        if (myDoc) {
+          const updatedProfile = {
+            ...currentUser,
+            id: myDoc.id,
+            name: myDoc.name,
+            phone: myDoc.phone || '',
+            projectId: myDoc.projectId || '',
+            projectName: myDoc.projectName || ''
+          };
+          if (
+            currentUser.projectId !== updatedProfile.projectId ||
+            currentUser.projectName !== updatedProfile.projectName ||
+            currentUser.name !== updatedProfile.name ||
+            currentUser.phone !== updatedProfile.phone ||
+            currentUser.id !== updatedProfile.id
+          ) {
+            setCurrentUser(updatedProfile);
+            localStorage.setItem('fiscal_profile', JSON.stringify(updatedProfile));
+          }
+        }
+      }
+    }, (error) => {
+      if (error.message.includes('Quota exceeded')) {
+        localStorage.setItem('firestore_quota_extrapolated', 'true');
+        setQuotaExceeded(true);
+      }
+      handleFirestoreError(error, OperationType.LIST, 'fieldInspectors');
+    });
+
+    const unsubDailyReports = onSnapshot(collection(db, 'dailyWorkReports'), (snapshot) => {
+      setDailyReports(snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+        } as unknown as DailyWorkReport;
+      }));
+    }, (error) => {
+      if (error.message.includes('Quota exceeded')) {
+        localStorage.setItem('firestore_quota_extrapolated', 'true');
+        setQuotaExceeded(true);
+      }
+      handleFirestoreError(error, OperationType.LIST, 'dailyWorkReports');
+    });
+
     return () => {
       unsubProjects();
       unsubReports();
@@ -2902,8 +3206,10 @@ export default function App() {
       unsubUsers();
       unsubRCRequests();
       unsubTravels();
+      unsubFieldInspectors();
+      unsubDailyReports();
     };
-  }, [isLoggedIn, isAuthReady]);
+  }, [isLoggedIn, isAuthReady, currentUser?.id, currentUser?.name, currentUser?.accessLevel, currentUser?.projectId, currentUser?.projectName, currentUser?.email]);
 
   useEffect(() => {
     if (notification) {
@@ -3045,7 +3351,9 @@ export default function App() {
     responsible: '',
     responsibleId: '',
     status: 'not-started' as Project['status'],
-    progress: 0
+    progress: 0,
+    fieldInspectorId: '',
+    fieldInspectorName: ''
   });
 
   const [newMeasurement, setNewMeasurement] = useState({
@@ -3069,14 +3377,16 @@ export default function App() {
         const updatedData = { 
           ...newProject, 
           budget: Number(newProject.budget),
-          progress: Number(newProject.progress)
+          progress: Number(newProject.progress),
+          fieldInspectorId: newProject.fieldInspectorId || null,
+          fieldInspectorName: newProject.fieldInspectorName || null
         };
         await updateDoc(projectRef, updatedData);
         showNotification('Projeto atualizado com sucesso!');
         setEditingProject(null);
       } else {
         const projectId = `proj-${Date.now()}`;
-        const project: Project = {
+        const project: Project & { fieldInspectorId?: string | null; fieldInspectorName?: string | null } = {
           id: projectId,
           name: newProject.name,
           client: newProject.client,
@@ -3094,7 +3404,9 @@ export default function App() {
           responsibleId: newProject.responsibleId,
           image: `https://picsum.photos/seed/${newProject.name}/800/600`,
           createdBy: currentUser?.id || '',
-          creatorName: currentUser?.name || 'Sistema'
+          creatorName: currentUser?.name || 'Sistema',
+          fieldInspectorId: newProject.fieldInspectorId || null,
+          fieldInspectorName: newProject.fieldInspectorName || null
         };
         await setDoc(doc(db, 'projects', projectId), project);
         showNotification('Novo projeto cadastrado com sucesso!');
@@ -3112,8 +3424,11 @@ export default function App() {
         endDate: '',
         executingCompany: '',
         responsible: '',
+        responsibleId: '',
         status: 'not-started',
-        progress: 0
+        progress: 0,
+        fieldInspectorId: '',
+        fieldInspectorName: ''
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'projects');
@@ -3211,7 +3526,9 @@ export default function App() {
       responsible: project.responsible || '',
       responsibleId: project.responsibleId || '',
       status: project.status || 'not-started',
-      progress: project.progress ?? 0
+      progress: project.progress ?? 0,
+      fieldInspectorId: project.fieldInspectorId || '',
+      fieldInspectorName: project.fieldInspectorName || ''
     });
     setShowAddProject(true);
     setViewingProject(null);
@@ -3915,6 +4232,559 @@ export default function App() {
     showNotification('Relatório PDF gerado com sucesso!');
   };
 
+  const generateSingleRdoPDF = (report: DailyWorkReport) => {
+    try {
+      showNotification('Iniciando geração do PDF do RDO...');
+      const doc = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+
+      // Apply watermark first
+      addWatermark(doc);
+
+      // Header representing company brand
+      doc.setFillColor(248, 250, 252);
+      doc.rect(0, 0, pageWidth, 35, 'F');
+      doc.setDrawColor(226, 232, 240);
+      doc.line(0, 35, pageWidth, 35);
+      
+      // Logo "Axia Energia"
+      drawPDFLogo(doc, 20, 15);
+      
+      doc.setTextColor(15, 23, 42);
+      doc.setFontSize(16);
+      doc.setFont('helvetica', 'bold');
+      doc.text('DIÁRIO DE OBRA (RDO)', pageWidth - 15, 15, { align: 'right' });
+      
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Identificador: RDO #${report.id.substring(4, 9) || report.id}`, pageWidth - 15, 21, { align: 'right' });
+      doc.text(`Data do Diário: ${formatInputDate(report.date)}`, pageWidth - 15, 26, { align: 'right' });
+      doc.text(`Emissão: ${new Date().toLocaleDateString('pt-BR')}`, pageWidth - 15, 31, { align: 'right' });
+
+      // Title header
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text('1. DADOS INICIAIS DA OBRA', 20, 48);
+
+      const generalInfo = [
+        ['Obra / Projeto', report.projectName || 'Não especificada', 'Identificador RDO', report.id],
+        ['Fiscal de Campo', report.inspectorName || 'Não designado', 'Emitido por', report.creatorName || 'Sistema'],
+        ['Período Atividade', report.activityPeriod || 'Integral', 'Data de Início/Fim', `${report.projectStartDate ? formatInputDate(report.projectStartDate) : '-'} a ${report.projectEndDate ? formatInputDate(report.projectEndDate) : '-'}`],
+        ['Progresso Planejado', `${report.plannedProgress || 0}%`, 'Progresso Realizado', `${report.executedProgress || 0}%`]
+      ];
+
+      autoTable(doc, {
+        startY: 52,
+        body: generalInfo,
+        theme: 'grid',
+        styles: { fontSize: 8.5, cellPadding: 3 },
+        columnStyles: {
+          0: { fontStyle: 'bold', cellWidth: 35, fillColor: [248, 250, 252] },
+          1: { cellWidth: 60 },
+          2: { fontStyle: 'bold', cellWidth: 35, fillColor: [248, 250, 252] },
+          3: { cellWidth: 60 }
+        }
+      });
+
+      let currentY = (doc as any).lastAutoTable.finalY + 10;
+
+      // Climatic and Working conditions
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text('2. CONDIÇÕES CLIMÁTICAS E TRABALHO', 20, currentY);
+
+      const condType = report.workConditions === 'normal' ? 'Normal' : report.workConditions === 'parcial' ? 'Parcial' : 'Suspenso';
+      const weatherInfo = [
+        ['Período da Manhã', report.weatherMorning || 'Sol', 'Período da Tarde', report.weatherAfternoon || 'Sol'],
+        ['Condição de Trabalho', condType, 'Detalhes / Clima', report.climaDetails || 'Sem observações adicionais']
+      ];
+
+      autoTable(doc, {
+        startY: currentY + 4,
+        body: weatherInfo,
+        theme: 'grid',
+        styles: { fontSize: 8.5, cellPadding: 3 },
+        columnStyles: {
+          0: { fontStyle: 'bold', cellWidth: 35, fillColor: [248, 250, 252] },
+          1: { cellWidth: 60 },
+          2: { fontStyle: 'bold', cellWidth: 35, fillColor: [248, 250, 252] },
+          3: { cellWidth: 60 }
+        }
+      });
+
+      currentY = (doc as any).lastAutoTable.finalY + 10;
+
+      // labor force / personnel list
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text('3. MÃO DE OBRA E EFETIVO DA OBRA', 20, currentY);
+
+      const hasCompanyLaborList = report.companyLaborList && report.companyLaborList.length > 0;
+      if (hasCompanyLaborList) {
+        const laborRows = report.companyLaborList!.map((item, idx) => [
+          idx + 1,
+          item.company || 'Geral',
+          item.count || 0,
+          item.functions || '-'
+        ]);
+        autoTable(doc, {
+          startY: currentY + 4,
+          head: [['Item', 'Empresa / Equipe', 'Qtd. Colaboradores', 'Atividades / Funções']],
+          body: laborRows,
+          theme: 'striped',
+          headStyles: { fillColor: [0, 51, 255], textColor: [255, 255, 255] },
+          styles: { fontSize: 8.5, cellPadding: 3 },
+          columnStyles: {
+            0: { cellWidth: 15 },
+            1: { cellWidth: 60 },
+            2: { cellWidth: 35, halign: 'center' },
+            3: { cellWidth: 80 }
+          }
+        });
+        currentY = (doc as any).lastAutoTable.finalY + 10;
+      } else {
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(100, 116, 139);
+        doc.text(`Efetivo Geral Declarado: ${report.laborCount || 'Não informado'} colaboradores.`, 20, currentY + 5);
+        if (report.equipmentsActive) {
+          doc.text(`Equipamentos Ativos: ${report.equipmentsActive}.`, 20, currentY + 10);
+          currentY += 15;
+        } else {
+          currentY += 10;
+        }
+      }
+
+      // Check height before rendering Narrative of Services
+      if (currentY > pageHeight - 60) {
+        doc.addPage();
+        currentY = 25;
+        addWatermark(doc);
+      }
+
+      // Services done
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text('4. SERVIÇOS EXECUTADOS E ATIVIDADES', 20, currentY);
+      
+      doc.setFontSize(9.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(51, 65, 85);
+      const servicesText = report.servicesDone || 'Nenhuma descrição detalhada inserida.';
+      const splitServices = doc.splitTextToSize(servicesText, pageWidth - 40);
+      doc.text(splitServices, 20, currentY + 5);
+
+      currentY += (splitServices.length * 4.5) + 15;
+
+      // Occurrences
+      if (report.occurrences) {
+        if (currentY > pageHeight - 50) {
+          doc.addPage();
+          currentY = 25;
+          addWatermark(doc);
+        }
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(15, 23, 42);
+        doc.text('5. OCORRÊNCIAS DE RELEVÂNCIA', 20, currentY);
+
+        doc.setFontSize(9.5);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(51, 65, 85);
+        const splitOcc = doc.splitTextToSize(report.occurrences, pageWidth - 40);
+        doc.text(splitOcc, 20, currentY + 5);
+        currentY += (splitOcc.length * 4.5) + 15;
+      }
+
+      // Daily Safety Dialog (DDS)
+      if (report.ddsTheme || report.ddsPhotoUrl) {
+        if (currentY > pageHeight - 60) {
+          doc.addPage();
+          currentY = 25;
+          addWatermark(doc);
+        }
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(15, 23, 42);
+        doc.text('6. DIÁLOGO DIÁRIO DE SEGURANÇA (DDS)', 20, currentY);
+
+        doc.setFontSize(9.5);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(51, 65, 85);
+        doc.text(`Tema abordado hoje: ${report.ddsTheme || 'Temas de Segurança e Saúde'}`, 20, currentY + 5);
+        
+        currentY += 10;
+
+        if (report.ddsPhotoUrl) {
+          try {
+            const ddsImgProps = doc.getImageProperties(report.ddsPhotoUrl);
+            const ddsAspect = ddsImgProps.width / ddsImgProps.height;
+            const ddsWidth = Math.min(80, pageWidth - 40);
+            const ddsHeight = ddsWidth / ddsAspect;
+
+            if (currentY + ddsHeight + 10 > pageHeight) {
+              doc.addPage();
+              currentY = 25;
+              addWatermark(doc);
+            }
+
+            doc.addImage(report.ddsPhotoUrl, 'JPEG', 20, currentY, ddsWidth, ddsHeight);
+            doc.setFontSize(7.5);
+            doc.setFont('helvetica', 'italic');
+            doc.setTextColor(100, 116, 139);
+            doc.text('Registro Fotográfico do DDS realizado em campo', 20, currentY + ddsHeight + 4);
+            currentY += ddsHeight + 15;
+          } catch (ddsImgErr) {
+            console.error('Error adding DDS image:', ddsImgErr);
+          }
+        } else {
+          currentY += 5;
+        }
+      }
+
+      // Detailed photos section if reports has photos
+      if (report.servicePhotos && report.servicePhotos.length > 0) {
+        doc.addPage();
+        addWatermark(doc);
+        
+        doc.setFillColor(0, 51, 255);
+        doc.rect(0, 0, pageWidth, 20, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.text('ANEXO FOTOGRÁFICO DE ATIVIDADES', pageWidth / 2, 12, { align: 'center' });
+
+        let pX = 20;
+        let pY = 30;
+        const colWidth = (pageWidth - 50) / 2;
+
+        report.servicePhotos.forEach((photo, pIdx) => {
+          try {
+            const pProps = doc.getImageProperties(photo.url);
+            const pAspect = pProps.width / pProps.height;
+            const pHeight = colWidth / pAspect;
+
+            if (pY + pHeight + 25 > pageHeight && pIdx > 0) {
+              doc.addPage();
+              addWatermark(doc);
+              doc.setFillColor(0, 51, 255);
+              doc.rect(0, 0, pageWidth, 20, 'F');
+              doc.setTextColor(255, 255, 255);
+              doc.setFontSize(12);
+              doc.setFont('helvetica', 'bold');
+              doc.text('ANEXO FOTOGRÁFICO DE ATIVIDADES (CONT.)', pageWidth / 2, 12, { align: 'center' });
+              pY = 30;
+              pX = 20;
+            }
+
+            doc.addImage(photo.url, 'JPEG', pX, pY, colWidth, pHeight);
+            doc.setFontSize(8.5);
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(51, 65, 85);
+            const splitCap = doc.splitTextToSize(photo.caption || 'Serviço em execução', colWidth);
+            doc.text(splitCap, pX, pY + pHeight + 4);
+
+            pX += colWidth + 10;
+            if (pX + colWidth > pageWidth) {
+              pX = 20;
+              pY += pHeight + 25;
+            }
+          } catch (pImgErr) {
+            console.error('Error adding service photo:', pImgErr);
+          }
+        });
+      }
+
+      // Add standard footer to all pages
+      const totalPages = (doc as any).internal.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        addWatermark(doc);
+        doc.setFontSize(8);
+        doc.setTextColor(148, 163, 184);
+        doc.text(`Registro Oficial de Fiscalização - RDO #${report.id.substring(4, 9) || report.id} - Página ${i} de ${totalPages}`, pageWidth / 2, pageHeight - 12, { align: 'center' });
+        doc.text('© 2026 AXIA ENERGIA - Todos os direitos reservados. Confidencial.', pageWidth / 2, pageHeight - 7, { align: 'center' });
+      }
+
+      doc.save(`RDO_${report.projectName.replace(/\s+/g, '_')}_RDO-${report.id.substring(4, 9) || report.id}_${report.date}.pdf`);
+      showNotification('Relatório Diário de Obra (RDO) em PDF gerado com sucesso!');
+    } catch (pdfErr) {
+      console.error('Error generating single RDO PDF:', pdfErr);
+      showNotification('Erro ao gerar relatório PDF.');
+    }
+  };
+
+  const generateConsolidatedRdoPDF = (projectId: string) => {
+    try {
+      const project = projects.find(p => p.id === projectId);
+      if (!project) {
+        showNotification('Projeto não encontrado para geração de relatório.');
+        return;
+      }
+
+      const projectRdos = dailyWorkReports
+        .filter(r => r.projectId === projectId)
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      if (projectRdos.length === 0) {
+        showNotification('Nenhum RDO cadastrado para esta obra.');
+        return;
+      }
+
+      showNotification('Iniciando geração do PDF consolidado da obra...');
+      const doc = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+
+      // Page 1: Cover / Summary
+      addWatermark(doc);
+
+      // Header representing company brand
+      doc.setFillColor(248, 250, 252);
+      doc.rect(0, 0, pageWidth, 38, 'F');
+      doc.setDrawColor(226, 232, 240);
+      doc.line(0, 38, pageWidth, 38);
+      
+      // Logo "Axia Energia"
+      drawPDFLogo(doc, 20, 16);
+      
+      doc.setTextColor(15, 23, 42);
+      doc.setFontSize(15);
+      doc.setFont('helvetica', 'bold');
+      doc.text('RELATÓRIO CONSOLIDADO RDO', pageWidth - 15, 16, { align: 'right' });
+      
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Obra: ${project.name}`, pageWidth - 15, 23, { align: 'right' });
+      doc.text(`Data de Geração: ${new Date().toLocaleDateString('pt-BR')}`, pageWidth - 15, 28, { align: 'right' });
+      doc.text(`Total de Relatórios Diários: ${projectRdos.length}`, pageWidth - 15, 33, { align: 'right' });
+
+      // Title header
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text('1. RESUMO GERAL DA OBRA / EMPREENDIMENTO', 20, 50);
+
+      // Project info table
+      const projectDetails = [
+        ['Nome da Obra', project.name || '-', 'Contrato SAP N°', project.contractNumber || '-'],
+        ['Cliente / Fiscalizado', project.client || '-', 'Empresa Executora', project.executingCompany || '-'],
+        ['Responsável Técnico', project.responsible || '-', 'Período Executável', `${project.startDate || '-'} a ${project.endDate || '-'}`],
+        ['Status Atual', project.status === 'finished' ? 'Concluído' : project.status === 'in-progress' ? 'Em Andamento' : 'Pendente', 'Progresso Real Obra', `${project.progress || 0}%`]
+      ];
+
+      autoTable(doc, {
+        startY: 54,
+        body: projectDetails,
+        theme: 'grid',
+        styles: { fontSize: 8, cellPadding: 3 },
+        columnStyles: {
+          0: { fontStyle: 'bold', cellWidth: 35, fillColor: [248, 250, 252] },
+          1: { cellWidth: 60 },
+          2: { fontStyle: 'bold', cellWidth: 35, fillColor: [248, 250, 252] },
+          3: { cellWidth: 60 }
+        }
+      });
+
+      let currentY = (doc as any).lastAutoTable.finalY + 10;
+
+      // Section 2: Chronological Summary of RDOs
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text('2. CRONOLOGIA DE RELATÓRIOS EMITIDOS (RDO)', 20, currentY);
+
+      const rdoSummaryRows = projectRdos.map((r) => [
+        formatInputDate(r.date),
+        `RDO #${r.id.substring(4, 9) || r.id}`,
+        r.activityPeriod || 'Integral',
+        r.inspectorName || r.creatorName || '-',
+        `${r.plannedProgress || 0}% / ${r.executedProgress || 0}%`,
+        `M: ${r.weatherMorning} | T: ${r.weatherAfternoon}`,
+        r.workConditions === 'normal' ? 'Normal' : r.workConditions === 'parcial' ? 'Parcial' : 'Suspenso'
+      ]);
+
+      autoTable(doc, {
+        startY: currentY + 4,
+        head: [['Data', 'Código RDO', 'Período', 'Fiscal/Relator', 'Plan. / Real.', 'Clima', 'Condição']],
+        body: rdoSummaryRows,
+        theme: 'striped',
+        headStyles: { fillColor: [0, 51, 255], textColor: [255, 255, 255] },
+        styles: { fontSize: 7.5, cellPadding: 2.2 },
+        columnStyles: {
+          0: { cellWidth: 20 },
+          1: { cellWidth: 25 },
+          2: { cellWidth: 20 },
+          3: { cellWidth: 40 },
+          4: { cellWidth: 25, halign: 'center' },
+          5: { cellWidth: 30 },
+          6: { cellWidth: 30 }
+        }
+      });
+
+      currentY = (doc as any).lastAutoTable.finalY + 12;
+
+      // Section 3: Detailed RDO narrative chronology
+      projectRdos.forEach((r, idx) => {
+        // We will start a new page or keep printing depending on height
+        if (currentY > pageHeight - 65) {
+          doc.addPage();
+          addWatermark(doc);
+          currentY = 25;
+        }
+
+        // Divider banner for each RDO detailed section
+        doc.setFillColor(241, 245, 249);
+        doc.rect(20, currentY, pageWidth - 40, 7, 'F');
+        doc.setDrawColor(203, 213, 225);
+        doc.rect(20, currentY, pageWidth - 40, 7, 'S');
+
+        doc.setTextColor(15, 23, 42);
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'bold');
+        doc.text(`RDO #${r.id.substring(4, 9) || r.id} - ${formatInputDate(r.date)} (Fiscal: ${r.inspectorName || r.creatorName})`, 24, currentY + 4.8);
+
+        currentY += 12;
+
+        // Display services done & occurrences
+        doc.setFontSize(8.5);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Serviços Realizados no dia:', 20, currentY);
+        
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(51, 65, 85);
+        const sText = r.servicesDone || 'Nenhum detalhe informado.';
+        const splitST = doc.splitTextToSize(sText, pageWidth - 40);
+        doc.text(splitST, 20, currentY + 4);
+
+        currentY += (splitST.length * 4) + 8;
+
+        if (r.occurrences) {
+          if (currentY > pageHeight - 25) {
+            doc.addPage();
+            addWatermark(doc);
+            currentY = 25;
+          }
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(15, 23, 42);
+          doc.text('Ocorrências do dia:', 20, currentY);
+
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(51, 65, 85);
+          const splitOT = doc.splitTextToSize(r.occurrences, pageWidth - 40);
+          doc.text(splitOT, 20, currentY + 4);
+          currentY += (splitOT.length * 4) + 8;
+        }
+
+        if (r.ddsTheme) {
+          if (currentY > pageHeight - 20) {
+            doc.addPage();
+            addWatermark(doc);
+            currentY = 25;
+          }
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(15, 23, 42);
+          doc.text(`DDS abordado: ${r.ddsTheme}`, 20, currentY);
+          currentY += 8;
+        }
+
+        // Add progress metrics sub line
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'italic');
+        doc.setTextColor(100, 116, 139);
+        doc.text(`Progresso Realizado Acumulado Declarado: ${r.executedProgress || 0}% | Clima: Manhã (${r.weatherMorning}) - Tarde (${r.weatherAfternoon}) | Condições: ${r.workConditions.toUpperCase()}`, 20, currentY);
+
+        currentY += 14;
+      });
+
+      // Photo gallery consolidated annex if there are any service photos across indeed all RDOS of this project
+      const allRdoPhotos = projectRdos.flatMap(r => 
+        (r.servicePhotos || []).map(p => ({
+          ...p,
+          rdoId: r.id,
+          rdoDate: r.date
+        }))
+      );
+
+      if (allRdoPhotos.length > 0) {
+        doc.addPage();
+        addWatermark(doc);
+        
+        doc.setFillColor(0, 51, 255);
+        doc.rect(0, 0, pageWidth, 20, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.text('ANEXO FOTOGRÁFICO CONSOLIDADO DE CAMPO', pageWidth / 2, 12, { align: 'center' });
+
+        let pX = 20;
+        let pY = 30;
+        const colWidth = (pageWidth - 50) / 2;
+
+        allRdoPhotos.forEach((photo, pIdx) => {
+          try {
+            const pProps = doc.getImageProperties(photo.url);
+            const pAspect = pProps.width / pProps.height;
+            const pHeight = colWidth / pAspect;
+
+            if (pY + pHeight + 25 > pageHeight && pIdx > 0) {
+              doc.addPage();
+              addWatermark(doc);
+              doc.setFillColor(0, 51, 255);
+              doc.rect(0, 0, pageWidth, 20, 'F');
+              doc.setTextColor(255, 255, 255);
+              doc.setFontSize(12);
+              doc.setFont('helvetica', 'bold');
+              doc.text('ANEXO FOTOGRÁFICO CONSOLIDADO DE CAMPO (CONT.)', pageWidth / 2, 12, { align: 'center' });
+              pY = 30;
+              pX = 20;
+            }
+
+            doc.addImage(photo.url, 'JPEG', pX, pY, colWidth, pHeight);
+            doc.setFontSize(8);
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(51, 65, 85);
+            doc.text(`RDO #${photo.rdoId.substring(4, 9) || photo.rdoId} (${formatInputDate(photo.rdoDate)})`, pX, pY + pHeight + 4);
+            const splitCap = doc.splitTextToSize(photo.caption || 'Serviço em execução', colWidth);
+            doc.text(splitCap, pX, pY + pHeight + 8);
+
+            pX += colWidth + 10;
+            if (pX + colWidth > pageWidth) {
+              pX = 20;
+              pY += pHeight + 25;
+            }
+          } catch (pImgErr) {
+            console.error('Error adding consolidated service photo:', pImgErr);
+          }
+        });
+      }
+
+      // Add page numbers
+      const totalPages = (doc as any).internal.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        addWatermark(doc);
+        doc.setFontSize(8);
+        doc.setTextColor(148, 163, 184);
+        doc.text(`Relatório Consolidado RDO - Obra: ${project.name} - Página ${i} de ${totalPages}`, pageWidth / 2, pageHeight - 12, { align: 'center' });
+        doc.text('© 2026 AXIA ENERGIA - Todos os direitos reservados. Confidencial.', pageWidth / 2, pageHeight - 7, { align: 'center' });
+      }
+
+      doc.save(`Consolidado_RDO_${project.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`);
+      showNotification('Relatório Integrado de RDOs consolidado gerado em PDF com sucesso!');
+    } catch (conErr) {
+      console.error('Error generating consolidated project RDO PDF:', conErr);
+      showNotification('Erro ao compilar diários de obras.');
+    }
+  };
+
   const handleGenerateGeneralReport = () => {
     setIsGeneratingReport(true);
     setTimeout(() => {
@@ -4497,74 +5367,95 @@ export default function App() {
         </div>
 
         <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto">
-          <NavItem 
-            icon={<LayoutDashboard size={20} />} 
-            label="Dashboard" 
-            active={activeTab === 'dashboard'} 
-            onClick={() => { setActiveTab('dashboard'); if(isMobile) setIsSidebarOpen(false); }}
-            collapsed={!isSidebarOpen && !isMobile}
-          />
-          <NavItem 
-            icon={<HardHat size={20} />} 
-            label="Projetos" 
-            active={activeTab === 'projects'} 
-            onClick={() => { setActiveTab('projects'); if(isMobile) setIsSidebarOpen(false); }}
-            collapsed={!isSidebarOpen && !isMobile}
-          />
+          {currentUser?.accessLevel === 'Fiscal de Campo' ? (
+            <NavItem 
+              icon={<ClipboardCheck size={20} />} 
+              label="Fiscalização de campo" 
+              active={activeTab === 'field-inspection'} 
+              onClick={() => { setActiveTab('field-inspection'); if(isMobile) setIsSidebarOpen(false); }}
+              collapsed={!isSidebarOpen && !isMobile}
+            />
+          ) : (
+            <>
+              <NavItem 
+                icon={<LayoutDashboard size={20} />} 
+                label="Dashboard" 
+                active={activeTab === 'dashboard'} 
+                onClick={() => { setActiveTab('dashboard'); if(isMobile) setIsSidebarOpen(false); }}
+                collapsed={!isSidebarOpen && !isMobile}
+              />
+              <NavItem 
+                icon={<HardHat size={20} />} 
+                label="Projetos" 
+                active={activeTab === 'projects'} 
+                onClick={() => { setActiveTab('projects'); if(isMobile) setIsSidebarOpen(false); }}
+                collapsed={!isSidebarOpen && !isMobile}
+              />
 
-          <NavItem 
-            icon={<TrendingUp size={20} />} 
-            label="Planejamento" 
-            active={activeTab === 'planning'} 
-            onClick={() => { setActiveTab('planning'); if(isMobile) setIsSidebarOpen(false); }}
-            collapsed={!isSidebarOpen && !isMobile}
-          />
-          <NavItem 
-            icon={<Receipt size={20} />} 
-            label="Medições" 
-            active={activeTab === 'measurements'} 
-            onClick={() => { setActiveTab('measurements'); if(isMobile) setIsSidebarOpen(false); }}
-            collapsed={!isSidebarOpen && !isMobile}
-          />
-          <NavItem 
-            icon={<ClipboardList size={20} />} 
-            label="Boletim de Medição" 
-            active={activeTab === 'bulletin'} 
-            onClick={() => { setActiveTab('bulletin'); if(isMobile) setIsSidebarOpen(false); }}
-            collapsed={!isSidebarOpen && !isMobile}
-          />
-          <NavItem 
-            icon={<ShieldCheck size={20} />} 
-            label="Controle de RC" 
-            active={activeTab === 'rc-control'} 
-            onClick={() => { setActiveTab('rc-control'); if(isMobile) setIsSidebarOpen(false); }}
-            collapsed={!isSidebarOpen && !isMobile}
-          />
-          <NavItem 
-            icon={<MapPin size={20} />} 
-            label="Controle de viagens" 
-            active={activeTab === 'travel-control'} 
-            onClick={() => { setActiveTab('travel-control'); if(isMobile) setIsSidebarOpen(false); }}
-            collapsed={!isSidebarOpen && !isMobile}
-          />
+              <NavItem 
+                icon={<TrendingUp size={20} />} 
+                label="Planejamento" 
+                active={activeTab === 'planning'} 
+                onClick={() => { setActiveTab('planning'); if(isMobile) setIsSidebarOpen(false); }}
+                collapsed={!isSidebarOpen && !isMobile}
+              />
+              <NavItem 
+                icon={<Receipt size={20} />} 
+                label="Medições" 
+                active={activeTab === 'measurements'} 
+                onClick={() => { setActiveTab('measurements'); if(isMobile) setIsSidebarOpen(false); }}
+                collapsed={!isSidebarOpen && !isMobile}
+              />
+              <NavItem 
+                icon={<ClipboardList size={20} />} 
+                label="Boletim de Medição" 
+                active={activeTab === 'bulletin'} 
+                onClick={() => { setActiveTab('bulletin'); if(isMobile) setIsSidebarOpen(false); }}
+                collapsed={!isSidebarOpen && !isMobile}
+              />
+              <NavItem 
+                icon={<ShieldCheck size={20} />} 
+                label="Controle de RC" 
+                active={activeTab === 'rc-control'} 
+                onClick={() => { setActiveTab('rc-control'); if(isMobile) setIsSidebarOpen(false); }}
+                collapsed={!isSidebarOpen && !isMobile}
+              />
+              <NavItem 
+                icon={<MapPin size={20} />} 
+                label="Controle de viagens" 
+                active={activeTab === 'travel-control'} 
+                onClick={() => { setActiveTab('travel-control'); if(isMobile) setIsSidebarOpen(false); }}
+                collapsed={!isSidebarOpen && !isMobile}
+              />
+              <NavItem 
+                icon={<ClipboardCheck size={20} />} 
+                label="Fiscalização de campo" 
+                active={activeTab === 'field-inspection'} 
+                onClick={() => { setActiveTab('field-inspection'); if(isMobile) setIsSidebarOpen(false); }}
+                collapsed={!isSidebarOpen && !isMobile}
+              />
 
-          <NavItem 
-            icon={<History size={20} />} 
-            label="Atualizações" 
-            active={activeTab === 'updates'} 
-            onClick={() => { setActiveTab('updates'); if(isMobile) setIsSidebarOpen(false); }}
-            collapsed={!isSidebarOpen && !isMobile}
-          />
+              <NavItem 
+                icon={<History size={20} />} 
+                label="Atualizações" 
+                active={activeTab === 'updates'} 
+                onClick={() => { setActiveTab('updates'); if(isMobile) setIsSidebarOpen(false); }}
+                collapsed={!isSidebarOpen && !isMobile}
+              />
+            </>
+          )}
         </nav>
 
         <div className="p-4 border-t border-slate-100 dark:border-slate-800">
-          <NavItem 
-            icon={<Settings size={20} />} 
-            label="Configurações" 
-            active={activeTab === 'settings'} 
-            onClick={() => { setActiveTab('settings'); if(isMobile) setIsSidebarOpen(false); }}
-            collapsed={!isSidebarOpen && !isMobile}
-          />
+          {currentUser?.accessLevel !== 'Fiscal de Campo' && (
+            <NavItem 
+              icon={<Settings size={20} />} 
+              label="Configurações" 
+              active={activeTab === 'settings'} 
+              onClick={() => { setActiveTab('settings'); if(isMobile) setIsSidebarOpen(false); }}
+              collapsed={!isSidebarOpen && !isMobile}
+            />
+          )}
         </div>
       </motion.aside>
 
@@ -4583,14 +5474,16 @@ export default function App() {
                <h1 className="text-xl font-display font-black tracking-tighter text-axia-primary">AXIA</h1>
                <div className="w-1.5 h-1.5 bg-axia-secondary rounded-full animate-pulse" />
             </div>
-            <div className="relative hidden md:block">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <input 
-                type="text" 
-                placeholder="Buscar projetos, tarefas..." 
-                className="pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20 w-64 transition-all dark:text-white"
-              />
-            </div>
+            {currentUser?.accessLevel !== 'Fiscal de Campo' && (
+              <div className="relative hidden md:block">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                <input 
+                  type="text" 
+                  placeholder="Buscar projetos, tarefas..." 
+                  className="pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-axia-primary/20 w-64 transition-all dark:text-white"
+                />
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-2 lg:gap-4">
@@ -5640,7 +6533,11 @@ export default function App() {
                                   <Link className="text-axia-primary" /> Gestão de Aditivos
                                 </h3>
                                 <button 
-                                  onClick={() => setIsAddingAddendum(true)}
+                                  onClick={() => {
+                                    setEditingAddendum(null);
+                                    setNewAddendum({ number: '', description: '', rcNumber: '', value: '', isApproved: false });
+                                    setIsAddingAddendum(true);
+                                  }}
                                   className="bg-axia-primary text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-axia-primary/90 transition-all shadow-md shadow-axia-primary/20"
                                 >
                                   <Plus size={18} /> Novo Aditivo
@@ -5653,6 +6550,12 @@ export default function App() {
                                   animate={{ opacity: 1, y: 0 }}
                                   className="p-6 bg-slate-50 rounded-3xl border border-slate-200 shadow-inner space-y-4 mb-8"
                                 >
+                                  <div className="flex items-center gap-2 border-b border-slate-200 pb-2 mb-3">
+                                    {editingAddendum ? <Pencil size={18} className="text-axia-primary" /> : <Plus size={18} className="text-axia-primary" />}
+                                    <h4 className="font-bold text-slate-800 text-sm">
+                                      {editingAddendum ? `Editar Aditivo: ${editingAddendum.number}` : 'Cadastrar Novo Aditivo'}
+                                    </h4>
+                                  </div>
                                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                     <div className="space-y-2">
                                       <label className="text-xs font-bold text-slate-500 uppercase">N° do Aditivo</label>
@@ -5711,16 +6614,21 @@ export default function App() {
                                   </div>
                                   <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
                                     <button 
-                                      onClick={() => setIsAddingAddendum(false)}
+                                      onClick={() => {
+                                        setIsAddingAddendum(false);
+                                        setEditingAddendum(null);
+                                        setNewAddendum({ number: '', description: '', rcNumber: '', value: '', isApproved: false });
+                                      }}
                                       className="px-6 py-2 text-sm font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-all"
                                     >
                                       Cancelar
                                     </button>
                                     <button 
                                       onClick={handleAddAddendum}
-                                      className="bg-axia-primary text-white px-8 py-2 rounded-xl font-bold text-sm hover:shadow-lg hover:shadow-axia-primary/25 transition-all"
+                                      className="bg-axia-primary text-white px-8 py-2 rounded-xl font-bold text-sm hover:shadow-lg hover:shadow-axia-primary/25 transition-all flex items-center gap-2"
                                     >
-                                      Salvar Aditivo
+                                      {editingAddendum ? <Pencil size={15} /> : <Plus size={15} />}
+                                      {editingAddendum ? 'Atualizar Aditivo' : 'Salvar Aditivo'}
                                     </button>
                                   </div>
                                 </motion.div>
@@ -5783,6 +6691,23 @@ export default function App() {
                                               className={`p-2 rounded-xl transition-all shadow-sm ${addendum.isApproved ? 'bg-amber-50 text-amber-500 hover:bg-amber-100' : 'bg-green-50 text-green-500 hover:bg-green-100'}`}
                                             >
                                               {addendum.isApproved ? <Clock size={20} /> : <CheckCircle2 size={20} />}
+                                            </button>
+                                            <button 
+                                              onClick={() => {
+                                                setEditingAddendum(addendum);
+                                                setNewAddendum({
+                                                  number: addendum.number,
+                                                  description: addendum.description,
+                                                  rcNumber: addendum.rcNumber || '',
+                                                  value: addendum.value.toString(),
+                                                  isApproved: addendum.isApproved
+                                                });
+                                                setIsAddingAddendum(true);
+                                              }}
+                                              title="Editar aditivo"
+                                              className="p-2 bg-blue-50 text-blue-500 rounded-xl hover:bg-blue-100 transition-all shadow-sm"
+                                            >
+                                              <Pencil size={20} />
                                             </button>
                                             <button 
                                               onClick={() => handleDeleteAddendum(addendum)}
@@ -6260,6 +7185,27 @@ export default function App() {
                               <option value="">Selecione um responsável</option>
                               {registeredUsers.map(user => (
                                 <option key={user.id} value={user.id}>{user.name} ({user.role})</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Fiscal de Campo Designado</label>
+                            <select 
+                              value={newProject.fieldInspectorId || ''}
+                              onChange={e => {
+                                const inspectorId = e.target.value;
+                                const inspector = rawFieldInspectors.find(fi => fi.id === inspectorId);
+                                setNewProject({
+                                  ...newProject, 
+                                  fieldInspectorId: inspectorId,
+                                  fieldInspectorName: inspector ? inspector.name : ''
+                                });
+                              }}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-axia-primary/20"
+                            >
+                              <option value="">Selecione o fiscal designado (Opcional)</option>
+                              {rawFieldInspectors.map(inspector => (
+                                <option key={inspector.id} value={inspector.id}>{inspector.name} ({inspector.company || 'Autônomo'})</option>
                               ))}
                             </select>
                           </div>
@@ -7739,6 +8685,448 @@ export default function App() {
               </motion.div>
             )}
 
+            {activeTab === 'field-inspection' && (
+              <motion.div 
+                key="field-inspection"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="space-y-6"
+              >
+                {/* Tab Header with visual styling */}
+                <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-2xl lg:text-3xl font-display font-semibold text-slate-900 dark:text-white">Fiscalização de Campo</h2>
+                    <p className="text-sm lg:text-base text-slate-500 dark:text-slate-400">Gerencie fiscais terceirizados/próprios e controle os relatórios diários de obras (RDO).</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 lg:gap-3">
+                    <button 
+                      onClick={() => {
+                        if (activeFieldInspectionSubTab === 'reports') {
+                          setEditingDailyReport(null);
+                          setNewDailyReport({
+                            projectId: (currentUser?.accessLevel === 'Fiscal de Campo' && currentUser?.projectId) ? currentUser.projectId : (projects[0]?.id || ''),
+                            date: new Date().toISOString().split('T')[0],
+                            weatherMorning: 'Sol',
+                            weatherAfternoon: 'Sol',
+                            climaDetails: '',
+                            workConditions: 'normal',
+                            servicesDone: '',
+                            laborCount: '',
+                            equipmentsActive: '',
+                            occurrences: '',
+                            inspectorId: currentUser?.accessLevel === 'Fiscal de Campo' ? currentUser.id : '',
+                            plannedProgress: 0,
+                            executedProgress: 0,
+                            activityPeriod: 'Integral',
+                            projectStartDate: '',
+                            projectEndDate: '',
+                            ddsTheme: '',
+                            ddsPhotoUrl: '',
+                            workforceList: [],
+                            companyLaborList: [],
+                            servicePhotos: []
+                          });
+                          setIsAddingDailyReport(true);
+                        } else {
+                          setEditingFieldInspector(null);
+                          setNewFieldInspector({ name: '', phone: '', email: '', company: '', projectId: '' });
+                          setIsAddingFieldInspector(true);
+                        }
+                      }}
+                      className="bg-axia-primary text-white px-4 py-2 lg:px-6 lg:py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-axia-primary/10 transition-all text-sm select-none"
+                    >
+                      <Plus size={16} />
+                      {activeFieldInspectionSubTab === 'reports' ? 'Novo RDO' : 'Novo Fiscal'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Sub-tabs Selection Bar */}
+                <div className="border-b border-slate-200 dark:border-slate-800 flex items-center gap-4">
+                  <button
+                    onClick={() => setActiveFieldInspectionSubTab('reports')}
+                    className={`pb-3 font-semibold text-sm transition-all relative ${
+                      activeFieldInspectionSubTab === 'reports' 
+                        ? 'text-axia-primary font-bold border-b-2 border-axia-primary' 
+                        : 'text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    Diários de Obras (RDO)
+                  </button>
+                  {currentUser?.accessLevel !== 'Fiscal de Campo' && (
+                    <button
+                      onClick={() => setActiveFieldInspectionSubTab('inspectors')}
+                      className={`pb-3 font-semibold text-sm transition-all relative ${
+                        activeFieldInspectionSubTab === 'inspectors' 
+                          ? 'text-axia-primary font-bold border-b-2 border-axia-primary' 
+                          : 'text-slate-400 hover:text-slate-600'
+                      }`}
+                    >
+                      Fiscais de Campo
+                    </button>
+                  )}
+                </div>
+
+                {/* Sub-tabs content render */}
+                {activeFieldInspectionSubTab === 'reports' ? (
+                  /* RDO Sub-tab Listing */
+                  <div className="space-y-6">
+                    {dailyWorkReports.length === 0 ? (
+                      <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 p-12 text-center shadow-sm">
+                        <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-400">
+                          <ClipboardList size={32} />
+                        </div>
+                        <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">Nenhum RDO encontrado</h3>
+                        <p className="text-slate-500 dark:text-slate-400 text-sm max-w-sm mx-auto mb-4">Gerencie as ocorrências de campo em tempo real cadastrando um diário de obras.</p>
+                        <button
+                          onClick={() => {
+                            setEditingDailyReport(null);
+                            setNewDailyReport({
+                              projectId: (currentUser?.accessLevel === 'Fiscal de Campo' && currentUser?.projectId) ? currentUser.projectId : (projects[0]?.id || ''),
+                              date: new Date().toISOString().split('T')[0],
+                              weatherMorning: 'Sol',
+                              weatherAfternoon: 'Sol',
+                              climaDetails: '',
+                              workConditions: 'normal',
+                              servicesDone: '',
+                              laborCount: '',
+                              equipmentsActive: '',
+                              occurrences: '',
+                              inspectorId: currentUser?.accessLevel === 'Fiscal de Campo' ? currentUser.id : '',
+                              plannedProgress: 0,
+                              executedProgress: 0,
+                              activityPeriod: 'Integral',
+                              projectStartDate: '',
+                              projectEndDate: '',
+                              ddsTheme: '',
+                              ddsPhotoUrl: '',
+                              workforceList: [],
+                              companyLaborList: [],
+                              servicePhotos: []
+                            });
+                            setIsAddingDailyReport(true);
+                          }}
+                          className="bg-axia-primary text-white px-5 py-2 rounded-xl text-xs font-bold"
+                        >
+                          Registrar Primeiro RDO
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Selector/Filter bar */}
+                        <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-3xl border border-slate-100 dark:border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-4">
+                          <div className="flex items-center gap-3 flex-1 w-full sm:w-auto">
+                            <div className="flex-1">
+                              <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1 block mb-1">Filtrar RDO por Obra / Empreendimento</label>
+                              <select 
+                                value={selectedRdoProjectId}
+                                onChange={(e) => setSelectedRdoProjectId(e.target.value)}
+                                className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2 text-xs focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                              >
+                                <option value="">Todas as Obras cadastradas</option>
+                                {projects.map((proj) => (
+                                  <option key={proj.id} value={proj.id}>{proj.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                          
+                          <div className="w-full sm:w-auto self-end sm:self-center">
+                            <button
+                              onClick={() => generateConsolidatedRdoPDF(selectedRdoProjectId)}
+                              disabled={!selectedRdoProjectId}
+                              className={`w-full sm:w-auto px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 text-xs transition-colors select-none ${
+                                selectedRdoProjectId 
+                                  ? 'bg-axia-primary text-white hover:bg-axia-primary/95 hover:shadow-md cursor-pointer' 
+                                  : 'bg-slate-150 dark:bg-slate-850 text-slate-400 cursor-not-allowed border border-slate-200/50 dark:border-slate-800'
+                              }`}
+                              title={selectedRdoProjectId ? "Gerar relatório consolidado de todos os RDOs para a obra selecionada" : "Selecione uma obra para habilitar"}
+                            >
+                              <FileDown size={14} />
+                              Relatório Geral da Obra (PDF)
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* RDO Grid */}
+                        {(() => {
+                          const filteredReports = selectedRdoProjectId
+                            ? [...dailyWorkReports].filter(r => r.projectId === selectedRdoProjectId).sort((a, b) => b.date.localeCompare(a.date))
+                            : [...dailyWorkReports].sort((a, b) => b.date.localeCompare(a.date));
+
+                          if (filteredReports.length === 0) {
+                            return (
+                              <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 p-12 text-center shadow-sm">
+                                <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-400">
+                                  <AlertCircle size={32} />
+                                </div>
+                                <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">Nenhum RDO correspondente</h3>
+                                <p className="text-slate-500 dark:text-slate-400 text-sm max-w-sm mx-auto">Não há diários de obras registrados para o empreendimento selecionado.</p>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                              {filteredReports.map((report) => (
+                                <div key={report.id} className="bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-100 dark:border-slate-800 p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+                                  <div>
+                                    <div className="flex items-center justify-between gap-2 mb-3">
+                                      <span className="bg-axia-primary/10 text-axia-primary font-bold text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md truncate max-w-[150px]">
+                                        {report.projectName}
+                                      </span>
+                                      <span className="text-[10px] font-mono text-slate-400 font-bold">
+                                        {formatInputDate(report.date)}
+                                      </span>
+                                    </div>
+
+                                    <div className="flex items-center justify-between gap-1.5 mb-2">
+                                      <h3 className="text-base font-bold text-slate-800 dark:text-white truncate">
+                                        RDO # {report.id.substring(4, 9) || report.id}
+                                      </h3>
+                                      {report.activityPeriod && (
+                                        <span className="text-[9px] font-black bg-blue-50 text-blue-600 dark:bg-blue-950/20 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                                          {report.activityPeriod}
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {/* Progresso Planejado vs Executado */}
+                                    <div className="bg-slate-50 dark:bg-slate-800/50 p-2.5 rounded-2xl border border-slate-100 dark:border-slate-800/40 mb-3 space-y-2">
+                                      <div className="space-y-1">
+                                        <div className="flex justify-between text-[10px] font-bold text-slate-500">
+                                          <span>Progresso Planejado</span>
+                                          <span className="text-slate-700 dark:text-slate-300">{report.plannedProgress || 0}%</span>
+                                        </div>
+                                        <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-705 rounded-full overflow-hidden">
+                                          <div className="bg-slate-400 h-full transition-all" style={{ width: `${report.plannedProgress || 0}%` }} />
+                                        </div>
+                                      </div>
+                                      <div className="space-y-1">
+                                        <div className="flex justify-between text-[10px] font-bold text-slate-500">
+                                          <span>Progresso Executado</span>
+                                          <span className="text-axia-primary dark:text-white">{report.executedProgress || 0}%</span>
+                                        </div>
+                                        <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-705 rounded-full overflow-hidden">
+                                          <div className="bg-axia-primary h-full transition-all" style={{ width: `${report.executedProgress || 0}%` }} />
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="space-y-2 text-xs text-slate-600 dark:text-slate-300">
+                                      <div className="flex items-center justify-between text-[11px] border-b border-slate-50 pb-1.5 dark:border-slate-800">
+                                        <span className="font-medium text-slate-400 uppercase tracking-tight">Clima:</span>
+                                        <span className="font-bold text-slate-700 dark:text-slate-200">
+                                          Manhã: {report.weatherMorning} | Tarde: {report.weatherAfternoon}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center justify-between text-[11px] border-b border-slate-50 pb-1.5 dark:border-slate-800">
+                                        <span className="font-medium text-slate-400 uppercase tracking-tight">Condições de Trab:</span>
+                                        <span className={`font-bold px-1.5 py-0.5 rounded uppercase text-[9px] ${
+                                          report.workConditions === 'normal' ? 'bg-green-50 text-green-600 dark:bg-green-950/20' :
+                                          report.workConditions === 'parcial' ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/20' :
+                                          'bg-red-50 text-red-600 dark:bg-red-950/20'
+                                        }`}>
+                                          {report.workConditions === 'normal' ? 'Normal' :
+                                           report.workConditions === 'parcial' ? 'Parcial' :
+                                           'Suspenso'}
+                                        </span>
+                                      </div>
+                                      {report.inspectorName && (
+                                        <div className="flex items-center justify-between text-[11px] border-b border-slate-50 pb-1.5 dark:border-slate-800">
+                                          <span className="font-medium text-slate-400 uppercase tracking-tight">Fiscal Designado:</span>
+                                          <span className="font-bold text-axia-primary truncate max-w-[170px]" title={report.inspectorName}>
+                                            {report.inspectorName}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                                      <span className="block text-[10px] text-slate-400 uppercase tracking-wide font-black">Serviços Executados</span>
+                                      <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-3 bg-slate-50 dark:bg-slate-800/40 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800 font-medium">
+                                        {report.servicesDone}
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center justify-between gap-2 mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                                    <span className="text-[9px] text-slate-400 font-bold truncate max-w-[120px]">
+                                      Por: {report.creatorName}
+                                    </span>
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        onClick={() => setViewingDailyReport(report)}
+                                        className="p-1.5 text-slate-400 hover:text-axia-primary hover:bg-axia-primary/5 rounded-lg transition-colors"
+                                        title="Visualizar RDO Completo"
+                                      >
+                                        <Eye size={14} />
+                                      </button>
+                                      <button
+                                        onClick={() => generateSingleRdoPDF(report)}
+                                        className="p-1.5 text-slate-400 hover:text-axia-primary hover:bg-axia-primary/5 rounded-lg transition-colors"
+                                        title="Gerar Relatório PDF"
+                                      >
+                                        <FileText size={14} />
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          setEditingDailyReport(report);
+                                          setNewDailyReport({
+                                            projectId: report.projectId,
+                                            date: report.date,
+                                            weatherMorning: report.weatherMorning,
+                                            weatherAfternoon: report.weatherAfternoon,
+                                            climaDetails: report.climaDetails || '',
+                                            workConditions: report.workConditions,
+                                            servicesDone: report.servicesDone,
+                                            laborCount: report.laborCount || '',
+                                            equipmentsActive: report.equipmentsActive || '',
+                                            occurrences: report.occurrences || '',
+                                            inspectorId: report.inspectorId || '',
+                                            plannedProgress: report.plannedProgress || 0,
+                                            executedProgress: report.executedProgress || 0,
+                                            activityPeriod: report.activityPeriod || 'Integral',
+                                            projectStartDate: report.projectStartDate || '',
+                                            projectEndDate: report.projectEndDate || '',
+                                            ddsTheme: report.ddsTheme || '',
+                                            ddsPhotoUrl: report.ddsPhotoUrl || '',
+                                            workforceList: report.workforceList || [],
+                                            companyLaborList: report.companyLaborList || [],
+                                            servicePhotos: report.servicePhotos || []
+                                          });
+                                          setIsAddingDailyReport(true);
+                                        }}
+                                        className="p-1.5 text-slate-400 hover:text-axia-primary hover:bg-axia-primary/5 rounded-lg transition-colors"
+                                        title="Editar"
+                                      >
+                                        <Pencil size={14} />
+                                      </button>
+                                      <button
+                                        onClick={() => handleDeleteDailyReport(report.id)}
+                                        className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg transition-colors"
+                                        title="Excluir"
+                                      >
+                                        <Trash2 size={14} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  /* Field Inspectors Sub-tab Listing */
+                  <div className="space-y-6">
+                    {fieldInspectors.length === 0 ? (
+                      <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 p-12 text-center shadow-sm">
+                        <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-400">
+                          <User size={32} />
+                        </div>
+                        <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">Nenhum fiscal cadastrado</h3>
+                        <p className="text-slate-500 dark:text-slate-400 text-sm max-w-sm mx-auto mb-4">Adicione novos fiscais para associá-los a diários de obras RDO e designá-los em atividades do cronograma.</p>
+                        <button
+                          onClick={() => {
+                            setEditingFieldInspector(null);
+                            setNewFieldInspector({ name: '', phone: '', email: '', company: '', projectId: '' });
+                            setIsAddingFieldInspector(true);
+                          }}
+                          className="bg-axia-primary text-white px-5 py-2 rounded-xl text-xs font-bold"
+                        >
+                          Adicionar Primeiro Fiscal
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {fieldInspectors.map((inspector) => (
+                          <div key={inspector.id} className="bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-100 dark:border-slate-800 p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+                            <div>
+                              <div className="flex items-center gap-3 mb-4">
+                                <div className="w-12 h-12 rounded-xl bg-axia-primary/10 flex items-center justify-center text-axia-primary font-black uppercase text-base">
+                                  {inspector.name.split(' ').map(n=>n[0]).join('').slice(0, 2)}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <h3 className="text-sm font-bold text-slate-800 dark:text-white truncate" title={inspector.name}>
+                                    {inspector.name}
+                                  </h3>
+                                  <p className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider truncate">
+                                    {inspector.company || 'Autônomo'}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="space-y-2 text-xs text-slate-600 dark:text-slate-300">
+                                {inspector.email && (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-slate-400">✉</span>
+                                    <span className="truncate">{inspector.email}</span>
+                                  </div>
+                                )}
+                                {inspector.phone && (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-slate-400">📞</span>
+                                    <span>{inspector.phone}</span>
+                                  </div>
+                                )}
+                                {inspector.projectName && (
+                                  <div className="flex items-center gap-2 mt-1 px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-100 dark:border-slate-800/80 text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                                    <span className="text-axia-primary">👷</span>
+                                    <span className="truncate" title={inspector.projectName}>Obra: {inspector.projectName}</span>
+                                  </div>
+                                )}
+                                <div className="flex items-center gap-2 text-[10px] text-slate-400 font-medium">
+                                  <span>Cadastrado em: {new Date(inspector.createdAt).toLocaleDateString('pt-BR')}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="h-px bg-slate-50 dark:bg-slate-800 my-3" />
+
+                            <div className="flex items-center justify-between gap-2 mt-1">
+                              <span className="text-[9px] text-slate-400 font-bold truncate">
+                                Por: {inspector.creatorName || 'Sistema'}
+                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={() => {
+                                    setEditingFieldInspector(inspector);
+                                    setNewFieldInspector({
+                                      name: inspector.name,
+                                      phone: inspector.phone || '',
+                                      email: inspector.email || '',
+                                      company: inspector.company || '',
+                                      projectId: inspector.projectId || ''
+                                    });
+                                    setIsAddingFieldInspector(true);
+                                  }}
+                                  className="p-1.5 text-slate-400 hover:text-axia-primary hover:bg-axia-primary/5 rounded-lg transition-colors"
+                                  title="Editar"
+                                >
+                                  <Pencil size={14} />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteFieldInspector(inspector.id)}
+                                  className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg transition-colors"
+                                  title="Excluir"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </motion.div>
+            )}
+
             {activeTab === 'updates' && (
               <motion.div 
                 key="updates"
@@ -8270,42 +9658,63 @@ export default function App() {
       {/* Mobile Bottom Navigation */}
       {isMobile && (
         <div className="fixed bottom-0 left-0 right-0 h-16 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center justify-around z-50 px-2 lg:hidden shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
-          <button 
-            onClick={() => setActiveTab('dashboard')}
-            className={`flex flex-col items-center gap-1 flex-1 transition-all ${activeTab === 'dashboard' ? 'text-axia-primary scale-110' : 'text-slate-400'}`}
-          >
-            <LayoutDashboard size={20} />
-            <span className="text-[10px] font-bold">Início</span>
-          </button>
-          <button 
-            onClick={() => setActiveTab('projects')}
-            className={`flex flex-col items-center gap-1 flex-1 transition-all ${activeTab === 'projects' ? 'text-axia-primary scale-110' : 'text-slate-400'}`}
-          >
-            <HardHat size={20} />
-            <span className="text-[10px] font-bold">Obras</span>
-          </button>
+          {currentUser?.accessLevel === 'Fiscal de Campo' ? (
+            <>
+              <button 
+                onClick={() => setActiveTab('field-inspection')}
+                className={`flex flex-col items-center gap-1 flex-1 transition-all ${activeTab === 'field-inspection' ? 'text-axia-primary scale-110' : 'text-slate-400'}`}
+              >
+                <ClipboardCheck size={20} />
+                <span className="text-[10px] font-bold">RDO</span>
+              </button>
+              <button 
+                onClick={() => setShowProfile(true)}
+                className="flex flex-col items-center gap-1 flex-1 text-slate-400"
+              >
+                <User size={20} />
+                <span className="text-[10px] font-bold">Perfil</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button 
+                onClick={() => setActiveTab('dashboard')}
+                className={`flex flex-col items-center gap-1 flex-1 transition-all ${activeTab === 'dashboard' ? 'text-axia-primary scale-110' : 'text-slate-400'}`}
+              >
+                <LayoutDashboard size={20} />
+                <span className="text-[10px] font-bold">Início</span>
+              </button>
+              <button 
+                onClick={() => setActiveTab('projects')}
+                className={`flex flex-col items-center gap-1 flex-1 transition-all ${activeTab === 'projects' ? 'text-axia-primary scale-110' : 'text-slate-400'}`}
+              >
+                <HardHat size={20} />
+                <span className="text-[10px] font-bold">Obras</span>
+              </button>
 
-          <button 
-            onClick={() => setActiveTab('measurements')}
-            className={`flex flex-col items-center gap-1 flex-1 transition-all ${activeTab === 'measurements' ? 'text-axia-primary scale-110' : 'text-slate-400'}`}
-          >
-            <Receipt size={20} />
-            <span className="text-[10px] font-bold">Medir</span>
-          </button>
-          <button 
-            onClick={() => setActiveTab('rc-control')}
-            className={`flex flex-col items-center gap-1 flex-1 transition-all ${activeTab === 'rc-control' ? 'text-axia-primary scale-110' : 'text-slate-400'}`}
-          >
-            <ShieldCheck size={20} />
-            <span className="text-[10px] font-bold">RC</span>
-          </button>
-          <button 
-            onClick={() => setShowProfile(true)}
-            className="flex flex-col items-center gap-1 flex-1 text-slate-400"
-          >
-            <User size={20} />
-            <span className="text-[10px] font-bold">Perfil</span>
-          </button>
+              <button 
+                onClick={() => setActiveTab('measurements')}
+                className={`flex flex-col items-center gap-1 flex-1 transition-all ${activeTab === 'measurements' ? 'text-axia-primary scale-110' : 'text-slate-400'}`}
+              >
+                <Receipt size={20} />
+                <span className="text-[10px] font-bold">Medir</span>
+              </button>
+              <button 
+                onClick={() => setActiveTab('rc-control')}
+                className={`flex flex-col items-center gap-1 flex-1 transition-all ${activeTab === 'rc-control' ? 'text-axia-primary scale-110' : 'text-slate-400'}`}
+              >
+                <ShieldCheck size={20} />
+                <span className="text-[10px] font-bold">RC</span>
+              </button>
+              <button 
+                onClick={() => setShowProfile(true)}
+                className="flex flex-col items-center gap-1 flex-1 text-slate-400"
+              >
+                <User size={20} />
+                <span className="text-[10px] font-bold">Perfil</span>
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -8396,6 +9805,7 @@ export default function App() {
                     onClick={async () => {
                       try {
                         await signOut(auth);
+                        localStorage.removeItem('fiscal_profile');
                         setIsLoggedIn(false);
                         setShowProfile(false);
                       } catch (error) {
@@ -9052,6 +10462,39 @@ export default function App() {
                       </select>
                     </div>
 
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Fiscal de Campo Designado</label>
+                       <select 
+                         value={editingActivity ? (editingActivity.fieldInspectorId || '') : (newActivity.fieldInspectorId || '')}
+                         onChange={(e) => {
+                           const selectedId = e.target.value;
+                           const inspector = rawFieldInspectors.find(fi => fi.id === selectedId);
+                           const inspectorName = inspector ? inspector.name : '';
+                           if (editingActivity) {
+                             setEditingActivity({
+                               ...editingActivity, 
+                               fieldInspectorId: selectedId,
+                               fieldInspectorName: inspectorName
+                             });
+                           } else {
+                             setNewActivity({
+                               ...newActivity, 
+                               fieldInspectorId: selectedId,
+                               fieldInspectorName: inspectorName
+                             });
+                           }
+                         }}
+                         className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                       >
+                         <option value="">-- Nenhum fiscal designado --</option>
+                         {rawFieldInspectors.map((fi) => (
+                           <option key={fi.id} value={fi.id}>
+                             {fi.name} {fi.company ? `(${fi.company})` : ''}
+                           </option>
+                         ))}
+                       </select>
+                     </div>
+
                     {((editingActivity && editingActivity.status === 'delayed') || (!editingActivity && newActivity.status === 'delayed')) && (
                     <motion.div 
                       initial={{ opacity: 0, height: 0 }}
@@ -9428,6 +10871,915 @@ export default function App() {
           </div>
         )}
 
+        {isAddingFieldInspector && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[32px] overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800"
+            >
+              <div className="p-8">
+                <div className="flex items-center justify-between mb-8">
+                  <div>
+                    <h3 className="text-2xl font-display font-bold text-slate-900 dark:text-white tracking-tight">
+                      {editingFieldInspector ? 'Editar Fiscal de Campo' : 'Adicionar Fiscal de Campo'}
+                    </h3>
+                    <p className="text-sm text-slate-500">
+                      Cadastre fiscais autorizados para atuar em visitas técnicas e diários de obras.
+                    </p>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setIsAddingFieldInspector(false);
+                      setEditingFieldInspector(null);
+                    }}
+                    type="button"
+                    className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                  >
+                    <X size={24} className="text-slate-400" />
+                  </button>
+                </div>
+
+                <div className="space-y-5">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Nome Completo *</label>
+                    <div className="relative">
+                      <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                      <input 
+                        type="text" 
+                        required
+                        value={newFieldInspector.name}
+                        onChange={(e) => setNewFieldInspector({ ...newFieldInspector, name: e.target.value })}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                        placeholder="Ex: Carlos Eduardo de Souza"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Empresa contratante / Subempreiteira</label>
+                    <div className="relative">
+                      <Briefcase className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                      <input 
+                        type="text" 
+                        value={newFieldInspector.company}
+                        onChange={(e) => setNewFieldInspector({ ...newFieldInspector, company: e.target.value })}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                        placeholder="Ex: AXIA Soluções ou Terceirizado"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">E-mail de contato</label>
+                      <div className="relative">
+                        <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                        <input 
+                          type="email" 
+                          value={newFieldInspector.email}
+                          onChange={(e) => setNewFieldInspector({ ...newFieldInspector, email: e.target.value })}
+                          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                          placeholder="carlos@empresa.com"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Telefone</label>
+                      <div className="relative">
+                        <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                        <input 
+                          type="text" 
+                          value={newFieldInspector.phone}
+                          onChange={(e) => setNewFieldInspector({ ...newFieldInspector, phone: e.target.value })}
+                          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                          placeholder="(11) 98888-7777"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Obra Alocada (Designação) *</label>
+                    <div className="relative">
+                      <HardHat className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                      <select 
+                        required
+                        value={newFieldInspector.projectId}
+                        onChange={(e) => setNewFieldInspector({ ...newFieldInspector, projectId: e.target.value })}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl pl-12 pr-10 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200 appearance-none"
+                      >
+                        <option value="">Selecione a obra delegada...</option>
+                        {projects.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-400">
+                        <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4 pt-4">
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setIsAddingFieldInspector(false);
+                        setEditingFieldInspector(null);
+                      }}
+                      className="flex-1 py-3.5 text-slate-500 font-bold hover:bg-slate-50 dark:hover:bg-slate-800 rounded-2xl transition-all"
+                    >
+                      Cancelar
+                    </button>
+                    <button 
+                      onClick={handleAddFieldInspector}
+                      type="button"
+                      className="flex-[2] py-3.5 bg-axia-primary text-white font-bold rounded-2xl hover:shadow-xl hover:shadow-axia-primary/20 transition-all shadow-lg shadow-axia-primary/20"
+                    >
+                      {editingFieldInspector ? 'Salvar Alterações' : 'Salvar Fiscal'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {isAddingDailyReport && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4 overflow-y-auto">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-[32px] overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800 my-8"
+            >
+              <div className="p-8 max-h-[85vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h3 className="text-2xl font-display font-bold text-slate-900 dark:text-white tracking-tight">
+                      {editingDailyReport ? 'Editar Diário de Obra (RDO)' : 'Registrar Diário de Obra (RDO)'}
+                    </h3>
+                    <p className="text-sm text-slate-500">
+                      Preencha os dados e ocorrências referentes ao progresso diário de campo.
+                    </p>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setIsAddingDailyReport(false);
+                      setEditingDailyReport(null);
+                    }}
+                    type="button"
+                    className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                  >
+                    <X size={24} className="text-slate-400" />
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Selecione a Obra / Projeto *</label>
+                      <select 
+                        required
+                        value={newDailyReport.projectId}
+                        onChange={(e) => {
+                          const selectedId = e.target.value;
+                          const inspector = rawFieldInspectors.find(fi => fi.projectId === selectedId);
+                          const inspectorIdVal = inspector ? inspector.id : '';
+                          setNewDailyReport({ 
+                            ...newDailyReport, 
+                            projectId: selectedId,
+                            inspectorId: inspectorIdVal
+                          });
+                        }}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                      >
+                        <option value="">Selecione...</option>
+                        {projects.map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Data do Relatório *</label>
+                      <input 
+                        type="date" 
+                        required
+                        value={newDailyReport.date}
+                        onChange={(e) => setNewDailyReport({ ...newDailyReport, date: e.target.value })}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Informações da Obra (Pré-preenchido de acordo com cada obra) */}
+                  {newDailyReport.projectId && (
+                    <div className="bg-slate-50 dark:bg-slate-800/60 p-4 rounded-3xl border border-slate-100 dark:border-slate-800/80 grid grid-cols-2 gap-4">
+                      <div>
+                        <span className="block text-[9px] font-bold uppercase text-slate-400 dark:text-slate-500 tracking-wider">Início da Obra (Previsão)</span>
+                        <span className="text-sm font-extrabold text-axia-primary dark:text-white">
+                          {projects.find(p => p.id === newDailyReport.projectId)?.startDate 
+                            ? formatInputDate(projects.find(p => p.id === newDailyReport.projectId)!.startDate)
+                            : 'Não informada'}
+                        </span>
+                        <span className="block text-[8px] text-slate-400 font-medium">Pré-preenchido</span>
+                      </div>
+                      <div>
+                        <span className="block text-[9px] font-bold uppercase text-slate-400 dark:text-slate-500 tracking-wider">Término da Obra (Previsão)</span>
+                        <span className="text-sm font-extrabold text-axia-primary dark:text-white">
+                          {projects.find(p => p.id === newDailyReport.projectId)?.endDate 
+                            ? formatInputDate(projects.find(p => p.id === newDailyReport.projectId)!.endDate)
+                            : 'Não informada'}
+                        </span>
+                        <span className="block text-[8px] text-slate-400 font-medium">Pré-preenchido</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Progresso e Período */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">% de Obra Planejado *</label>
+                      <div className="relative">
+                        <input 
+                          type="number"
+                          min="0"
+                          max="100"
+                          required
+                          value={newDailyReport.plannedProgress || 0}
+                          onChange={(e) => setNewDailyReport({ ...newDailyReport, plannedProgress: Math.min(100, Math.max(0, Number(e.target.value))) })}
+                          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl pl-4 pr-8 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                          placeholder="Ex: 45"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">%</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">% de Obra Executado *</label>
+                      <div className="relative">
+                        <input 
+                          type="number"
+                          min="0"
+                          max="100"
+                          required
+                          value={newDailyReport.executedProgress || 0}
+                          onChange={(e) => setNewDailyReport({ ...newDailyReport, executedProgress: Math.min(100, Math.max(0, Number(e.target.value))) })}
+                          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl pl-4 pr-8 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                          placeholder="Ex: 40"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">%</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Período da Atividade *</label>
+                      <select 
+                        required
+                        value={newDailyReport.activityPeriod || 'Integral'}
+                        onChange={(e) => setNewDailyReport({ ...newDailyReport, activityPeriod: e.target.value })}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                      >
+                        <option value="Integral">Integral</option>
+                        <option value="Diurno">Diurno</option>
+                        <option value="Noturno">Noturno</option>
+                        <option value="Turno Único">Turno Único</option>
+                        <option value="Turno Especial">Turno Especial</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Clima Manhã *</label>
+                      <select 
+                        required
+                        value={newDailyReport.weatherMorning}
+                        onChange={(e) => setNewDailyReport({ ...newDailyReport, weatherMorning: e.target.value })}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                      >
+                        <option value="Sol">Sol / Céu Aberto</option>
+                        <option value="Chuva">Chuva</option>
+                        <option value="Nublado">Nublado</option>
+                        <option value="Instável">Instável</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Clima Tarde *</label>
+                      <select 
+                        required
+                        value={newDailyReport.weatherAfternoon}
+                        onChange={(e) => setNewDailyReport({ ...newDailyReport, weatherAfternoon: e.target.value })}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                      >
+                        <option value="Sol">Sol / Céu Aberto</option>
+                        <option value="Chuva">Chuva</option>
+                        <option value="Nublado">Nublado</option>
+                        <option value="Instável">Instável</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Condições de Trabalho *</label>
+                      <select 
+                        required
+                        value={newDailyReport.workConditions}
+                        onChange={(e) => setNewDailyReport({ ...newDailyReport, workConditions: e.target.value as any })}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                      >
+                        <option value="normal">Praticável (Normal)</option>
+                        <option value="parcial">Parcialmente Praticável</option>
+                        <option value="suspenso">Impraticável (Suspenso)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                   {currentUser?.accessLevel === 'Fiscal de Campo' ? (
+                    <div className="space-y-1.55">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Fiscal de Campo Designado</label>
+                      <div className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-150 dark:border-slate-850 rounded-2xl px-4 py-3 text-sm font-bold text-slate-500">
+                        {currentUser.name} (Você)
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Fiscal de Campo Designado</label>
+                      <select 
+                        value={newDailyReport.inspectorId}
+                        onChange={(e) => {
+                          const selectedId = e.target.value;
+                          const inspector = rawFieldInspectors.find(fi => fi.id === selectedId);
+                          if (inspector && inspector.projectId) {
+                            setNewDailyReport({ 
+                              ...newDailyReport, 
+                              inspectorId: selectedId,
+                              projectId: inspector.projectId
+                            });
+                          } else {
+                            setNewDailyReport({ 
+                              ...newDailyReport, 
+                              inspectorId: selectedId 
+                            });
+                          }
+                        }}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                      >
+                        <option value="">Nenhum / Selecione...</option>
+                        {rawFieldInspectors.map((fi) => (
+                          <option key={fi.id} value={fi.id}>{fi.name} ({fi.company || 'Autônomo'})</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Diálogo Diário de Segurança (DDS) */}
+                  <div className="bg-slate-50 dark:bg-slate-800/40 p-5 rounded-3xl border border-slate-100 dark:border-slate-800/50 space-y-4">
+                    <span className="block text-[11px] font-extrabold uppercase text-axia-primary dark:text-axia-primary/80 tracking-widest">Diálogo Diário de Segurança (DDS)</span>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Tema do DDS</label>
+                        <input 
+                          type="text" 
+                          value={newDailyReport.ddsTheme || ''}
+                          onChange={(e) => setNewDailyReport({ ...newDailyReport, ddsTheme: e.target.value })}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-850 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all text-slate-700 dark:text-slate-200 font-medium"
+                          placeholder="Ex: Uso correto de EPIs e EPCs"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Foto do DDS</label>
+                        <div className="flex items-center gap-3">
+                          {newDailyReport.ddsPhotoUrl ? (
+                            <div className="relative w-full h-24 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-100 flex-shrink-0 group">
+                              <img src={newDailyReport.ddsPhotoUrl} referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                              <button 
+                                type="button" 
+                                onClick={() => setNewDailyReport({ ...newDailyReport, ddsPhotoUrl: '' })}
+                                className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full hover:bg-red-600 transition-colors shadow-md z-10"
+                              >
+                                <X size={12} />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex-1">
+                              <input 
+                                type="file" 
+                                accept="image/*"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) {
+                                    const reader = new FileReader();
+                                    reader.onloadend = () => {
+                                      setNewDailyReport({ ...newDailyReport, ddsPhotoUrl: reader.result as string });
+                                    };
+                                    reader.readAsDataURL(file);
+                                  }
+                                }}
+                                className="hidden" 
+                                id="dds-photo-input"
+                              />
+                              <label 
+                                htmlFor="dds-photo-input"
+                                className="cursor-pointer flex flex-col items-center justify-center gap-1 border border-dashed border-slate-200 dark:border-slate-700 hover:border-axia-primary dark:hover:border-axia-primary rounded-2xl py-3 px-4 text-xs font-bold text-slate-500 hover:text-axia-primary bg-white dark:bg-slate-900 transition-all text-center h-24"
+                              >
+                                <Camera size={16} />
+                                <span className="text-[10px]">Anexar Foto do DDS</span>
+                              </label>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Serviços Executados (Descrição Geral) *</label>
+                    <textarea 
+                      required
+                      rows={3}
+                      value={newDailyReport.servicesDone}
+                      onChange={(e) => setNewDailyReport({ ...newDailyReport, servicesDone: e.target.value })}
+                      className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-medium text-slate-700 dark:text-slate-200"
+                      placeholder="Ex: Escavação manual de sapatas, lançamento de cabos ópticos..."
+                    />
+                  </div>
+
+
+
+                  {/* Listagem de Empresa com Qtd de Funcionários e Funções por Funcionário */}
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-3xl border border-slate-100 dark:border-slate-800/50 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-extrabold uppercase text-axia-primary dark:text-axia-primary/80 tracking-widest">Empresas & Funções Alocadas</span>
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          const currentList = newDailyReport.companyLaborList || [];
+                          setNewDailyReport({
+                            ...newDailyReport,
+                            companyLaborList: [...currentList, { id: `co_${Date.now()}_${Math.random()}`, company: '', count: 1, functions: '' }]
+                          });
+                        }}
+                        className="text-[10px] bg-axia-primary/10 hover:bg-axia-primary/20 text-axia-primary px-3 py-1.5 rounded-xl font-bold flex items-center gap-1 transition-all"
+                      >
+                        <Plus size={12} /> Adicionar Empresa
+                      </button>
+                    </div>
+
+                    {(!newDailyReport.companyLaborList || newDailyReport.companyLaborList.length === 0) ? (
+                      <p className="text-xs text-slate-400 dark:text-slate-500 italic text-center py-2">Nenhuma empresa mapeada neste relatório ainda.</p>
+                    ) : (
+                      <div className="space-y-3 max-h-56 overflow-y-auto pr-1">
+                        {newDailyReport.companyLaborList.map((item, idx) => (
+                          <div key={item.id} className="p-3 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-850 rounded-2xl relative space-y-2">
+                            <button 
+                              type="button" 
+                              onClick={() => {
+                                const list = (newDailyReport.companyLaborList || []).filter(c => c.id !== item.id);
+                                setNewDailyReport({ ...newDailyReport, companyLaborList: list });
+                              }}
+                              className="absolute top-2.5 right-2.5 text-slate-400 hover:text-red-500 p-1 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                              title="Remover Empresa"
+                            >
+                              <X size={14} />
+                            </button>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              <div className="sm:col-span-2 space-y-0.5">
+                                <label className="text-[8px] uppercase tracking-wider text-slate-400 font-bold ml-1">Nome da Empresa</label>
+                                <input 
+                                  type="text" 
+                                  required
+                                  value={item.company} 
+                                  onChange={(e) => {
+                                    const list = [...(newDailyReport.companyLaborList || [])];
+                                    list[idx].company = e.target.value;
+                                    setNewDailyReport({ ...newDailyReport, companyLaborList: list });
+                                  }}
+                                  placeholder="Ex: Axia Montagens Inc"
+                                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-xl px-2.5 py-1.5 text-xs font-semibold"
+                                />
+                              </div>
+                              <div className="space-y-0.5">
+                                <label className="text-[8px] uppercase tracking-wider text-slate-400 font-bold ml-1">Qtd Efetivo</label>
+                                <input 
+                                  type="number" 
+                                  min="1"
+                                  value={item.count} 
+                                  onChange={(e) => {
+                                    const list = [...(newDailyReport.companyLaborList || [])];
+                                    list[idx].count = Math.max(1, parseInt(e.target.value) || 1);
+                                    setNewDailyReport({ ...newDailyReport, companyLaborList: list });
+                                  }}
+                                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-xl px-2.5 py-1.5 text-xs font-bold text-center"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="space-y-0.5">
+                              <label className="text-[8px] uppercase tracking-wider text-slate-400 font-bold ml-1">Funções Realizadas por Colaborador</label>
+                              <input 
+                                type="text" 
+                                required
+                                value={item.functions} 
+                                onChange={(e) => {
+                                  const list = [...(newDailyReport.companyLaborList || [])];
+                                  list[idx].functions = e.target.value;
+                                  setNewDailyReport({ ...newDailyReport, companyLaborList: list });
+                                }}
+                                placeholder="Ex: 2 Soldadores montando pórticos, 1 Encarregado"
+                                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-xl px-2.5 py-1.5 text-xs font-medium"
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Ocorrências / Observações Gerais</label>
+                    <textarea 
+                      rows={2}
+                      value={newDailyReport.occurrences}
+                      onChange={(e) => setNewDailyReport({ ...newDailyReport, occurrences: e.target.value })}
+                      className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-medium text-slate-700 dark:text-slate-200"
+                      placeholder="Descreva atrasos, interrupções por chuvas, acidentes de trabalho ou falta de materiais..."
+                    />
+                  </div>
+
+                  {/* Fotos dos Serviços Realizados */}
+                  <div className="p-5 bg-slate-50 dark:bg-slate-800/40 rounded-3xl border border-slate-100 dark:border-slate-800/50 space-y-4">
+                    <span className="block text-[11px] font-extrabold uppercase text-axia-primary dark:text-axia-primary/80 tracking-widest">Fotos dos Serviços Sendo Realizados</span>
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {/* Upload Box */}
+                      <div className="flex items-center justify-center">
+                        <input 
+                          type="file" 
+                          multiple 
+                          accept="image/*"
+                          onChange={(e) => {
+                            const files = e.target.files;
+                            if (files) {
+                              const promises = (Array.from(files) as File[]).map((file) => {
+                                return new Promise<{ id: string; url: string; caption: string }>((resolve) => {
+                                  const reader = new FileReader();
+                                  reader.onloadend = () => {
+                                    resolve({
+                                      id: `photo_${Date.now()}_${Math.random()}`,
+                                      url: reader.result as string,
+                                      caption: ''
+                                    });
+                                  };
+                                  reader.readAsDataURL(file);
+                                });
+                              });
+                              Promise.all(promises).then((results) => {
+                                const currentList = newDailyReport.servicePhotos || [];
+                                setNewDailyReport({
+                                  ...newDailyReport,
+                                  servicePhotos: [...currentList, ...results]
+                                });
+                              });
+                            }
+                          }}
+                          className="hidden" 
+                          id="service-photos-upload"
+                        />
+                        <label 
+                          htmlFor="service-photos-upload"
+                          className="cursor-pointer flex flex-col items-center justify-center gap-1.5 border border-dashed border-slate-200 dark:border-slate-700 hover:border-axia-primary dark:hover:border-axia-primary rounded-2xl p-6 text-xs text-slate-500 hover:text-axia-primary bg-white dark:bg-slate-900 transition-all text-center w-full min-h-[140px]"
+                        >
+                          <UploadCloud size={24} className="text-slate-400 dark:text-slate-500 animate-pulse" />
+                          <span className="font-bold text-[11px]">Selecionar Fotos de Atividades</span>
+                          <span className="text-[9px] text-slate-400 text-center">Arraste ou clique para anexar múltiplas fotos</span>
+                        </label>
+                      </div>
+
+                      {/* Info box if no images */}
+                      {(!newDailyReport.servicePhotos || newDailyReport.servicePhotos.length === 0) ? (
+                        <div className="flex flex-col items-center justify-center text-center p-4 border border-slate-100 dark:border-slate-800 rounded-2xl bg-white dark:bg-slate-900/60 min-h-[140px]">
+                          <Camera size={24} className="text-slate-300 dark:text-slate-700 mb-2" />
+                          <span className="text-[10px] text-slate-400 italic">Nenhuma foto de serviço anexada</span>
+                        </div>
+                      ) : (
+                        <div className="space-y-3 max-h-[220px] overflow-y-auto pr-1">
+                          {newDailyReport.servicePhotos.map((item, idx) => (
+                            <div key={item.id} className="flex gap-2 p-2 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl relative group">
+                              <div className="w-14 h-14 rounded-xl overflow-hidden bg-slate-100 border border-slate-100 dark:border-slate-800 flex-shrink-0">
+                                <img src={item.url} referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                              </div>
+                              <div className="flex-1 space-y-1">
+                                <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wide">Legenda da Foto {idx + 1}</span>
+                                <input 
+                                  type="text" 
+                                  value={item.caption}
+                                  onChange={(e) => {
+                                    const list = [...(newDailyReport.servicePhotos || [])];
+                                    list[idx].caption = e.target.value;
+                                    setNewDailyReport({ ...newDailyReport, servicePhotos: list });
+                                  }}
+                                  placeholder="Descrição do serviço..."
+                                  className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800 rounded-lg px-2 py-1 text-[10px] font-semibold"
+                                />
+                              </div>
+                              <button 
+                                type="button" 
+                                onClick={() => {
+                                  const list = (newDailyReport.servicePhotos || []).filter(p => p.id !== item.id);
+                                  setNewDailyReport({ ...newDailyReport, servicePhotos: list });
+                                }}
+                                className="text-red-500 hover:text-red-600 self-center p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20"
+                                title="Remover Foto"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4 pt-4">
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setIsAddingDailyReport(false);
+                        setEditingDailyReport(null);
+                      }}
+                      className="flex-1 py-3 text-slate-500 font-bold hover:bg-slate-50 dark:hover:bg-slate-800 rounded-2xl transition-all"
+                    >
+                      Cancelar
+                    </button>
+                    <button 
+                      onClick={handleSaveDailyReport}
+                      type="button"
+                      className="flex-[2] py-3 bg-axia-primary text-white font-bold rounded-2xl hover:shadow-xl hover:shadow-axia-primary/20 transition-all shadow-lg shadow-axia-primary/20"
+                    >
+                      {editingDailyReport ? 'Salvar Alterações' : 'Registrar RDO'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {viewingDailyReport && (
+          <div className="fixed inset-0 bg-slate-900/65 backdrop-blur-sm z-[70] flex items-center justify-center p-4 overflow-y-auto">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 30 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 30 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-4xl rounded-[32px] overflow-hidden shadow-[0_25px_60px_-15px_rgba(0,0,0,0.3)] border border-slate-200/60 dark:border-slate-800 flex flex-col my-8 max-h-[90vh]"
+            >
+              {/* Header */}
+              <div className="bg-slate-50 dark:bg-slate-850 px-8 py-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="bg-axia-primary/10 text-axia-primary font-bold text-[10px] uppercase tracking-widest px-2.5 py-1 rounded-md">
+                      {viewingDailyReport.projectName}
+                    </span>
+                    <span className="bg-blue-50 text-blue-600 dark:bg-blue-950/30 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md">
+                      Período {viewingDailyReport.activityPeriod || 'Integral'}
+                    </span>
+                  </div>
+                  <h3 className="text-2xl font-display font-bold text-slate-900 dark:text-white mt-1.5 flex items-center gap-2">
+                    <ClipboardList size={22} className="text-axia-primary" />
+                    Diário de Obra (RDO) #{viewingDailyReport.id.substring(4, 9) || viewingDailyReport.id}
+                  </h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => generateSingleRdoPDF(viewingDailyReport)}
+                    className="bg-axia-primary hover:bg-axia-primary/95 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm hover:shadow-md transition-all select-none cursor-pointer"
+                    title="Exportar este RDO para PDF"
+                  >
+                    <FileDown size={14} />
+                    Exportar PDF
+                  </button>
+                  <button 
+                    onClick={() => setViewingDailyReport(null)}
+                    className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-full transition-all"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Scrollable Body */}
+              <div className="p-8 space-y-6 overflow-y-auto flex-1 max-h-[60vh] select-none text-slate-800 dark:text-slate-100">
+                
+                {/* 1. Cronograma e Progresso de Obra */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-slate-50 dark:bg-slate-850/40 p-5 rounded-3xl border border-slate-100/80 dark:border-slate-800/60 space-y-3">
+                    <span className="block text-[10px] font-black uppercase text-slate-400 tracking-wider">Cronograma de Atividades</span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="block text-[9px] text-slate-400 font-bold uppercase">Início (Previsto)</span>
+                        <span className="text-xs font-black text-slate-700 dark:text-slate-200">
+                          {viewingDailyReport.projectStartDate ? formatInputDate(viewingDailyReport.projectStartDate) : 'Não informado'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="block text-[9px] text-slate-400 font-bold uppercase">Conclusão (Previsto)</span>
+                        <span className="text-xs font-black text-slate-700 dark:text-slate-200">
+                          {viewingDailyReport.projectEndDate ? formatInputDate(viewingDailyReport.projectEndDate) : 'Não informado'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 dark:bg-slate-850/40 p-5 rounded-3xl border border-slate-100/80 dark:border-slate-800/60 space-y-3">
+                    <span className="block text-[10px] font-black uppercase text-slate-400 tracking-wider">Progresso de Execução Física</span>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-[11px] font-bold text-slate-500">
+                          <span>Planejado</span>
+                          <span className="font-extrabold text-slate-700 dark:text-slate-200">{viewingDailyReport.plannedProgress || 0}%</span>
+                        </div>
+                        <div className="w-full h-2 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                          <div className="bg-slate-400 h-full transition-all" style={{ width: `${viewingDailyReport.plannedProgress || 0}%` }} />
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-[11px] font-bold text-slate-500">
+                          <span>Realizado</span>
+                          <span className="font-extrabold text-axia-primary">{viewingDailyReport.executedProgress || 0}%</span>
+                        </div>
+                        <div className="w-full h-2 bg-slate-205 dark:bg-slate-800 rounded-full overflow-hidden">
+                          <div className="bg-axia-primary h-full transition-all" style={{ width: `${viewingDailyReport.executedProgress || 0}%` }} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Clima, Condições de Trabalho, Fiscal */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="p-4 bg-slate-50 dark:bg-slate-850/40 rounded-3xl border border-slate-105 dark:border-slate-800/50">
+                    <span className="block text-[9px] font-black uppercase text-slate-500 tracking-widest mb-1.5">Clima e Temperatura</span>
+                    <div className="text-xs space-y-1 text-slate-700 dark:text-slate-300">
+                      <div><strong className="text-slate-400">Manhã:</strong> {viewingDailyReport.weatherMorning}</div>
+                      <div><strong className="text-slate-400">Tarde:</strong> {viewingDailyReport.weatherAfternoon}</div>
+                      {viewingDailyReport.climaDetails && (
+                        <p className="mt-1 pb-1 pt-1 border-t border-slate-100 dark:border-slate-800 text-[11px] italic text-slate-500">{viewingDailyReport.climaDetails}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-slate-50 dark:bg-slate-850/40 rounded-3xl border border-slate-105 dark:border-slate-800/50 flex flex-col justify-center">
+                    <span className="block text-[9px] font-black uppercase text-slate-500 tracking-widest mb-1.5">Condições de Trabalho</span>
+                    <span className={`inline-block text-center font-bold px-3 py-1.5 rounded-2xl uppercase text-[10px] ${
+                      viewingDailyReport.workConditions === 'normal' ? 'bg-green-50 text-green-600 dark:bg-green-950/20' :
+                      viewingDailyReport.workConditions === 'parcial' ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/20' :
+                      'bg-red-50 text-red-600 dark:bg-red-950/20'
+                    }`}>
+                      {viewingDailyReport.workConditions === 'normal' ? 'Operações Normais' :
+                       viewingDailyReport.workConditions === 'parcial' ? 'Paralisação Parcial' :
+                       'Trabalhos Suspensos'}
+                    </span>
+                  </div>
+
+                  <div className="p-4 bg-slate-50 dark:bg-slate-850/40 rounded-3xl border border-slate-105 dark:border-slate-800/50">
+                    <span className="block text-[9px] font-black uppercase text-slate-500 tracking-widest mb-1">Fiscal de Campo Designado</span>
+                    <span className="block text-sm font-extrabold text-axia-primary dark:text-white truncate">
+                      {viewingDailyReport.inspectorName || 'Nenhum fiscal selecionado'}
+                    </span>
+                    <span className="block text-[8px] font-bold text-slate-400 uppercase">Responsável RDO</span>
+                  </div>
+                </div>
+
+                {/* 3. DDS Section CARD */}
+                <div className="bg-slate-50 dark:bg-slate-850/30 p-5 rounded-[2rem] border border-slate-100/80 dark:border-slate-800/80 space-y-4">
+                  <span className="block text-[11px] font-extrabold uppercase text-axia-primary tracking-widest">Diálogo Diário de Segurança (DDS)</span>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+                    <div className="md:col-span-2 space-y-1">
+                      <span className="block text-[9px] font-black uppercase text-slate-400">Tema Abordado</span>
+                      <p className="text-sm font-bold text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 px-4 py-3 rounded-2xl font-mono">
+                        {viewingDailyReport.ddsTheme || 'Nenhum diálogo registrado para o dia.'}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-col items-center">
+                      <span className="block text-[9px] font-black uppercase text-slate-400 mb-1.5 self-start">Evidência / Foto do DDS</span>
+                      {viewingDailyReport.ddsPhotoUrl ? (
+                        <div className="w-full h-24 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-sm relative group cursor-pointer" onClick={() => window.open(viewingDailyReport.ddsPhotoUrl, '_blank')}>
+                          <img src={viewingDailyReport.ddsPhotoUrl} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] font-bold">
+                            Ver Ampliado
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="w-full h-24 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 flex flex-col items-center justify-center text-center p-2 bg-white dark:bg-slate-900/60">
+                          <EyeOff size={16} className="text-slate-350 dark:text-slate-600 mb-1" />
+                          <span className="text-[9px] text-slate-400 italic">Sem foto do DDS</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. Serviços Executados */}
+                <div className="space-y-2">
+                  <span className="block text-[10px] font-black uppercase text-slate-400 tracking-wider">Descrição dos Serviços Executados</span>
+                  <p className="text-sm text-slate-700 dark:text-slate-200 bg-slate-50 dark:bg-slate-850/30 p-4 border border-slate-100 dark:border-slate-800 rounded-3xl font-medium leading-relaxed whitespace-pre-wrap">
+                    {viewingDailyReport.servicesDone}
+                  </p>
+                </div>
+
+                {/* 5. Empresas e Subempreiteiras Alocadas */}
+                <div className="bg-slate-50 dark:bg-slate-850/30 p-5 rounded-[2rem] border border-slate-100/80 dark:border-slate-800/80 space-y-3">
+                  <span className="block text-[10px] font-black uppercase text-slate-400 tracking-wider">Empresas e Subempreiteiras Alocadas</span>
+                  {(!viewingDailyReport.companyLaborList || viewingDailyReport.companyLaborList.length === 0) ? (
+                    <p className="text-xs text-slate-400 dark:text-slate-500 italic py-2 text-center">Nenhuma empresa listada individualmente hoje.</p>
+                  ) : (
+                    <div className="space-y-3 max-h-56 overflow-y-auto pr-1">
+                      {viewingDailyReport.companyLaborList.map((item) => (
+                        <div key={item.id} className="p-3 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl">
+                          <div className="flex justify-between items-center gap-2 mb-1">
+                            <span className="font-extrabold text-xs text-axia-primary">{item.company}</span>
+                            <span className="text-[10px] font-black bg-slate-100 dark:bg-slate-850 px-2 py-0.5 rounded-lg">
+                              Qtd: {item.count}
+                            </span>
+                          </div>
+                          <p className="text-[10.5px] font-medium text-slate-600 dark:text-slate-400 leading-tight">
+                            {item.functions}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 7. Ocorrências / Observações */}
+                {viewingDailyReport.occurrences && (
+                  <div className="space-y-1.5">
+                    <span className="block text-[10px] font-black uppercase text-slate-400 tracking-wider">Ocorrências / Observações</span>
+                    <p className="text-xs font-medium text-slate-600 dark:text-slate-300 p-3 bg-red-50/20 dark:bg-red-950/5 border border-red-100/30 dark:border-red-950/30 rounded-2xl italic">
+                      {viewingDailyReport.occurrences}
+                    </p>
+                  </div>
+                )}
+
+                {/* 8. Fotos dos Serviços Sendo Realizados */}
+                <div className="space-y-3">
+                  <span className="block text-[10px] font-black uppercase text-slate-400 tracking-wider">Fotos de Evidências das Atividades</span>
+                  {(!viewingDailyReport.servicePhotos || viewingDailyReport.servicePhotos.length === 0) ? (
+                    <p className="text-xs text-slate-400 dark:text-slate-500 italic py-2 text-center bg-slate-50 dark:bg-slate-850/40 border border-slate-100 border-dashed rounded-3xl">Nenhuma foto adicionada para os serviços.</p>
+                  ) : (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                      {viewingDailyReport.servicePhotos.map((item, idx) => (
+                        <div 
+                          key={item.id} 
+                          className="bg-white dark:bg-slate-850/60 p-2 rounded-2xl border border-slate-100 dark:border-slate-800 flex flex-col justify-between group cursor-pointer"
+                          onClick={() => window.open(item.url, '_blank')}
+                        >
+                          <div className="w-full aspect-[4/3] rounded-xl overflow-hidden bg-slate-100 border border-slate-100 dark:border-slate-800 mb-2 relative">
+                            <img src={item.url} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                            <div className="absolute top-1 right-1 bg-black/60 text-white text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded">
+                              Foto {idx + 1}
+                            </div>
+                          </div>
+                          {item.caption ? (
+                            <span className="block text-[10px] font-medium text-slate-600 dark:text-slate-400 text-center line-clamp-1 italic px-1">
+                              "{item.caption}"
+                            </span>
+                          ) : (
+                            <span className="block text-[9px] text-slate-400 text-center italic">
+                              Sem legenda
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+              </div>
+
+              {/* Action buttons */}
+              <div className="bg-slate-50 dark:bg-slate-850 px-8 py-5 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-3">
+                <button 
+                  onClick={() => setViewingDailyReport(null)}
+                  className="px-6 py-2.5 bg-axia-primary text-white text-xs font-bold rounded-xl hover:shadow-lg transition-all"
+                >
+                  Fechar Detalhes
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
         {travelToDelete && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
             <motion.div 
@@ -9533,7 +11885,7 @@ function LoginPage({ onLogin, onRegister }: {
   onLogin: (user: UserProfile) => void;
   onRegister: (user: UserProfile) => void;
 }) {
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [mode, setMode] = useState<'login' | 'register' | 'fiscal_campo'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -9549,8 +11901,72 @@ function LoginPage({ onLogin, onRegister }: {
     setError(null);
 
     try {
-      const trimmedEmail = email.trim();
-      if (mode === 'login') {
+      const trimmedEmail = email.trim().toLowerCase();
+      if (mode === 'fiscal_campo') {
+        try {
+          await signInWithEmailAndPassword(auth, 'fiscal-guest@axiaenergia.com.br', 'GuestAxiaEnergy2026!');
+        } catch (authErr: any) {
+          if (
+            authErr.code === 'auth/user-not-found' || 
+            authErr.code === 'auth/invalid-credential' || 
+            authErr.code === 'auth/invalid-login-credentials' ||
+            authErr.message?.includes('user-not-found') ||
+            authErr.message?.includes('invalid-credential')
+          ) {
+            try {
+              await createUserWithEmailAndPassword(auth, 'fiscal-guest@axiaenergia.com.br', 'GuestAxiaEnergy2026!');
+            } catch (createErr) {
+              console.error('Error creating guest user:', createErr);
+              throw createErr;
+            }
+          } else {
+            console.error('Error signing in anonymously/guest:', authErr);
+            throw authErr;
+          }
+        }
+
+        let querySnapshot = await getDocs(query(collection(db, 'fieldInspectors'), where('email', '==', trimmedEmail)));
+        let docData = !querySnapshot.empty ? querySnapshot.docs[0].data() : null;
+
+        if (!docData) {
+          // Fallback tolerante a maiúsculas/minúsculas e espaços em branco
+          const allInspectorsSnap = await getDocs(collection(db, 'fieldInspectors'));
+          const matchedDoc = allInspectorsSnap.docs.find(d => {
+            const infEmail = (d.data().email || '').trim().toLowerCase();
+            return infEmail === trimmedEmail;
+          });
+          if (matchedDoc) {
+            docData = matchedDoc.data();
+          }
+        }
+        
+        if (!docData) {
+          try {
+            await auth.signOut();
+            localStorage.removeItem('fiscal_profile');
+          } catch (signOutErr) {
+            console.error('Error signing out:', signOutErr);
+          }
+          setError('Este e-mail de Fiscal de Campo não foi localizado no cadastro. Por favor, solicite ao seu Gestor para cadastrá-lo.');
+          setIsLoading(false);
+          return;
+        }
+        
+        const userProfile: UserProfile = {
+          id: docData.id,
+          name: docData.name,
+          email: docData.email || trimmedEmail,
+          role: 'Fiscal de Campo',
+          avatar: `https://picsum.photos/seed/${docData.name}/200/200`,
+          phone: docData.phone || '',
+          accessLevel: 'Fiscal de Campo',
+          projectId: docData.projectId || '',
+          projectName: docData.projectName || ''
+        };
+        
+        localStorage.setItem('fiscal_profile', JSON.stringify(userProfile));
+        onLogin(userProfile);
+      } else if (mode === 'login') {
         const userCredential = await signInWithEmailAndPassword(auth, trimmedEmail, password);
         const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
         if (userDoc.exists()) {
@@ -9631,16 +12047,25 @@ function LoginPage({ onLogin, onRegister }: {
               <p className="text-xs uppercase tracking-[0.4em] text-axia-secondary font-bold -mt-1 ml-1">ENERGIA</p>
             </div>
 
-            <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-2xl mb-8">
+            <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-2xl mb-8 overflow-hidden">
               <button 
+                type="button"
                 onClick={() => setMode('login')}
-                className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all ${mode === 'login' ? 'bg-white dark:bg-slate-700 text-axia-primary shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                className={`flex-1 py-2.5 text-[11px] lg:text-xs font-black truncate rounded-xl transition-all ${mode === 'login' ? 'bg-white dark:bg-slate-700 text-axia-primary shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
               >
-                Login
+                Colaborador
               </button>
               <button 
+                type="button"
+                onClick={() => setMode('fiscal_campo')}
+                className={`flex-1 py-2.5 text-[11px] lg:text-xs font-black truncate rounded-xl transition-all ${mode === 'fiscal_campo' ? 'bg-white dark:bg-slate-700 text-axia-primary shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+              >
+                Fiscal de Campo
+              </button>
+              <button 
+                type="button"
                 onClick={() => setMode('register')}
-                className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all ${mode === 'register' ? 'bg-white dark:bg-slate-700 text-axia-primary shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                className={`flex-1 py-2.5 text-[11px] lg:text-xs font-black truncate rounded-xl transition-all ${mode === 'register' ? 'bg-white dark:bg-slate-700 text-axia-primary shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
               >
                 Cadastro
               </button>
@@ -9648,12 +12073,14 @@ function LoginPage({ onLogin, onRegister }: {
 
             <div className="mb-8">
               <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
-                {mode === 'login' ? 'Bem-vindo de volta' : 'Criar nova conta'}
+                {mode === 'login' ? 'Bem-vindo de volta' : mode === 'fiscal_campo' ? 'Acesso do Fiscal de Campo' : 'Criar nova conta'}
               </h2>
               <p className="text-slate-500 dark:text-slate-400 text-sm">
                 {mode === 'login' 
                   ? 'Acesse sua conta para gerenciar suas obras.' 
-                  : 'Preencha os dados abaixo para solicitar seu acesso.'}
+                  : mode === 'fiscal_campo'
+                    ? 'Insira o e-mail cadastrado pelo seu Gestor para registrar seus relatórios diários (RDO).'
+                    : 'Preencha os dados abaixo para solicitar seu acesso.'}
               </p>
             </div>
 
@@ -9731,7 +12158,7 @@ function LoginPage({ onLogin, onRegister }: {
               )}
 
               <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider ml-1">E-mail Corporativo</label>
+                <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider ml-1">E-mail Cadastrado</label>
                 <div className="relative">
                   <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                   <input 
@@ -9745,25 +12172,27 @@ function LoginPage({ onLogin, onRegister }: {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <div className="flex justify-between items-center px-1">
-                  <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Senha</label>
-                  {mode === 'login' && (
-                    <button type="button" className="text-xs font-bold text-axia-primary hover:underline">Esqueceu a senha?</button>
-                  )}
+              {mode !== 'fiscal_campo' && (
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center px-1">
+                    <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Senha</label>
+                    {mode === 'login' && (
+                      <button type="button" className="text-xs font-bold text-axia-primary hover:underline">Esqueceu a senha?</button>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <input 
+                      type="password" 
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all font-medium dark:text-white"
+                      placeholder="Sua senha"
+                      required={mode !== 'fiscal_campo'}
+                    />
+                  </div>
                 </div>
-                <div className="relative">
-                  <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                  <input 
-                    type="password" 
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all font-medium dark:text-white"
-                    placeholder="Sua senha"
-                    required
-                  />
-                </div>
-              </div>
+              )}
 
               {mode === 'login' && (
                 <div className="flex items-center gap-2 px-1">
@@ -9781,7 +12210,7 @@ function LoginPage({ onLogin, onRegister }: {
                   <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 ) : (
                   <>
-                    {mode === 'login' ? 'Entrar no Sistema' : 'Solicitar Cadastro'}
+                    {mode === 'login' ? 'Entrar no Sistema' : mode === 'fiscal_campo' ? 'Acessar como Fiscal' : 'Solicitar Cadastro'}
                     <ArrowUpRight size={20} />
                   </>
                 )}
@@ -9792,9 +12221,11 @@ function LoginPage({ onLogin, onRegister }: {
           <div className="bg-slate-50 dark:bg-slate-800/50 p-6 border-t border-slate-100 dark:border-slate-800 text-center">
             <p className="text-sm text-slate-500 dark:text-slate-400">
               {mode === 'login' ? (
-                <>Não tem acesso? <button onClick={() => setMode('register')} className="text-axia-primary font-bold hover:underline">Solicite aqui</button></>
+                <>Não tem acesso? <button type="button" onClick={() => setMode('register')} className="text-axia-primary font-bold hover:underline">Solicite aqui</button></>
+              ) : mode === 'fiscal_campo' ? (
+                <>Voltar para <button type="button" onClick={() => setMode('login')} className="text-axia-primary font-bold hover:underline">Login Colaborador</button></>
               ) : (
-                <>Já possui conta? <button onClick={() => setMode('login')} className="text-axia-primary font-bold hover:underline">Faça login</button></>
+                <>Já possui conta? <button type="button" onClick={() => setMode('login')} className="text-axia-primary font-bold hover:underline">Faça login</button></>
               )}
             </p>
           </div>

@@ -126,6 +126,19 @@ service cloud.firestore {
              data.monthYear is string;
     }
 
+    function isValidFieldInspector(data) {
+      return data.id is string && data.name is string && data.createdAt is string;
+    }
+
+    function isValidDailyWorkReport(data) {
+      return data.id is string && data.projectId is string && 
+             data.projectName is string && data.date is string && 
+             data.weatherMorning is string && data.weatherAfternoon is string && 
+             data.workConditions is string && data.servicesDone is string && 
+             data.createdAt is string && data.createdBy is string && 
+             data.creatorName is string;
+    }
+
     // ===============================================================
     // Collection Rules
     // ===============================================================
@@ -214,6 +227,18 @@ service cloud.firestore {
     match /travels/{travelId} {
       allow read: if isAuthenticated();
       allow create, update: if isAuthenticated() && isValidId(travelId) && isValidTravel(request.resource.data);
+      allow delete: if isAuthenticated();
+    }
+
+    match /fieldInspectors/{inspectorId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidId(inspectorId) && isValidFieldInspector(request.resource.data);
+      allow delete: if isAuthenticated();
+    }
+
+    match /dailyWorkReports/{reportId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidId(reportId) && isValidDailyWorkReport(request.resource.data);
       allow delete: if isAuthenticated();
     }
   }

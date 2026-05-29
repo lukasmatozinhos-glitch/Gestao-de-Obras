@@ -25,6 +25,8 @@ export interface ScheduleActivity {
   category?: string;
   order: number;
   isHidden: boolean;
+  fieldInspectorId?: string;
+  fieldInspectorName?: string;
 }
 
 export interface PhotoReportItem {
@@ -55,6 +57,8 @@ export interface Project {
   createdBy?: string;
   creatorName?: string;
   photoReport?: PhotoReportItem[];
+  fieldInspectorId?: string;
+  fieldInspectorName?: string;
 }
 
 export interface Resource {
@@ -100,6 +104,8 @@ export interface UserProfile {
   accessLevel: string;
   palette?: string;
   isDarkMode?: boolean;
+  projectId?: string;
+  projectName?: string;
 }
 
 export interface Attachment {
@@ -154,6 +160,53 @@ export interface PlanningActivity {
   category?: string;
   description?: string;
   isHidden: boolean;
+  fieldInspectorId?: string;
+  fieldInspectorName?: string;
+}
+
+export interface FieldInspector {
+  id: string;
+  name: string;
+  phone?: string;
+  email?: string;
+  company?: string;
+  createdAt: string;
+  createdBy?: string;
+  creatorName?: string;
+  projectId?: string;
+  projectName?: string;
+}
+
+export interface DailyWorkReport {
+  id: string;
+  projectId: string;
+  projectName: string;
+  date: string;
+  weatherMorning: string; // e.g., "Sol", "Chuva", "Nublado"
+  weatherAfternoon: string; // e.g., "Sol", "Chuva", "Nublado"
+  climaDetails?: string;
+  workConditions: 'normal' | 'parcial' | 'suspenso';
+  servicesDone: string; // descrição dos serviços executados
+  laborCount?: string; // quantidade de mão de obra
+  equipmentsActive?: string; // equipamentos em uso
+  occurrences?: string; // ocorrências relevantes
+  inspectorId?: string; // fiscal associado ao relatório (opcional)
+  inspectorName?: string;
+  createdAt: string;
+  createdBy: string;
+  creatorName: string;
+
+  // Novos campos adicionados:
+  plannedProgress?: number; // % de obra planejado
+  executedProgress?: number; // % de obra executado
+  activityPeriod?: string; // período da atividade (ex: "Integral", "Diurno", "Noturno")
+  projectStartDate?: string; // data de início da obra (pré-preenchido)
+  projectEndDate?: string; // data de término da obra (pré-preenchido)
+  ddsTheme?: string; // Tema do DDS
+  ddsPhotoUrl?: string; // foto do DDS
+  workforceList?: { id: string; role: string; quantity: number }[]; // quantidade de efetivo do dia em modelo de listagem
+  companyLaborList?: { id: string; company: string; count: number; functions: string }[]; // listagem de empresa com quantidade de funcionarios e funções por funcionario
+  servicePhotos?: { id: string; url: string; caption: string }[]; // fotos dos serviços sendo realizados
 }
 
 export interface ConsumptionRCRequest {
