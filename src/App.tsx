@@ -366,6 +366,7 @@ export default function App() {
   const [viewingDailyReport, setViewingDailyReport] = useState<DailyWorkReport | null>(null);
   const [newDailyReport, setNewDailyReport] = useState({
     projectId: '',
+    rdoNumber: '',
     date: new Date().toISOString().split('T')[0],
     weatherMorning: 'Sol',
     weatherAfternoon: 'Sol',
@@ -392,14 +393,19 @@ export default function App() {
     if (newDailyReport.projectId) {
       const proj = projects.find(p => p.id === newDailyReport.projectId);
       if (proj) {
+        // Obter número sequencial se não estiver editando e o número estiver vazio
+        const projectRdos = dailyWorkReports.filter(r => r.projectId === newDailyReport.projectId);
+        const nextNum = (projectRdos.length + 1).toString().padStart(3, '0');
+
         setNewDailyReport(prev => ({
           ...prev,
           projectStartDate: proj.startDate || '',
-          projectEndDate: proj.endDate || ''
+          projectEndDate: proj.endDate || '',
+          rdoNumber: prev.rdoNumber || nextNum
         }));
       }
     }
-  }, [newDailyReport.projectId, projects]);
+  }, [newDailyReport.projectId, projects, dailyWorkReports]);
 
   useEffect(() => {
     if (isAddingDailyReport && !editingDailyReport) {
@@ -889,6 +895,7 @@ export default function App() {
 
       const docData: any = {
         id,
+        rdoNumber: newDailyReport.rdoNumber || '',
         projectId: newDailyReport.projectId,
         projectName: project ? project.name : '',
         date: newDailyReport.date,
@@ -925,7 +932,7 @@ export default function App() {
         const newNotif: AppNotification = {
           id: `notif-rdo-${Date.now()}`,
           title: 'Novo RDO Registrado',
-          description: `O diário de obra RDO #${id.substring(4, 9) || id} para "${project ? project.name : ''}" foi cadastrado.`,
+          description: `O diário de obra RDO #${newDailyReport.rdoNumber || id.substring(4, 9) || id} para "${project ? project.name : ''}" foi cadastrado.`,
           time: 'Agora mesmo',
           read: false,
           type: 'rdo',
@@ -937,6 +944,7 @@ export default function App() {
       setEditingDailyReport(null);
       setNewDailyReport({
         projectId: '',
+        rdoNumber: '',
         date: new Date().toISOString().split('T')[0],
         weatherMorning: 'Sol',
         weatherAfternoon: 'Sol',
@@ -4326,7 +4334,7 @@ export default function App() {
       doc.setFontSize(8);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(100, 116, 139);
-      doc.text(`Identificador: RDO #${report.id.substring(4, 9) || report.id}`, pageWidth - 15, 21, { align: 'right' });
+      doc.text(`Identificador: RDO #${report.rdoNumber || report.id.substring(4, 9) || report.id}`, pageWidth - 15, 21, { align: 'right' });
       doc.text(`Data do Diário: ${formatInputDate(report.date)}`, pageWidth - 15, 26, { align: 'right' });
       doc.text(`Emissão: ${new Date().toLocaleDateString('pt-BR')}`, pageWidth - 15, 31, { align: 'right' });
 
@@ -4575,11 +4583,11 @@ export default function App() {
         addWatermark(doc);
         doc.setFontSize(8);
         doc.setTextColor(148, 163, 184);
-        doc.text(`Registro Oficial de Fiscalização - RDO #${report.id.substring(4, 9) || report.id} - Página ${i} de ${totalPages}`, pageWidth / 2, pageHeight - 12, { align: 'center' });
+        doc.text(`Registro Oficial de Fiscalização - RDO #${report.rdoNumber || report.id.substring(4, 9) || report.id} - Página ${i} de ${totalPages}`, pageWidth / 2, pageHeight - 12, { align: 'center' });
         doc.text('© 2026 AXIA ENERGIA - Todos os direitos reservados. Confidencial.', pageWidth / 2, pageHeight - 7, { align: 'center' });
       }
 
-      doc.save(`RDO_${report.projectName.replace(/\s+/g, '_')}_RDO-${report.id.substring(4, 9) || report.id}_${report.date}.pdf`);
+      doc.save(`RDO_${report.projectName.replace(/\s+/g, '_')}_RDO-${report.rdoNumber || report.id.substring(4, 9) || report.id}_${report.date}.pdf`);
       showNotification('Relatório Diário de Obra (RDO) em PDF gerado com sucesso!');
     } catch (pdfErr) {
       console.error('Error generating single RDO PDF:', pdfErr);
@@ -4670,7 +4678,7 @@ export default function App() {
 
       const rdoSummaryRows = projectRdos.map((r) => [
         formatInputDate(r.date),
-        `RDO #${r.id.substring(4, 9) || r.id}`,
+        `RDO #${r.rdoNumber || r.id.substring(4, 9) || r.id}`,
         r.activityPeriod || 'Integral',
         r.inspectorName || r.creatorName || '-',
         `${r.plannedProgress || 0}% / ${r.executedProgress || 0}%`,
@@ -4716,7 +4724,7 @@ export default function App() {
         doc.setTextColor(15, 23, 42);
         doc.setFontSize(9);
         doc.setFont('helvetica', 'bold');
-        doc.text(`RDO #${r.id.substring(4, 9) || r.id} - ${formatInputDate(r.date)} (Fiscal: ${r.inspectorName || r.creatorName})`, 24, currentY + 4.8);
+        doc.text(`RDO #${r.rdoNumber || r.id.substring(4, 9) || r.id} - ${formatInputDate(r.date)} (Fiscal: ${r.inspectorName || r.creatorName})`, 24, currentY + 4.8);
 
         currentY += 12;
 
@@ -4776,6 +4784,7 @@ export default function App() {
         (r.servicePhotos || []).map(p => ({
           ...p,
           rdoId: r.id,
+          rdoNumber: r.rdoNumber,
           rdoDate: r.date
         }))
       );
@@ -4818,7 +4827,7 @@ export default function App() {
             doc.setFontSize(8);
             doc.setFont('helvetica', 'normal');
             doc.setTextColor(51, 65, 85);
-            doc.text(`RDO #${photo.rdoId.substring(4, 9) || photo.rdoId} (${formatInputDate(photo.rdoDate)})`, pX, pY + pHeight + 4);
+            doc.text(`RDO #${photo.rdoNumber || photo.rdoId.substring(4, 9) || photo.rdoId} (${formatInputDate(photo.rdoDate)})`, pX, pY + pHeight + 4);
             const splitCap = doc.splitTextToSize(photo.caption || 'Serviço em execução', colWidth);
             doc.text(splitCap, pX, pY + pHeight + 8);
 
@@ -8888,6 +8897,7 @@ export default function App() {
                           setEditingDailyReport(null);
                           setNewDailyReport({
                             projectId: (currentUser?.accessLevel === 'Fiscal de Campo' && currentUser?.projectId) ? currentUser.projectId : (projects[0]?.id || ''),
+                            rdoNumber: '',
                             date: new Date().toISOString().split('T')[0],
                             weatherMorning: 'Sol',
                             weatherAfternoon: 'Sol',
@@ -8965,27 +8975,28 @@ export default function App() {
                           onClick={() => {
                             setEditingDailyReport(null);
                             setNewDailyReport({
-                              projectId: (currentUser?.accessLevel === 'Fiscal de Campo' && currentUser?.projectId) ? currentUser.projectId : (projects[0]?.id || ''),
-                              date: new Date().toISOString().split('T')[0],
-                              weatherMorning: 'Sol',
-                              weatherAfternoon: 'Sol',
-                              climaDetails: '',
-                              workConditions: 'normal',
-                              servicesDone: '',
-                              laborCount: '',
-                              equipmentsActive: '',
-                              occurrences: '',
-                              inspectorId: currentUser?.accessLevel === 'Fiscal de Campo' ? currentUser.id : '',
-                              plannedProgress: 0,
-                              executedProgress: 0,
-                              activityPeriod: 'Integral',
-                              projectStartDate: '',
-                              projectEndDate: '',
-                              ddsTheme: '',
-                              ddsPhotoUrl: '',
-                              workforceList: [],
-                              companyLaborList: [],
-                              servicePhotos: []
+                                projectId: (currentUser?.accessLevel === 'Fiscal de Campo' && currentUser?.projectId) ? currentUser.projectId : (projects[0]?.id || ''),
+                                rdoNumber: '',
+                                date: new Date().toISOString().split('T')[0],
+                                weatherMorning: 'Sol',
+                                weatherAfternoon: 'Sol',
+                                climaDetails: '',
+                                workConditions: 'normal',
+                                servicesDone: '',
+                                laborCount: '',
+                                equipmentsActive: '',
+                                occurrences: '',
+                                inspectorId: currentUser?.accessLevel === 'Fiscal de Campo' ? currentUser.id : '',
+                                plannedProgress: 0,
+                                executedProgress: 0,
+                                activityPeriod: 'Integral',
+                                projectStartDate: '',
+                                projectEndDate: '',
+                                ddsTheme: '',
+                                ddsPhotoUrl: '',
+                                workforceList: [],
+                                companyLaborList: [],
+                                servicePhotos: []
                             });
                             setIsAddingDailyReport(true);
                           }}
@@ -9065,7 +9076,7 @@ export default function App() {
 
                                     <div className="flex items-center justify-between gap-1.5 mb-2">
                                       <h3 className="text-base font-bold text-slate-800 dark:text-white truncate">
-                                        RDO # {report.id.substring(4, 9) || report.id}
+                                        RDO # {report.rdoNumber || report.id.substring(4, 9) || report.id}
                                       </h3>
                                       {report.activityPeriod && (
                                         <span className="text-[9px] font-black bg-blue-50 text-blue-600 dark:bg-blue-950/20 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
@@ -9157,6 +9168,7 @@ export default function App() {
                                           setEditingDailyReport(report);
                                           setNewDailyReport({
                                             projectId: report.projectId,
+                                            rdoNumber: report.rdoNumber || '',
                                             date: report.date,
                                             weatherMorning: report.weatherMorning,
                                             weatherAfternoon: report.weatherAfternoon,
@@ -11222,9 +11234,9 @@ export default function App() {
                 </div>
 
                 <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Selecione a Obra / Projeto *</label>
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Selecione a Obra *</label>
                       <select 
                         required
                         value={newDailyReport.projectId}
@@ -11235,7 +11247,8 @@ export default function App() {
                           setNewDailyReport({ 
                             ...newDailyReport, 
                             projectId: selectedId,
-                            inspectorId: inspectorIdVal
+                            inspectorId: inspectorIdVal,
+                            rdoNumber: '' // Força recálculo do número sequencial ao selecionar outra obra
                           });
                         }}
                         className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
@@ -11245,6 +11258,18 @@ export default function App() {
                           <option key={p.id} value={p.id}>{p.name}</option>
                         ))}
                       </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Número do RDO *</label>
+                      <input 
+                        type="text" 
+                        required
+                        placeholder="Ex: 001"
+                        value={newDailyReport.rdoNumber}
+                        onChange={(e) => setNewDailyReport({ ...newDailyReport, rdoNumber: e.target.value })}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                      />
                     </div>
 
                     <div className="space-y-1.5">
@@ -11737,7 +11762,7 @@ export default function App() {
                   </div>
                   <h3 className="text-2xl font-display font-bold text-slate-900 dark:text-white mt-1.5 flex items-center gap-2">
                     <ClipboardList size={22} className="text-axia-primary" />
-                    Diário de Obra (RDO) #{viewingDailyReport.id.substring(4, 9) || viewingDailyReport.id}
+                    Diário de Obra (RDO) #{viewingDailyReport.rdoNumber || viewingDailyReport.id.substring(4, 9) || viewingDailyReport.id}
                   </h3>
                 </div>
                 <div className="flex items-center gap-2">
@@ -11855,7 +11880,7 @@ export default function App() {
                     <div className="flex flex-col items-center">
                       <span className="block text-[9px] font-black uppercase text-slate-400 mb-1.5 self-start">Evidência / Foto do DDS</span>
                       {viewingDailyReport.ddsPhotoUrl ? (
-                        <div className="w-full h-24 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-sm relative group cursor-pointer" onClick={() => window.open(viewingDailyReport.ddsPhotoUrl, '_blank')}>
+                        <div className="w-full h-24 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-sm relative group cursor-pointer" onClick={() => setSelectedPhotoUrl(viewingDailyReport.ddsPhotoUrl)}>
                           <img src={viewingDailyReport.ddsPhotoUrl} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] font-bold">
                             Ver Ampliado
@@ -11924,7 +11949,7 @@ export default function App() {
                         <div 
                           key={item.id} 
                           className="bg-white dark:bg-slate-850/60 p-2 rounded-2xl border border-slate-100 dark:border-slate-800 flex flex-col justify-between group cursor-pointer"
-                          onClick={() => window.open(item.url, '_blank')}
+                          onClick={() => setSelectedPhotoUrl(item.url)}
                         >
                           <div className="w-full aspect-[4/3] rounded-xl overflow-hidden bg-slate-100 border border-slate-100 dark:border-slate-800 mb-2 relative">
                             <img src={item.url} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />

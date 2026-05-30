@@ -179,6 +179,7 @@ export interface FieldInspector {
 
 export interface DailyWorkReport {
   id: string;
+  rdoNumber?: string;
   projectId: string;
   projectName: string;
   date: string;
