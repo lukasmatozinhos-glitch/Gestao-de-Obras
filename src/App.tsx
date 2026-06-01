@@ -50,7 +50,8 @@ import { GripVertical, LayoutDashboard,
   DownloadCloud,
   UploadCloud,
   EyeOff,
-  ClipboardCheck
+  ClipboardCheck,
+  ListTodo
 } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
 import { jsPDF } from 'jspdf';
@@ -358,7 +359,8 @@ export default function App() {
     phone: '',
     email: '',
     company: '',
-    projectId: ''
+    projectId: '',
+    photoUrl: ''
   });
   
   const [isAddingDailyReport, setIsAddingDailyReport] = useState(false);
@@ -666,6 +668,26 @@ export default function App() {
   const [settingsTab, setSettingsTab] = useState<'general' | 'appearance' | 'security' | 'users'>('general');
   const [notification, setNotification] = useState<string | null>(null);
   const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
+
+  // Estados e persistência para Anotações Diárias (Personal Task Tracker)
+  const [personalTodos, setPersonalTodos] = useState<{ id: string; text: string; completed: boolean; createdAt: string }[]>(() => {
+    try {
+      const saved = localStorage.getItem('axia_personal_todos');
+      return saved ? JSON.parse(saved) : [
+        { id: 'todo-1', text: 'Revisar RDOs pendentes da semana', completed: false, createdAt: new Date().toISOString() },
+        { id: 'todo-2', text: 'Verificar novas medições no painel', completed: false, createdAt: new Date().toISOString() },
+        { id: 'todo-3', text: 'Atualizar planejamento da obra principal', completed: true, createdAt: new Date().toISOString() }
+      ];
+    } catch {
+      return [];
+    }
+  });
+  const [showTodoPopup, setShowTodoPopup] = useState(false);
+  const [newTodoText, setNewTodoText] = useState('');
+
+  useEffect(() => {
+    localStorage.setItem('axia_personal_todos', JSON.stringify(personalTodos));
+  }, [personalTodos]);
   const [notifications, setNotifications] = useState<AppNotification[]>([
     {
       id: 'notif-1',
@@ -856,6 +878,7 @@ export default function App() {
         company: newFieldInspector.company || '',
         projectId: newFieldInspector.projectId || '',
         projectName: projectObj ? projectObj.name : '',
+        photoUrl: newFieldInspector.photoUrl || '',
         createdAt: editingFieldInspector ? editingFieldInspector.createdAt : new Date().toISOString(),
         createdBy: editingFieldInspector ? (editingFieldInspector.createdBy || currentUser?.id || '') : (currentUser?.id || ''),
         creatorName: editingFieldInspector ? (editingFieldInspector.creatorName || currentUser?.name || '') : (currentUser?.name || '')
@@ -864,7 +887,7 @@ export default function App() {
       showNotification(editingFieldInspector ? 'Fiscal atualizado com sucesso!' : 'Fiscal cadastrado com sucesso!');
       setIsAddingFieldInspector(false);
       setEditingFieldInspector(null);
-      setNewFieldInspector({ name: '', phone: '', email: '', company: '', projectId: '' });
+      setNewFieldInspector({ name: '', phone: '', email: '', company: '', projectId: '', photoUrl: '' });
     } catch (e: any) {
       console.error(e);
       handleFirestoreError(e, OperationType.WRITE, 'fieldInspectors');
@@ -5570,6 +5593,19 @@ export default function App() {
             >
               {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
             </button>
+
+            {/* Botão de Anotações Diárias */}
+            <button
+              onClick={() => setShowTodoPopup(true)}
+              className="relative p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-500 dark:text-slate-400 transition-colors"
+              title="Tarefas e Anotações Diárias"
+            >
+              <ListTodo size={20} />
+              {personalTodos.some(t => !t.completed) && (
+                <span className="absolute top-1 right-1 flex h-2.5 w-2.5 rounded-full bg-axia-primary border-2 border-white dark:border-slate-900" />
+              )}
+            </button>
+
             <div className="relative">
               <button 
                 onClick={() => setShowNotificationsDropdown(!showNotificationsDropdown)}
@@ -8922,7 +8958,7 @@ export default function App() {
                           setIsAddingDailyReport(true);
                         } else {
                           setEditingFieldInspector(null);
-                          setNewFieldInspector({ name: '', phone: '', email: '', company: '', projectId: '' });
+                          setNewFieldInspector({ name: '', phone: '', email: '', company: '', projectId: '', photoUrl: '' });
                           setIsAddingFieldInspector(true);
                         }
                       }}
@@ -9227,7 +9263,7 @@ export default function App() {
                         <button
                           onClick={() => {
                             setEditingFieldInspector(null);
-                            setNewFieldInspector({ name: '', phone: '', email: '', company: '', projectId: '' });
+                            setNewFieldInspector({ name: '', phone: '', email: '', company: '', projectId: '', photoUrl: '' });
                             setIsAddingFieldInspector(true);
                           }}
                           className="bg-axia-primary text-white px-5 py-2 rounded-xl text-xs font-bold"
@@ -9241,8 +9277,19 @@ export default function App() {
                           <div key={inspector.id} className="bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-100 dark:border-slate-800 p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
                             <div>
                               <div className="flex items-center gap-3 mb-4">
-                                <div className="w-12 h-12 rounded-xl bg-axia-primary/10 flex items-center justify-center text-axia-primary font-black uppercase text-base">
-                                  {inspector.name.split(' ').map(n=>n[0]).join('').slice(0, 2)}
+                                <div className="relative">
+                                  {inspector.photoUrl ? (
+                                    <img 
+                                      src={inspector.photoUrl} 
+                                      alt={inspector.name} 
+                                      className="w-12 h-12 rounded-xl object-cover border border-slate-150 dark:border-slate-850 shadow-sm"
+                                      referrerPolicy="no-referrer" 
+                                    />
+                                  ) : (
+                                    <div className="w-12 h-12 rounded-xl bg-axia-primary/10 flex items-center justify-center text-axia-primary font-black uppercase text-base">
+                                      {inspector.name.split(' ').map(n=>n[0]).join('').slice(0, 2)}
+                                    </div>
+                                  )}
                                 </div>
                                 <div className="min-w-0 flex-1">
                                   <h3 className="text-sm font-bold text-slate-800 dark:text-white truncate" title={inspector.name}>
@@ -9294,7 +9341,8 @@ export default function App() {
                                       phone: inspector.phone || '',
                                       email: inspector.email || '',
                                       company: inspector.company || '',
-                                      projectId: inspector.projectId || ''
+                                      projectId: inspector.projectId || '',
+                                      photoUrl: inspector.photoUrl || ''
                                     });
                                     setIsAddingFieldInspector(true);
                                   }}
@@ -9911,6 +9959,226 @@ export default function App() {
           )}
         </div>
       )}
+
+      {/* Daily Notes / Scratchpad Sliding Side Sheet */}
+      <AnimatePresence>
+        {showTodoPopup && (
+          <div className="fixed inset-0 z-[110] flex justify-end">
+            {/* Backdrop */}
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowTodoPopup(false)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+            />
+            {/* Slide-out Sheet */}
+            <motion.div 
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 26, stiffness: 220 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-md h-full relative z-10 shadow-2xl flex flex-col border-l border-slate-100 dark:border-slate-800"
+            >
+              {/* Header */}
+              <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-950/30">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <ListTodo className="text-axia-primary animate-pulse" size={22} />
+                    <h2 className="text-lg font-display font-bold text-slate-800 dark:text-white">Anotações Diárias</h2>
+                  </div>
+                  <p className="text-xs text-slate-400 dark:text-slate-500">Organize suas tarefas pessoais e metas do dia</p>
+                </div>
+                <button 
+                  onClick={() => setShowTodoPopup(false)}
+                  className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Progress Summary */}
+              {personalTodos.length > 0 && (
+                <div className="px-6 py-4 bg-slate-50/30 dark:bg-slate-950/10 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex justify-between items-center text-xs mb-2">
+                    <span className="font-bold text-slate-500 dark:text-slate-400">Progresso Geral</span>
+                    <span className="font-black text-axia-primary">
+                      {personalTodos.filter(t => t.completed).length} de {personalTodos.length} ({Math.round((personalTodos.filter(t => t.completed).length / personalTodos.length) * 100)}%)
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                    <div 
+                      className="bg-axia-primary h-full transition-all duration-300" 
+                      style={{ width: `${(personalTodos.filter(t => t.completed).length / personalTodos.length) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Input Form */}
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!newTodoText.trim()) return;
+                  const newTodoItem = {
+                    id: `todo-${Date.now()}`,
+                    text: newTodoText.trim(),
+                    completed: false,
+                    createdAt: new Date().toISOString()
+                  };
+                  setPersonalTodos(prev => [newTodoItem, ...prev]);
+                  setNewTodoText('');
+                }}
+                className="p-6 border-b border-slate-100 dark:border-slate-800"
+              >
+                <div className="flex gap-2">
+                  <input 
+                    type="text"
+                    value={newTodoText}
+                    onChange={(e) => setNewTodoText(e.target.value)}
+                    placeholder="Adicionar nova tarefa para hoje..."
+                    className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-150 dark:border-slate-750 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all text-slate-800 dark:text-slate-100 font-medium"
+                  />
+                  <button 
+                    type="submit"
+                    className="bg-axia-primary hover:bg-axia-primary/95 text-white p-3 rounded-2xl flex items-center justify-center shadow-lg shadow-axia-primary/15 hover:shadow-axia-primary/20 transition-all font-bold font-sans"
+                  >
+                    <Plus size={20} />
+                  </button>
+                </div>
+              </form>
+
+              {/* Task list container */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                {personalTodos.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-10 text-center">
+                    <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800/50 rounded-3xl flex items-center justify-center text-slate-300 dark:text-slate-600 mb-4 border border-dashed border-slate-200 dark:border-slate-800">
+                      <ListTodo size={28} />
+                    </div>
+                    <h3 className="font-bold text-slate-700 dark:text-slate-300 text-sm mb-1">Tudo limpo por aqui!</h3>
+                    <p className="text-xs text-slate-400 dark:text-slate-500 max-w-xs leading-relaxed">Sua lista de tarefas diárias está vazia. Comece inserindo novas atividades acima para planejar seu dia.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {personalTodos.map((todo) => (
+                      <motion.div 
+                        key={todo.id}
+                        layout
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        className={`flex items-center justify-between p-4 rounded-2xl border transition-all ${
+                          todo.completed 
+                            ? 'bg-slate-50/50 dark:bg-slate-950/20 border-slate-100/50 dark:border-slate-850/50 opacity-65' 
+                            : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 shadow-sm hover:shadow'
+                        }`}
+                      >
+                        <div 
+                          onClick={() => {
+                            setPersonalTodos(prev => prev.map(t => t.id === todo.id ? { ...t, completed: !t.completed } : t));
+                          }}
+                          className="flex items-center gap-3 flex-1 cursor-pointer select-none min-w-0"
+                        >
+                          <button 
+                            type="button"
+                            className={`w-5 h-5 rounded-md flex items-center justify-center border-2 transition-all shrink-0 ${
+                              todo.completed 
+                                ? 'bg-axia-primary border-axia-primary text-white' 
+                                : 'border-slate-300 dark:border-slate-600 hover:border-axia-primary'
+                            }`}
+                          >
+                            {todo.completed && <CheckCircle2 size={13} className="stroke-[3]" />}
+                          </button>
+                          <span className={`text-sm font-medium truncate py-0.5 ${
+                            todo.completed 
+                              ? 'text-slate-400 dark:text-slate-500 line-through decoration-slate-300 dark:decoration-slate-700 decoration-2' 
+                              : 'text-slate-700 dark:text-slate-200'
+                          }`}>
+                            {todo.text}
+                          </span>
+                        </div>
+                        <button 
+                          onClick={() => {
+                            setPersonalTodos(prev => prev.filter(t => t.id !== todo.id));
+                          }}
+                          className="p-1 text-slate-400 hover:text-red-500 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors ml-2 shrink-0"
+                          title="Remover Tarefa"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Quick Suggestions Presets */}
+                <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
+                  <h4 className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-3">Sugestões Rápidas de Tarefas</h4>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      'Fazer vistoria em campo',
+                      'Revisar fotos de hoje no RDO',
+                      'Registrar boletim de medição',
+                      'Alinhamento com empreiteiro',
+                      'Verificar liberação de RC',
+                      'Revisar cronograma da obra'
+                    ].map((preset, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          const newTodoItem = {
+                            id: `todo-${Date.now()}-${idx}`,
+                            text: preset,
+                            completed: false,
+                            createdAt: new Date().toISOString()
+                          };
+                          setPersonalTodos(prev => [newTodoItem, ...prev]);
+                          showNotification(`Tarefa adicionada: "${preset}"`);
+                        }}
+                        className="text-xs bg-slate-50 dark:bg-slate-850 hover:bg-axia-primary/10 hover:text-axia-primary border border-slate-100 dark:border-slate-800 text-slate-500 dark:text-slate-400 px-3 py-1.5 rounded-full transition-colors font-semibold"
+                      >
+                        + {preset}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer controls */}
+              <div className="p-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30 flex justify-between gap-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (personalTodos.length === 0) return;
+                    if (window.confirm('Deseja limpar todas as tarefas?')) {
+                      setPersonalTodos([]);
+                      showNotification('Todas as tarefas foram removidas.');
+                    }
+                  }}
+                  disabled={personalTodos.length === 0}
+                  className="flex-1 text-xs text-center border border-slate-200 dark:border-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 py-2.5 rounded-xl font-bold transition-all disabled:opacity-50 disabled:pointer-events-none"
+                >
+                  Limpar Tudo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const completedCount = personalTodos.filter(t => t.completed).length;
+                    if (completedCount === 0) return;
+                    setPersonalTodos(prev => prev.filter(t => !t.completed));
+                    showNotification(`${completedCount} tarefa(s) concluída(s) agrupada(s) limpa(s).`);
+                  }}
+                  disabled={!personalTodos.some(t => t.completed)}
+                  className="flex-1 text-xs text-center bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 hover:bg-slate-250 dark:hover:bg-slate-700 py-2.5 rounded-xl font-bold transition-all disabled:opacity-50 disabled:pointer-events-none"
+                >
+                  Limpar Concluídas
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* User Profile Modal */}
       <AnimatePresence>
@@ -11096,6 +11364,53 @@ export default function App() {
                 </div>
 
                 <div className="space-y-5">
+                  {/* Foto de Perfil */}
+                  <div className="flex flex-col items-center justify-center pb-2">
+                    <div className="relative group w-24 h-24">
+                      {newFieldInspector.photoUrl ? (
+                        <>
+                          <img
+                            src={newFieldInspector.photoUrl}
+                            alt="Visualização"
+                            className="w-24 h-24 rounded-full object-cover border-2 border-axia-primary/35 shadow-md"
+                            referrerPolicy="no-referrer"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setNewFieldInspector({ ...newFieldInspector, photoUrl: '' })}
+                            className="absolute -top-1 -right-1 bg-red-500 text-white p-1 rounded-full hover:bg-red-600 transition-colors shadow-md"
+                          >
+                            <X size={14} />
+                          </button>
+                        </>
+                      ) : (
+                        <div className="w-24 h-24 rounded-full border-2 border-dashed border-slate-200 dark:border-slate-800 flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-900 transition-all hover:border-axia-primary text-slate-400 hover:text-axia-primary">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            id="inspector-photo-upload"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onloadend = () => {
+                                  setNewFieldInspector({ ...newFieldInspector, photoUrl: reader.result as string });
+                                };
+                                reader.readAsDataURL(file);
+                              }
+                            }}
+                            className="hidden"
+                          />
+                          <label htmlFor="inspector-photo-upload" className="cursor-pointer flex flex-col items-center justify-center w-full h-full">
+                            <Camera size={22} className="mb-1" />
+                            <span className="text-[10px] font-bold">Foto</span>
+                          </label>
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-2">Foto de Perfil</span>
+                  </div>
+
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Nome Completo *</label>
                     <div className="relative">
@@ -11234,9 +11549,9 @@ export default function App() {
                 </div>
 
                 <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Selecione a Obra *</label>
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Selecione a Obra / Projeto *</label>
                       <select 
                         required
                         value={newDailyReport.projectId}
@@ -11247,8 +11562,7 @@ export default function App() {
                           setNewDailyReport({ 
                             ...newDailyReport, 
                             projectId: selectedId,
-                            inspectorId: inspectorIdVal,
-                            rdoNumber: '' // Força recálculo do número sequencial ao selecionar outra obra
+                            inspectorId: inspectorIdVal
                           });
                         }}
                         className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
@@ -11258,18 +11572,6 @@ export default function App() {
                           <option key={p.id} value={p.id}>{p.name}</option>
                         ))}
                       </select>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Número do RDO *</label>
-                      <input 
-                        type="text" 
-                        required
-                        placeholder="Ex: 001"
-                        value={newDailyReport.rdoNumber}
-                        onChange={(e) => setNewDailyReport({ ...newDailyReport, rdoNumber: e.target.value })}
-                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
-                      />
                     </div>
 
                     <div className="space-y-1.5">
