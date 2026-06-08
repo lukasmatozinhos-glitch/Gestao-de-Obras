@@ -24,6 +24,10 @@ service cloud.firestore {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
+    function isNumeric(val) {
+      return val is int || val is float;
+    }
+
     function incoming() {
       return request.resource.data;
     }
@@ -82,7 +86,7 @@ service cloud.firestore {
              data.projectId is string && data.projectId.size() <= 128 &&
              data.projectName is string && data.projectName.size() <= 256 &&
              data.contractNumber is string && data.contractNumber.size() <= 128 &&
-             data.value is number && data.value >= 0 &&
+             isNumeric(data.value) && data.value >= 0 &&
              data.date is string && data.date.size() <= 64 &&
              data.status is string && data.status.size() <= 64;
     }
@@ -92,7 +96,7 @@ service cloud.firestore {
              data.projectId is string && data.projectId.size() <= 128 &&
              data.projectName is string && data.projectName.size() <= 256 &&
              data.date is string && data.date.size() <= 64 &&
-             data.value is number && data.value >= 0 &&
+             isNumeric(data.value) && data.value >= 0 &&
              (!('description' in data) || (data.description is string && data.description.size() <= 1024)) &&
              data.status in ['pending', 'approved', 'paid'] &&
              (!('createdBy' in data) || (data.createdBy is string && data.createdBy.size() <= 128)) &&
@@ -104,7 +108,7 @@ service cloud.firestore {
              data.projectId is string && data.projectId.size() <= 128 &&
              data.number is string && data.number.size() <= 128 &&
              data.description is string && data.description.size() <= 1024 &&
-             data.value is number && data.value >= 0 &&
+             isNumeric(data.value) && data.value >= 0 &&
              data.isApproved is bool &&
              data.createdAt is string && data.createdAt.size() <= 64;
     }
@@ -115,28 +119,28 @@ service cloud.firestore {
              data.name is string && data.name.size() <= 256 &&
              data.startDate is string && data.startDate.size() <= 64 &&
              data.endDate is string && data.endDate.size() <= 64 &&
-             data.progress is number && data.progress >= 0 && data.progress <= 100 &&
+             isNumeric(data.progress) && data.progress >= 0 && data.progress <= 100 &&
              data.status is string && data.status.size() <= 64 &&
-             data.order is number;
+             isNumeric(data.order);
     }
 
     function isValidPlanningActivity(data) {
       return data.id is string && data.id.size() <= 128 &&
              data.projectId is string && data.projectId.size() <= 128 &&
              data.name is string && data.name.size() <= 256 &&
-             data.startMonth is number && data.startYear is number &&
-             data.endMonth is number && data.endYear is number &&
+             isNumeric(data.startMonth) && isNumeric(data.startYear) &&
+             isNumeric(data.endMonth) && isNumeric(data.endYear) &&
              data.color is string && data.color.size() <= 64 &&
-             data.order is number;
+             isNumeric(data.order);
     }
 
     function isValidFiscalPlanningActivity(data) {
       return data.id is string && data.id.size() <= 128 &&
              data.name is string && data.name.size() <= 256 &&
-             data.startMonth is number && data.startYear is number &&
-             data.endMonth is number && data.endYear is number &&
+             isNumeric(data.startMonth) && isNumeric(data.startYear) &&
+             isNumeric(data.endMonth) && isNumeric(data.endYear) &&
              data.color is string && data.color.size() <= 64 &&
-             data.order is number;
+             isNumeric(data.order);
     }
 
     function isValidRCRequest(data) {
@@ -144,7 +148,7 @@ service cloud.firestore {
              data.projectName is string && data.projectName.size() <= 256 &&
              data.requestDate is string && data.requestDate.size() <= 64 &&
              data.status in ['requested', 'pending', 'received', 'returned', 'canceled'] &&
-             (data.value is number || !('value' in data)) &&
+             (isNumeric(data.value) || !('value' in data)) &&
              (!('signedBulletin' in data) || (
                data.signedBulletin.name is string && data.signedBulletin.name.size() <= 256 &&
                data.signedBulletin.url is string && data.signedBulletin.url.size() <= 1048576
@@ -154,7 +158,7 @@ service cloud.firestore {
     function isValidTravel(data) {
       return data.id is string && data.id.size() <= 128 &&
              data.name is string && data.name.size() <= 256 &&
-             data.cost is number && data.cost >= 0 &&
+             isNumeric(data.cost) && data.cost >= 0 &&
              data.inspector is string && data.inspector.size() <= 256 &&
              data.origin is string && data.origin.size() <= 256 &&
              data.destination is string && data.destination.size() <= 256 &&
