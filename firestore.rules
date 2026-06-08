@@ -1,15 +1,17 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 0. Global Safety Net
+    
+    // ===============================================================
+    // 1. Global Safety Net (Deny-All by Default)
+    // ===============================================================
     match /{document=**} {
       allow read, write: if false;
     }
 
     // ===============================================================
-    // Helper Functions
+    // 2. Global Helper Primitives & Boundary Limits
     // ===============================================================
-    
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -18,228 +20,309 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // Hardened Admin Helper
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Hardened Admin Helper: checks token email list OR Firestore user role hierarchy
     function isAdmin() {
       return isAuthenticated() && (
-        request.auth.token.email in ["lukasmatozinhos3@gmail.com", "lucas.m.santos@axia.com.br", "lucas.m.santos@axia.com.br"] ||
+        request.auth.token.email in ["lukasmatozinhos3@gmail.com", "lucas.m.santos@axia.com.br", "ricardo.silva@axiaenergia.com.br"] ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accessLevel in ['Administrador de Sistema', 'Gestor'])
       );
     }
 
-    function isValidId(id) {
-      return id is string && id.size() <= 128;
-    }
-
-    function isValidEmail(email) {
-      return email is string && email.size() > 5;
-    }
-
-    function isValidUrl(url) {
-      return url is string && url.size() > 0;
+    // Relational Project Governance Helper for Work Segregation (Obra Isolation)
+    function isAuthorizedForProject(projectId) {
+      return isAuthenticated() && (
+        isAdmin() || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('projectId', '') == projectId ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('projectId', '') == ''))
+      );
     }
 
     // ===============================================================
-    // Domain Validators (The "Anti-Update-Gap")
+    // 3. Validation Blueprints (Anti-Update-Gap / Precise Schemas)
     // ===============================================================
-
     function isValidUser(data) {
-      return data.id is string && 
-             data.name is string && 
-             data.email is string;
+      return data.id is string && data.id.size() <= 128 &&
+             data.name is string && data.name.size() <= 128 &&
+             data.email is string && data.email.size() <= 128 &&
+             (!('role' in data) || (data.role is string && data.role.size() <= 128)) &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() <= 128)) &&
+             (!('accessLevel' in data) || (data.accessLevel is string && data.accessLevel.size() <= 128));
     }
 
     function isValidProject(data) {
-      return data.id is string && data.name is string &&
-             data.client is string && data.status is string;
+      return data.id is string && data.id.size() <= 128 &&
+             data.name is string && data.name.size() <= 256 &&
+             data.client is string && data.client.size() <= 128 &&
+             data.status is string && data.status.size() <= 64;
     }
 
     function isValidPhotoReport(data) {
-      return data.id is string && data.projectId is string &&
-             data.url is string && 
-             data.date is string;
+      return data.id is string && data.id.size() <= 128 &&
+             data.projectId is string && data.projectId.size() <= 128 &&
+             data.url is string && data.url.size() <= 1048576 && // 1MB limit check
+             data.date is string && data.date.size() <= 64;
     }
 
     function isValidBulletin(data) {
-      return data.id is string && data.projectId is string &&
-             data.projectName is string && data.contractNumber is string &&
-             data.value is number && data.date is string &&
-             data.status is string;
+      return data.id is string && data.id.size() <= 128 &&
+             data.projectId is string && data.projectId.size() <= 128 &&
+             data.projectName is string && data.projectName.size() <= 256 &&
+             data.contractNumber is string && data.contractNumber.size() <= 128 &&
+             data.value is number && data.value >= 0 &&
+             data.date is string && data.date.size() <= 64 &&
+             data.status is string && data.status.size() <= 64;
+    }
+
+    function isValidMeasurement(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.projectId is string && data.projectId.size() <= 128 &&
+             data.projectName is string && data.projectName.size() <= 256 &&
+             data.date is string && data.date.size() <= 64 &&
+             data.value is number && data.value >= 0 &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 1024)) &&
+             data.status in ['pending', 'approved', 'paid'] &&
+             (!('createdBy' in data) || (data.createdBy is string && data.createdBy.size() <= 128)) &&
+             (!('creatorName' in data) || (data.creatorName is string && data.creatorName.size() <= 256));
     }
 
     function isValidAddendum(data) {
-      return data.id is string && data.projectId is string &&
-             data.number is string && data.description is string &&
-             data.value is number && data.isApproved is bool &&
-             data.createdAt is string;
+      return data.id is string && data.id.size() <= 128 &&
+             data.projectId is string && data.projectId.size() <= 128 &&
+             data.number is string && data.number.size() <= 128 &&
+             data.description is string && data.description.size() <= 1024 &&
+             data.value is number && data.value >= 0 &&
+             data.isApproved is bool &&
+             data.createdAt is string && data.createdAt.size() <= 64;
     }
 
     function isValidScheduleActivity(data) {
-      return data.id is string && 
-             data.projectId is string && 
-             data.name is string &&
-             data.startDate is string &&
-             data.endDate is string &&
-             data.progress is number &&
-             data.status is string &&
+      return data.id is string && data.id.size() <= 128 &&
+             data.projectId is string && data.projectId.size() <= 128 &&
+             data.name is string && data.name.size() <= 256 &&
+             data.startDate is string && data.startDate.size() <= 64 &&
+             data.endDate is string && data.endDate.size() <= 64 &&
+             data.progress is number && data.progress >= 0 && data.progress <= 100 &&
+             data.status is string && data.status.size() <= 64 &&
              data.order is number;
     }
 
     function isValidPlanningActivity(data) {
-      return data.id is string && 
-             data.projectId is string && 
-             data.name is string &&
+      return data.id is string && data.id.size() <= 128 &&
+             data.projectId is string && data.projectId.size() <= 128 &&
+             data.name is string && data.name.size() <= 256 &&
              data.startMonth is number && data.startYear is number &&
              data.endMonth is number && data.endYear is number &&
-             data.color is string && data.order is number;
+             data.color is string && data.color.size() <= 64 &&
+             data.order is number;
     }
 
     function isValidFiscalPlanningActivity(data) {
-      return data.id is string && 
-             data.name is string &&
+      return data.id is string && data.id.size() <= 128 &&
+             data.name is string && data.name.size() <= 256 &&
              data.startMonth is number && data.startYear is number &&
              data.endMonth is number && data.endYear is number &&
-             data.color is string && data.order is number;
+             data.color is string && data.color.size() <= 64 &&
+             data.order is number;
     }
 
     function isValidRCRequest(data) {
-      return data.projectId is string && 
-             data.projectName is string &&
-             data.requestDate is string &&
-             data.status in ['requested', 'pending', 'received', 'returned'] &&
+      return data.projectId is string && data.projectId.size() <= 128 &&
+             data.projectName is string && data.projectName.size() <= 256 &&
+             data.requestDate is string && data.requestDate.size() <= 64 &&
+             data.status in ['requested', 'pending', 'received', 'returned', 'canceled'] &&
              (data.value is number || !('value' in data)) &&
              (!('signedBulletin' in data) || (
-               data.signedBulletin.name is string &&
-               data.signedBulletin.url is string
+               data.signedBulletin.name is string && data.signedBulletin.name.size() <= 256 &&
+               data.signedBulletin.url is string && data.signedBulletin.url.size() <= 1048576
              ));
     }
 
     function isValidTravel(data) {
-      return data.id is string && 
-             data.name is string && 
-             data.cost is number && 
-             data.inspector is string && 
-             data.origin is string && 
-             data.destination is string && 
-             data.startDate is string && 
-             data.endDate is string && 
-             data.monthYear is string;
+      return data.id is string && data.id.size() <= 128 &&
+             data.name is string && data.name.size() <= 256 &&
+             data.cost is number && data.cost >= 0 &&
+             data.inspector is string && data.inspector.size() <= 256 &&
+             data.origin is string && data.origin.size() <= 256 &&
+             data.destination is string && data.destination.size() <= 256 &&
+             data.startDate is string && data.startDate.size() <= 64 &&
+             data.endDate is string && data.endDate.size() <= 64 &&
+             data.monthYear is string && data.monthYear.size() <= 32;
     }
 
     function isValidFieldInspector(data) {
-      return data.id is string && data.name is string && data.createdAt is string;
+      return data.id is string && data.id.size() <= 128 &&
+             data.name is string && data.name.size() <= 256 &&
+             data.createdAt is string && data.createdAt.size() <= 64;
     }
 
     function isValidDailyWorkReport(data) {
-      return data.id is string && data.projectId is string && 
-             data.projectName is string && data.date is string && 
-             data.weatherMorning is string && data.weatherAfternoon is string && 
-             data.workConditions is string && data.servicesDone is string && 
-             data.createdAt is string && data.createdBy is string && 
+      return data.id is string && data.id.size() <= 128 &&
+             data.projectId is string && data.projectId.size() <= 128 &&
+             data.projectName is string && data.projectName.size() <= 256 &&
+             data.date is string && data.date.size() <= 64 &&
+             data.weatherMorning is string &&
+             data.weatherAfternoon is string &&
+             data.workConditions is string &&
+             data.servicesDone is string &&
+             data.createdAt is string &&
+             data.createdBy is string &&
              data.creatorName is string;
     }
 
+    function isValidAuditLog(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.userName is string && data.userName.size() <= 256 &&
+             data.timestamp is string && data.timestamp.size() <= 64 &&
+             data.operation is string && data.operation.size() <= 64 &&
+             data.entity is string && data.entity.size() <= 64 &&
+             data.recordId is string && data.recordId.size() <= 128 &&
+             data.status is string && data.status.size() <= 64 &&
+             data.userAgent is string && data.userAgent.size() <= 1024 &&
+             (!('details' in data) || (data.details is string && data.details.size() <= 8192));
+    }
+
     // ===============================================================
-    // Collection Rules
+    // 4. Match Rules per Collection Path (Zero-Trust Configuration)
     // ===============================================================
+
+    // Audit Logs: STRICTLY IMUTABLE (No updates/deletions permitted)
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated() && isValidAuditLog(incoming());
+      allow update, delete: if false;
+    }
 
     match /users/{userId} {
       allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
-      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) || isAdmin());
-      allow update: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) || isAdmin());
+      allow create: if isAuthenticated() && isValidUser(incoming()) && (isOwner(userId) || isAdmin());
+      allow update: if isAuthenticated() && isValidUser(incoming()) && (isOwner(userId) || isAdmin()) && (
+        // Forbid standard users from promoting their own access levels
+        isAdmin() || (!incoming().diff(existing()).affectedKeys().hasAny(['accessLevel', 'role']))
+      );
       allow delete: if isAdmin();
     }
 
     match /projects/{projectId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidProject(request.resource.data);
-      allow update: if isAuthenticated() && isValidProject(request.resource.data);
+      allow read: if isAuthenticated() && isAuthorizedForProject(projectId);
+      allow create: if isAdmin() && isValidProject(incoming());
+      allow update: if isAuthorizedForProject(projectId) && isValidProject(incoming()) && (
+        isAdmin() || (!incoming().diff(existing()).affectedKeys().hasAny(['budget', 'client', 'contractNumber', 'name']))
+      );
       allow delete: if isAdmin();
     }
 
     match /reports/{reportId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && isAuthorizedForProject(existing().projectId);
       allow write: if isAdmin();
     }
 
     match /measurements/{measurementId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read: if isAuthenticated() && isAuthorizedForProject(existing().projectId);
+      allow create: if isAuthenticated() && isValidMeasurement(incoming()) && isAuthorizedForProject(incoming().projectId);
+      allow update: if isAuthenticated() && isAuthorizedForProject(incoming().projectId) && isValidMeasurement(incoming()) && (
+        isAdmin() || (!incoming().diff(existing()).affectedKeys().hasAny(['status']) || incoming().status == existing().status)
+      );
+      allow delete: if isAdmin();
     }
 
     match /attachments/{attachmentId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read: if isAuthenticated() && isAuthorizedForProject(existing().projectId);
+      allow create: if isAuthenticated() && isAuthorizedForProject(incoming().projectId);
+      allow update: if isAdmin();
+      allow delete: if isAdmin() || (isAuthenticated() && isAuthorizedForProject(existing().projectId));
     }
 
     match /statusUpdates/{updateId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
+      allow read: if isAuthenticated() && isAuthorizedForProject(existing().projectId);
+      allow create: if isAuthenticated() && isAuthorizedForProject(incoming().projectId);
       allow update, delete: if isAdmin();
     }
 
     match /photoReports/{photoId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidPhotoReport(request.resource.data);
+      allow read: if isAuthenticated() && isAuthorizedForProject(existing().projectId);
+      allow create: if isAuthenticated() && isValidPhotoReport(incoming()) && isAuthorizedForProject(incoming().projectId);
       allow update, delete: if isAdmin();
     }
 
     match /measurementBulletins/{bulletinId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidBulletin(request.resource.data);
-      allow update, delete: if isAdmin();
+      allow read: if isAuthenticated() && isAuthorizedForProject(existing().projectId);
+      allow create: if isAuthenticated() && isValidBulletin(incoming()) && isAuthorizedForProject(incoming().projectId);
+      allow update: if isAuthorizedForProject(incoming().projectId) && (
+        isAdmin() || (!incoming().diff(existing()).affectedKeys().hasOnly(['status']))
+      );
+      allow delete: if isAdmin();
     }
 
     match /projectAddendums/{addendumId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidAddendum(request.resource.data);
+      allow read: if isAuthenticated() && isAuthorizedForProject(existing().projectId);
+      allow create: if isAuthenticated() && isValidAddendum(incoming()) && isAuthorizedForProject(incoming().projectId);
       allow update, delete: if isAdmin();
     }
 
     match /scheduleActivities/{activityId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && isAuthorizedForProject(existing().projectId);
       allow create, update: if isAuthenticated() && isValidId(activityId) && 
-                              isValidScheduleActivity(request.resource.data);
+                              isValidScheduleActivity(incoming()) && 
+                              isAuthorizedForProject(incoming().projectId);
       allow delete: if isAdmin();
     }
 
     match /planningActivities/{activityId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && isAuthorizedForProject(existing().projectId);
       allow create, update: if isAuthenticated() && isValidId(activityId) && 
-                              isValidPlanningActivity(request.resource.data);
+                              isValidPlanningActivity(incoming()) && 
+                              isAuthorizedForProject(incoming().projectId);
       allow delete: if isAdmin();
     }
 
     match /fiscalPlanningActivities/{activityId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && isAuthorizedForProject(existing().projectId);
       allow create, update: if isAuthenticated() && isValidId(activityId) && 
-                              isValidFiscalPlanningActivity(request.resource.data);
+                              isValidFiscalPlanningActivity(incoming()) && 
+                              isAuthorizedForProject(incoming().projectId);
       allow delete: if isAdmin();
     }
 
     match /consumptionRCRequests/{requestId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidRCRequest(request.resource.data);
-      allow update: if isAuthenticated() && (isAdmin() || (isOwner(resource.data.createdBy) && isValidRCRequest(request.resource.data)));
-      allow delete: if isAdmin() || isOwner(resource.data.createdBy);
+      allow read: if isAuthenticated() && isAuthorizedForProject(existing().projectId);
+      allow create: if isAuthenticated() && isValidRCRequest(incoming()) && isAuthorizedForProject(incoming().projectId);
+      allow update: if isAuthenticated() && isAuthorizedForProject(incoming().projectId) && (
+        isAdmin() || (isOwner(existing().createdBy) && isValidRCRequest(incoming()) && !incoming().diff(existing()).affectedKeys().hasAny(['value']))
+      );
+      allow delete: if isAdmin() || (isAuthenticated() && isOwner(existing().createdBy));
     }
 
     match /travels/{travelId} {
       allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && isValidId(travelId) && isValidTravel(request.resource.data);
+      allow create, update: if isAuthenticated() && isValidId(travelId) && isValidTravel(incoming());
       allow delete: if isAuthenticated();
     }
 
     match /fieldInspectors/{inspectorId} {
       allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && isValidId(inspectorId) && isValidFieldInspector(request.resource.data);
-      allow delete: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidId(inspectorId) && isValidFieldInspector(incoming());
+      allow delete: if isAdmin();
     }
 
     match /dailyWorkReports/{reportId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && isValidId(reportId) && isValidDailyWorkReport(request.resource.data);
-      allow delete: if isAuthenticated();
+      allow read: if isAuthenticated() && isAuthorizedForProject(existing().projectId);
+      allow create, update: if isAuthenticated() && isValidId(reportId) && isValidDailyWorkReport(incoming()) && isAuthorizedForProject(incoming().projectId);
+      allow delete: if isAdmin();
     }
   }
 }

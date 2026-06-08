@@ -57,6 +57,8 @@ import { motion, AnimatePresence, Reorder } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { db, auth, getStorageInstance } from './firebase';
+import { encryptString, decryptString } from './utils/crypto';
+import { microsoftIntegration } from './utils/microsoftIntegration';
 import { 
   collection, 
   onSnapshot, 
@@ -72,7 +74,8 @@ import {
   where,
   or,
   orderBy,
-  getDocFromServer
+  getDocFromServer,
+  documentId
 } from 'firebase/firestore';
 import { 
   ref as storageRef, 
@@ -85,6 +88,7 @@ import {
   createUserWithEmailAndPassword, 
   signOut,
   signInAnonymously,
+  sendPasswordResetEmail,
   User as FirebaseUser
 } from 'firebase/auth';
 import { 
@@ -164,6 +168,54 @@ interface FirestoreErrorInfo {
       email: string | null;
       photoUrl: string | null;
     }[];
+  }
+}
+
+const allowedExtensions = ['.pdf', '.jpg', '.jpeg', '.png', '.docx', '.xlsx'];
+const blockedExtensions = ['.exe', '.bat', '.cmd', '.ps1', '.vbs', '.js', '.jar', '.scr'];
+
+function validateUploadedFile(file: File): boolean {
+  if (!file) return false;
+  const fileName = file.name.toLowerCase();
+  const hasAllowedExtension = allowedExtensions.some(ext => fileName.endsWith(ext));
+  const hasBlockedExtension = blockedExtensions.some(ext => fileName.endsWith(ext));
+  return hasAllowedExtension && !hasBlockedExtension;
+}
+
+function sanitizeInput(input: string): string {
+  if (typeof input !== 'string') return input;
+  return input
+    .replace(/<[^>]*>/g, '')
+    .replace(/javascript:/gi, '')
+    .trim();
+}
+
+async function createAuditLog(
+  userId: string | undefined,
+  userName: string | undefined,
+  operation: 'LOGIN' | 'LOGOUT' | 'CRIAÇÃO' | 'ALTERAÇÃO' | 'EXCLUSÃO' | 'APROVAÇÃO' | 'UPLOAD' | 'DOWNLOAD' | string,
+  entity: string,
+  recordId: string,
+  status: 'SUCCESS' | 'FAILURE',
+  details?: string
+) {
+  try {
+    const logId = `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const logDoc = {
+      id: logId,
+      userId: userId || 'Anonymous',
+      userName: userName || 'Anonymous',
+      timestamp: new Date().toISOString(),
+      operation,
+      entity,
+      recordId,
+      status,
+      userAgent: navigator.userAgent || 'unknown',
+      details: details || '',
+    };
+    await setDoc(doc(db, 'auditLogs', logId), logDoc);
+  } catch (err) {
+    console.warn('Logging failure: could not create audit log document:', err);
   }
 }
 
@@ -550,6 +602,7 @@ export default function App() {
   });
   const [registeredUsers, setRegisteredUsers] = useState<UserProfile[]>([]);
   const [isUpdatingUser, setIsUpdatingUser] = useState<string | null>(null);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [selectedProject, setSelectedProject] = useState('');
   const [selectedDate, setSelectedDate] = useState('');
@@ -719,6 +772,28 @@ export default function App() {
   ]);
   const [imageEditingProjectId, setImageEditingProjectId] = useState<string | null>(null);
   const [showProfile, setShowProfile] = useState(false);
+  const [showDailyNotes, setShowDailyNotes] = useState(false);
+  const [dailyNotes, setDailyNotes] = useState<{ id: string; text: string; done: boolean }[]>([]);
+
+  useEffect(() => {
+    if (currentUser?.id) {
+      try {
+        const saved = localStorage.getItem(`axia_daily_notes_${currentUser.id}`);
+        setDailyNotes(saved ? JSON.parse(saved) : []);
+      } catch {
+        setDailyNotes([]);
+      }
+    } else {
+      setDailyNotes([]);
+    }
+  }, [currentUser?.id]);
+
+  const saveDailyNotes = (notes: { id: string; text: string; done: boolean }[]) => {
+    setDailyNotes(notes);
+    if (currentUser?.id) {
+      localStorage.setItem(`axia_daily_notes_${currentUser.id}`, JSON.stringify(notes));
+    }
+  };
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [isUpdatingProgress, setIsUpdatingProgress] = useState(false);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
@@ -3007,7 +3082,12 @@ export default function App() {
     if (!isLoggedIn || !isAuthReady || quotaExceeded) return;
 
     const isManager = currentUser?.accessLevel === 'Administrador de Sistema' || currentUser?.accessLevel === 'Gestor';
-    const projectsQuery = collection(db, 'projects');
+    const hasProject = currentUser?.projectId && currentUser?.projectId !== '';
+    const projectsQuery = isManager
+      ? collection(db, 'projects')
+      : hasProject
+        ? query(collection(db, 'projects'), where(documentId(), '==', currentUser.projectId))
+        : query(collection(db, 'projects'), where(documentId(), '==', 'non_existent_placeholder_id'));
 
     const unsubProjects = onSnapshot(projectsQuery, (snapshot) => {
       const allProjects = snapshot.docs.map(doc => {
@@ -3049,7 +3129,13 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'projects');
     });
 
-    const unsubReports = onSnapshot(collection(db, 'reports'), (snapshot) => {
+    const reportsQuery = isManager
+      ? collection(db, 'reports')
+      : hasProject
+        ? query(collection(db, 'reports'), where('projectId', '==', currentUser.projectId))
+        : query(collection(db, 'reports'), where('projectId', '==', 'non_existent_placeholder_id'));
+
+    const unsubReports = onSnapshot(reportsQuery, (snapshot) => {
       setReports(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WeeklyReport)));
     }, (error) => {
       if (error.message.includes('Quota exceeded')) {
@@ -3059,7 +3145,13 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'reports');
     });
 
-    const unsubMeasurements = onSnapshot(collection(db, 'measurements'), (snapshot) => {
+    const measurementsQuery = isManager
+      ? collection(db, 'measurements')
+      : hasProject
+        ? query(collection(db, 'measurements'), where('projectId', '==', currentUser.projectId))
+        : query(collection(db, 'measurements'), where('projectId', '==', 'non_existent_placeholder_id'));
+
+    const unsubMeasurements = onSnapshot(measurementsQuery, (snapshot) => {
       setMeasurements(snapshot.docs.map(doc => {
         const data = doc.data();
         return { 
@@ -3078,7 +3170,13 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'measurements');
     });
 
-    const unsubAttachments = onSnapshot(collection(db, 'attachments'), (snapshot) => {
+    const attachmentsQuery = isManager
+      ? collection(db, 'attachments')
+      : hasProject
+        ? query(collection(db, 'attachments'), where('projectId', '==', currentUser.projectId))
+        : query(collection(db, 'attachments'), where('projectId', '==', 'non_existent_placeholder_id'));
+
+    const unsubAttachments = onSnapshot(attachmentsQuery, (snapshot) => {
       setAttachments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Attachment)));
     }, (error) => {
       if (error.message.includes('Quota exceeded')) {
@@ -3088,7 +3186,13 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'attachments');
     });
 
-    const unsubStatusUpdates = onSnapshot(query(collection(db, 'statusUpdates'), orderBy('date', 'desc')), (snapshot) => {
+    const statusUpdatesQuery = isManager
+      ? query(collection(db, 'statusUpdates'), orderBy('date', 'desc'))
+      : hasProject
+        ? query(collection(db, 'statusUpdates'), where('projectId', '==', currentUser.projectId), orderBy('date', 'desc'))
+        : query(collection(db, 'statusUpdates'), orderBy('date', 'desc'));
+
+    const unsubStatusUpdates = onSnapshot(statusUpdatesQuery, (snapshot) => {
       setStatusUpdates(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StatusUpdate)));
     }, (error) => {
       if (error.message.includes('Quota exceeded')) {
@@ -3098,7 +3202,13 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'statusUpdates');
     });
 
-    const unsubPhotoReports = onSnapshot(collection(db, 'photoReports'), (snapshot) => {
+    const photoReportsQuery = isManager
+      ? collection(db, 'photoReports')
+      : hasProject
+        ? query(collection(db, 'photoReports'), where('projectId', '==', currentUser.projectId))
+        : query(collection(db, 'photoReports'), where('projectId', '==', 'non_existent_placeholder_id'));
+
+    const unsubPhotoReports = onSnapshot(photoReportsQuery, (snapshot) => {
       setPhotoReports(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PhotoReportItem)));
     }, (error) => {
       if (error.message.includes('Quota exceeded')) {
@@ -3108,7 +3218,13 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'photoReports');
     });
 
-    const unsubBulletins = onSnapshot(collection(db, 'measurementBulletins'), (snapshot) => {
+    const bulletinsQuery = isManager
+      ? collection(db, 'measurementBulletins')
+      : hasProject
+        ? query(collection(db, 'measurementBulletins'), where('projectId', '==', currentUser.projectId))
+        : query(collection(db, 'measurementBulletins'), where('projectId', '==', 'non_existent_placeholder_id'));
+
+    const unsubBulletins = onSnapshot(bulletinsQuery, (snapshot) => {
       setMeasurementBulletins(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MeasurementBulletin)));
     }, (error) => {
       if (error.message.includes('Quota exceeded')) {
@@ -3118,7 +3234,13 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'measurementBulletins');
     });
 
-    const unsubAddendums = onSnapshot(collection(db, 'projectAddendums'), (snapshot) => {
+    const addendumsQuery = isManager
+      ? collection(db, 'projectAddendums')
+      : hasProject
+        ? query(collection(db, 'projectAddendums'), where('projectId', '==', currentUser.projectId))
+        : query(collection(db, 'projectAddendums'), where('projectId', '==', 'non_existent_placeholder_id'));
+
+    const unsubAddendums = onSnapshot(addendumsQuery, (snapshot) => {
       setAddendums(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProjectAddendum)));
     }, (error) => {
       if (error.message.includes('Quota exceeded')) {
@@ -3128,7 +3250,13 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'projectAddendums');
     });
 
-    const unsubActivities = onSnapshot(query(collection(db, 'scheduleActivities'), orderBy('order', 'asc')), (snapshot) => {
+    const activitiesQuery = isManager
+      ? query(collection(db, 'scheduleActivities'), orderBy('order', 'asc'))
+      : hasProject
+        ? query(collection(db, 'scheduleActivities'), where('projectId', '==', currentUser.projectId), orderBy('order', 'asc'))
+        : query(collection(db, 'scheduleActivities'), orderBy('order', 'asc'));
+
+    const unsubActivities = onSnapshot(activitiesQuery, (snapshot) => {
       setActivities(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ScheduleActivity)));
     }, (error) => {
       if (error.message.includes('Quota exceeded')) {
@@ -3138,7 +3266,13 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'scheduleActivities');
     });
 
-    const unsubPlanning = onSnapshot(query(collection(db, 'planningActivities'), orderBy('order', 'asc')), (snapshot) => {
+    const planningQuery = isManager
+      ? query(collection(db, 'planningActivities'), orderBy('order', 'asc'))
+      : hasProject
+        ? query(collection(db, 'planningActivities'), where('projectId', '==', currentUser.projectId), orderBy('order', 'asc'))
+        : query(collection(db, 'planningActivities'), orderBy('order', 'asc'));
+
+    const unsubPlanning = onSnapshot(planningQuery, (snapshot) => {
       setPlanningActivities(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlanningActivity)));
     }, (error) => {
       if (error.message.includes('Quota exceeded')) {
@@ -3148,7 +3282,13 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'planningActivities');
     });
 
-    const unsubFiscalPlanning = onSnapshot(query(collection(db, 'fiscalPlanningActivities'), orderBy('order', 'asc')), (snapshot) => {
+    const fiscalPlanningQuery = isManager
+      ? query(collection(db, 'fiscalPlanningActivities'), orderBy('order', 'asc'))
+      : hasProject
+        ? query(collection(db, 'fiscalPlanningActivities'), where('projectId', '==', currentUser.projectId), orderBy('order', 'asc'))
+        : query(collection(db, 'fiscalPlanningActivities'), orderBy('order', 'asc'));
+
+    const unsubFiscalPlanning = onSnapshot(fiscalPlanningQuery, (snapshot) => {
       setFiscalPlanningActivities(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlanningActivity)));
     }, (error) => {
       if (error.message.includes('Quota exceeded')) {
@@ -3170,7 +3310,13 @@ export default function App() {
         })
       : () => {};
 
-    const unsubRCRequests = onSnapshot(collection(db, 'consumptionRCRequests'), (snapshot) => {
+    const rcQuery = isManager
+      ? collection(db, 'consumptionRCRequests')
+      : hasProject
+        ? query(collection(db, 'consumptionRCRequests'), where('projectId', '==', currentUser.projectId))
+        : query(collection(db, 'consumptionRCRequests'), where('projectId', '==', 'non_existent_placeholder_id'));
+
+    const unsubRCRequests = onSnapshot(rcQuery, (snapshot) => {
       setConsumptionRCRequests(snapshot.docs.map(doc => {
         const data = doc.data();
         return { 
@@ -3249,7 +3395,13 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'fieldInspectors');
     });
 
-    const unsubDailyReports = onSnapshot(collection(db, 'dailyWorkReports'), (snapshot) => {
+    const dailyReportsQuery = isManager
+      ? collection(db, 'dailyWorkReports')
+      : hasProject
+        ? query(collection(db, 'dailyWorkReports'), where('projectId', '==', currentUser.projectId))
+        : query(collection(db, 'dailyWorkReports'), where('projectId', '==', 'non_existent_placeholder_id'));
+
+    const unsubDailyReports = onSnapshot(dailyReportsQuery, (snapshot) => {
       setDailyReports(snapshot.docs.map(doc => {
         const data = doc.data();
         return {
@@ -3284,6 +3436,49 @@ export default function App() {
       unsubDailyReports();
     };
   }, [isLoggedIn, isAuthReady, currentUser?.id, currentUser?.name, currentUser?.accessLevel, currentUser?.projectId, currentUser?.projectName, currentUser?.email]);
+
+  // Idle Session Security Timeout (30 Minutes)
+  useEffect(() => {
+    if (!isLoggedIn) return;
+
+    const TIMEOUT_DURATION = 30 * 60 * 1000; // 30 minutes
+    let idleTimer: NodeJS.Timeout;
+
+    const logoutDueToInactivity = async () => {
+      try {
+        await createAuditLog(
+          currentUser?.id,
+          currentUser?.name || 'Sistema',
+          'LOGOUT',
+          'UserSession',
+          currentUser?.id || 'none',
+          'SUCCESS',
+          'Sessão expirada automaticamente por inatividade.'
+        );
+        await signOut(auth);
+        localStorage.removeItem('fiscal_profile');
+        setIsLoggedIn(false);
+        showNotification('Sessão expirada por inatividade. Por favor, faça login novamente para sua segurança.');
+      } catch (err) {
+        console.error('Error on auto logout:', err);
+      }
+    };
+
+    const resetTimer = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(logoutDueToInactivity, TIMEOUT_DURATION);
+    };
+
+    const events = ['mousemove', 'keydown', 'scroll', 'click', 'touchstart'];
+    events.forEach(event => window.addEventListener(event, resetTimer));
+
+    resetTimer();
+
+    return () => {
+      clearTimeout(idleTimer);
+      events.forEach(event => window.removeEventListener(event, resetTimer));
+    };
+  }, [isLoggedIn, currentUser?.id, currentUser?.name]);
 
   useEffect(() => {
     if (notification) {
@@ -3539,6 +3734,12 @@ export default function App() {
   const handleAttachmentUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'pdf' | 'image') => {
     const file = e.target.files?.[0];
     if (!file || !viewingProject) return;
+
+    if (!validateUploadedFile(file)) {
+      showNotification('Arquivo rejeitado por políticas de segurança. Extensão inválida ou suspeita.');
+      if (e.target) e.target.value = '';
+      return;
+    }
 
     if (file.size > 0.8 * 1024 * 1024) {
       showNotification('O arquivo é muito grande. O limite para anexos diretos no banco de dados é de 800KB para garantir o funcionamento.');
@@ -5153,6 +5354,45 @@ export default function App() {
     }
   };
 
+  const handleDeleteUser = async (userId: string) => {
+    if (userId === currentUser?.id) {
+      showNotification('Você não pode se auto-excluir!');
+      return;
+    }
+
+    const targetUser = registeredUsers.find(u => u.id === userId);
+    if (!targetUser) return;
+
+    setIsUpdatingUser(userId);
+    try {
+      await deleteDoc(doc(db, 'users', userId));
+      await createAuditLog(
+        currentUser?.id,
+        currentUser?.name,
+        'EXCLUSÃO',
+        'User',
+        userId,
+        'SUCCESS',
+        `Usuário ${targetUser.name} (${targetUser.email}) excluído por ${currentUser?.name || 'Gestor'}`
+      );
+      showNotification('Usuário excluído com sucesso!');
+    } catch (error) {
+      await createAuditLog(
+        currentUser?.id,
+        currentUser?.name,
+        'EXCLUSÃO',
+        'User',
+        userId,
+        'FAILURE',
+        `Falha ao excluir usuário ${targetUser.name} (${targetUser.email}): ${error instanceof Error ? error.message : String(error)}`
+      );
+      handleFirestoreError(error, OperationType.DELETE, `users/${userId}`);
+    } finally {
+      setIsUpdatingUser(null);
+      setDeletingUserId(null);
+    }
+  };
+
   const handleAddStatusUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newStatusUpdate.projectId || !newStatusUpdate.message) {
@@ -5725,7 +5965,21 @@ export default function App() {
                 </>
               )}
             </div>
-            <div className="h-8 w-px bg-slate-200 dark:bg-slate-800 mx-2"></div>
+            <div className="h-8 w-px bg-slate-200 dark:bg-slate-800 mx-1"></div>
+            {/* Daily Notes Icon Trigger */}
+            <button
+              onClick={() => setShowTodoPopup(true)}
+              className="relative p-2.5 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-full transition-all duration-200 group flex items-center justify-center pointer-events-auto"
+              title="Anotações Diárias e Tarefas"
+            >
+              <ClipboardList size={22} className="group-hover:scale-105 transition-transform" />
+              {personalTodos.filter(n => !n.completed).length > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 w-5 h-5 bg-axia-primary text-white text-[10px] font-black rounded-full flex items-center justify-center animate-pulse border-2 border-white dark:border-slate-900 shadow">
+                  {personalTodos.filter(n => !n.completed).length}
+                </span>
+              )}
+            </button>
+            <div className="h-8 w-px bg-slate-200 dark:bg-slate-800 mx-1"></div>
             <button 
               onClick={() => setShowProfile(true)}
               className="flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-800 p-1.5 rounded-xl transition-colors text-left"
@@ -9870,8 +10124,44 @@ export default function App() {
                                         <option value="Usuário Padrão">Usuário Padrão</option>
                                         <option value="Colaborador">Colaborador</option>
                                         <option value="Gestor">Gestor</option>
+                                        <option value="Fiscal de Campo">Fiscal de Campo</option>
                                         <option value="Administrador de Sistema">Administrador de Sistema</option>
                                       </select>
+
+                                      {user.id !== currentUser.id && (
+                                        <div className="flex items-center">
+                                          {deletingUserId === user.id ? (
+                                            <div className="flex items-center gap-1.5">
+                                              <button
+                                                type="button"
+                                                onClick={() => handleDeleteUser(user.id)}
+                                                disabled={isUpdatingUser === user.id}
+                                                className="text-[10px] font-bold bg-red-600 hover:bg-red-700 text-white px-2 py-1.5 rounded-lg transition-colors shadow-sm disabled:opacity-50"
+                                              >
+                                                Confirmar
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => setDeletingUserId(null)}
+                                                disabled={isUpdatingUser === user.id}
+                                                className="text-[10px] font-bold bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 px-2 py-1.5 rounded-lg transition-colors"
+                                              >
+                                                Cancelar
+                                              </button>
+                                            </div>
+                                          ) : (
+                                            <button
+                                              type="button"
+                                              onClick={() => setDeletingUserId(user.id)}
+                                              disabled={isUpdatingUser === user.id}
+                                              title="Excluir Usuário"
+                                              className="p-1.5 text-slate-400 hover:text-red-500 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 transition-all duration-200"
+                                            >
+                                              <Trash2 size={16} />
+                                            </button>
+                                          )}
+                                        </div>
+                                      )}
                                     </div>
                                   </div>
                                 ))
@@ -10271,7 +10561,7 @@ export default function App() {
                         setIsLoggedIn(false);
                         setShowProfile(false);
                       } catch (error) {
-                        console.error('Error signing out:', error);
+                        console.warn('Error signing out:', error);
                       }
                     }}
                     className="w-full flex items-center justify-center gap-2 py-4 px-4 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-2xl transition-all shadow-sm"
@@ -11124,6 +11414,10 @@ export default function App() {
                               onChange={(e) => {
                                 const file = e.target.files?.[0];
                                 if (file) {
+                                  if (!validateUploadedFile(file)) {
+                                    showNotification('Arquivo rejeitado por políticas de segurança. Extensão inválida ou suspeita.');
+                                    return;
+                                  }
                                   const reader = new FileReader();
                                   reader.onload = (event) => {
                                     setNewRCRequest({
@@ -11392,6 +11686,10 @@ export default function App() {
                             onChange={(e) => {
                               const file = e.target.files?.[0];
                               if (file) {
+                                if (!validateUploadedFile(file)) {
+                                  showNotification('Arquivo rejeitado por políticas de segurança. Extensão inválida ou suspeita.');
+                                  return;
+                                }
                                 const reader = new FileReader();
                                 reader.onloadend = () => {
                                   setNewFieldInspector({ ...newFieldInspector, photoUrl: reader.result as string });
@@ -11785,6 +12083,10 @@ export default function App() {
                                 onChange={(e) => {
                                   const file = e.target.files?.[0];
                                   if (file) {
+                                    if (!validateUploadedFile(file)) {
+                                      showNotification('Arquivo rejeitado por políticas de segurança. Extensão inválida ou suspeita.');
+                                      return;
+                                    }
                                     const reader = new FileReader();
                                     reader.onloadend = () => {
                                       setNewDailyReport({ ...newDailyReport, ddsPhotoUrl: reader.result as string });
@@ -11938,7 +12240,14 @@ export default function App() {
                           onChange={(e) => {
                             const files = e.target.files;
                             if (files) {
-                              const promises = (Array.from(files) as File[]).map((file) => {
+                              const validFiles = (Array.from(files) as File[]).filter((file: File) => {
+                                if (!validateUploadedFile(file)) {
+                                  showNotification(`Arquivo ${file.name} ignorado por políticas de segurança (extensão inválida).`);
+                                  return false;
+                                }
+                                return true;
+                              });
+                              const promises = validFiles.map((file: File) => {
                                 return new Promise<{ id: string; url: string; caption: string }>((resolve) => {
                                   const reader = new FileReader();
                                   reader.onloadend = () => {
@@ -12404,35 +12713,56 @@ function LoginPage({ onLogin, onRegister }: {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const handleForgotPassword = async () => {
+    if (!email) {
+      setError('Por favor, insira o seu e-mail no campo "E-mail Cadastrado" para poder redefinir a sua senha.');
+      return;
+    }
+    setIsLoading(true);
+    setError(null);
+    try {
+      await sendPasswordResetEmail(auth, email.trim());
+      setError('E-mail de redefinição de senha enviado com sucesso! Verifique a sua caixa de entrada.');
+    } catch (err: any) {
+      console.warn('Password Reset Error:', err);
+      const errorCode = err.code || '';
+      if (errorCode === 'auth/user-not-found' || errorCode === 'auth/invalid-credential') {
+        setError('Nenhum usuário correspondente localizado com este e-mail.');
+      } else if (errorCode === 'auth/invalid-email') {
+        setError('E-mail inválido.');
+      } else {
+        setError('Falha ao enviar e-mail de redefinição: ' + (err.message || 'Erro desconhecido.'));
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError(null);
 
+    const now = Date.now();
+    const lockUntilStr = localStorage.getItem('login_lock_until');
+    const lockUntil = lockUntilStr ? parseInt(lockUntilStr, 10) : 0;
+    
+    if (lockUntil && now < lockUntil) {
+      const waitMinutes = Math.ceil((lockUntil - now) / 60000);
+      setError(`Muitas tentativas falhas de login. Sua conta foi temporariamente bloqueada por segurança. Tente novamente em ${waitMinutes} minuto(s).`);
+      setIsLoading(false);
+      return;
+    }
+
     try {
-      const trimmedEmail = email.trim().toLowerCase();
+      const trimmedEmail = sanitizeInput(email);
+      const sanitizedName = sanitizeInput(name);
+      const sanitizedRole = sanitizeInput(role);
+      const sanitizedPhone = encryptString(sanitizeInput(phone));
+
       if (mode === 'fiscal_campo') {
-        try {
-          await signInWithEmailAndPassword(auth, 'fiscal-guest@axiaenergia.com.br', 'GuestAxiaEnergy2026!');
-        } catch (authErr: any) {
-          if (
-            authErr.code === 'auth/user-not-found' || 
-            authErr.code === 'auth/invalid-credential' || 
-            authErr.code === 'auth/invalid-login-credentials' ||
-            authErr.message?.includes('user-not-found') ||
-            authErr.message?.includes('invalid-credential')
-          ) {
-            try {
-              await createUserWithEmailAndPassword(auth, 'fiscal-guest@axiaenergia.com.br', 'GuestAxiaEnergy2026!');
-            } catch (createErr) {
-              console.error('Error creating guest user:', createErr);
-              throw createErr;
-            }
-          } else {
-            console.error('Error signing in anonymously/guest:', authErr);
-            throw authErr;
-          }
-        }
+        const userCredential = await signInWithEmailAndPassword(auth, trimmedEmail, password);
+        const authUid = userCredential.user.uid;
 
         let querySnapshot = await getDocs(query(collection(db, 'fieldInspectors'), where('email', '==', trimmedEmail)));
         let docData = !querySnapshot.empty ? querySnapshot.docs[0].data() : null;
@@ -12454,17 +12784,20 @@ function LoginPage({ onLogin, onRegister }: {
             await auth.signOut();
             localStorage.removeItem('fiscal_profile');
           } catch (signOutErr) {
-            console.error('Error signing out:', signOutErr);
+            console.warn('Error signing out:', signOutErr);
           }
-          setError('Este e-mail de Fiscal de Campo não foi localizado no cadastro. Por favor, solicite ao seu Gestor para cadastrá-lo.');
+          await createAuditLog(undefined, trimmedEmail, 'LOGIN', 'UserSession', 'none', 'FAILURE', 'E-mail de fiscal de campo não cadastrado.');
+          setError('Este e-mail de Fiscal de Campo não foi localizado no cadastro como fiscal ativo. Por favor, solicite ao seu Gestor para cadastrá-lo.');
           setIsLoading(false);
           return;
         }
-        
-        const userProfile: UserProfile = {
-          id: docData.id,
+
+        // Ensure the Firebase Auth user has a corresponding document in Firestore's users collection with the correct projectId to satisfy security rules
+        const userDocRef = doc(db, 'users', authUid);
+        const userProfileData = {
+          id: authUid,
           name: docData.name,
-          email: docData.email || trimmedEmail,
+          email: trimmedEmail,
           role: 'Fiscal de Campo',
           avatar: `https://picsum.photos/seed/${docData.name}/200/200`,
           phone: docData.phone || '',
@@ -12472,40 +12805,77 @@ function LoginPage({ onLogin, onRegister }: {
           projectId: docData.projectId || '',
           projectName: docData.projectName || ''
         };
+        await setDoc(userDocRef, userProfileData);
+        
+        const userProfile: UserProfile = {
+          id: docData.id || authUid,
+          name: docData.name,
+          email: docData.email || trimmedEmail,
+          role: 'Fiscal de Campo',
+          avatar: `https://picsum.photos/seed/${docData.name}/200/200`,
+          phone: decryptString(docData.phone || ''),
+          accessLevel: 'Fiscal de Campo',
+          projectId: docData.projectId || '',
+          projectName: docData.projectName || ''
+        };
         
         localStorage.setItem('fiscal_profile', JSON.stringify(userProfile));
+        localStorage.removeItem('login_failure_count');
+        localStorage.removeItem('login_lock_until');
+        await createAuditLog(userProfile.id, userProfile.name, 'LOGIN', 'UserSession', userProfile.id, 'SUCCESS', 'Acesso de Fiscal de Campo concedido com credenciais próprias.');
         onLogin(userProfile);
       } else if (mode === 'login') {
         const userCredential = await signInWithEmailAndPassword(auth, trimmedEmail, password);
         const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
         if (userDoc.exists()) {
-          onLogin(userDoc.data() as UserProfile);
+          const profile = userDoc.data() as UserProfile;
+          if (profile.phone) {
+            profile.phone = decryptString(profile.phone);
+          }
+          localStorage.removeItem('login_failure_count');
+          localStorage.removeItem('login_lock_until');
+          await createAuditLog(profile.id, profile.name, 'LOGIN', 'UserSession', profile.id, 'SUCCESS', 'Autenticação de administrador/gestor bem-sucedida.');
+          onLogin(profile);
         } else {
           setError('Perfil do usuário não encontrado.');
+          await createAuditLog(userCredential.user.uid, trimmedEmail, 'LOGIN', 'UserSession', userCredential.user.uid, 'FAILURE', 'Cadastro correspondente do Firestore inexistente.');
           await signOut(auth);
         }
       } else {
         const userCredential = await createUserWithEmailAndPassword(auth, trimmedEmail, password);
         const newUser: UserProfile = {
           id: userCredential.user.uid,
-          name: name,
+          name: sanitizedName,
           email: trimmedEmail,
-          role: role || 'Colaborador',
-          avatar: `https://picsum.photos/seed/${name}/200/200`,
-          phone: phone,
+          role: sanitizedRole || 'Colaborador',
+          avatar: `https://picsum.photos/seed/${sanitizedName}/200/200`,
+          phone: sanitizedPhone,
           accessLevel: accessLevel
         };
         await setDoc(doc(db, 'users', userCredential.user.uid), newUser);
+        await createAuditLog(newUser.id, newUser.name, 'CRIAÇÃO', 'UserProfile', newUser.id, 'SUCCESS', `Cadastro efetuado: nível ${accessLevel}`);
+        newUser.phone = phone;
         onRegister(newUser);
         setMode('login');
       }
     } catch (err: any) {
-      console.error('Full Auth Error Object:', JSON.stringify(err, null, 2));
-      console.error('Auth error code:', err.code);
-      console.error('Auth error message:', err.message);
+      console.warn('Full Auth Error Object:', JSON.stringify(err, null, 2));
+      console.warn('Auth error code:', err.code);
+      console.warn('Auth error message:', err.message);
       
       const errorCode = err.code || '';
       const errorMessage = err.message || '';
+
+      let failures = parseInt(localStorage.getItem('login_failure_count') || '0', 10);
+      failures += 1;
+      localStorage.setItem('login_failure_count', failures.toString());
+      if (failures >= 5) {
+        const lockoutTime = Date.now() + 15 * 60 * 1000;
+        localStorage.setItem('login_lock_until', lockoutTime.toString());
+        await createAuditLog(undefined, email, 'LOGIN', 'UserSession', 'none', 'FAILURE', 'Número máximo de tentativas de login excedido. Conta bloqueada por 15 minutos.');
+      } else {
+        await createAuditLog(undefined, email, 'LOGIN', 'UserSession', 'none', 'FAILURE', `Tentativa inválida ${failures}/5 de login.`);
+      }
 
       if (errorMessage.includes('Quota exceeded') || errorCode.includes('quota-exceeded')) {
         setError('O limite de acesso aos dados do Google foi atingido para hoje. O sistema voltará ao normal em breve.');
@@ -12517,7 +12887,11 @@ function LoginPage({ onLogin, onRegister }: {
         errorMessage.includes('auth/invalid-credential') ||
         errorMessage.includes('invalid-credential')
       ) {
-        setError('E-mail ou senha incorretos. Verifique suas credenciais e tente novamente.');
+        if (failures >= 5) {
+          setError('Número máximo de tentativas excedido. Acesso bloqueado por 15 minutos.');
+        } else {
+          setError(`E-mail ou senha incorretos. Tentativa ${failures} de 5.`);
+        }
       } else if (errorCode === 'auth/email-already-in-use') {
         setError('Este e-mail já está em uso.');
       } else if (errorCode === 'auth/weak-password') {
@@ -12657,6 +13031,7 @@ function LoginPage({ onLogin, onRegister }: {
                       >
                         <option value="Usuário Padrão">Usuário Padrão</option>
                         <option value="Gestor">Gestor</option>
+                        <option value="Fiscal de Campo">Fiscal de Campo</option>
                       </select>
                       <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
                         <ChevronRight size={18} className="rotate-90" />
@@ -12681,27 +13056,31 @@ function LoginPage({ onLogin, onRegister }: {
                 </div>
               </div>
 
-              {mode !== 'fiscal_campo' && (
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center px-1">
-                    <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Senha</label>
-                    {mode === 'login' && (
-                      <button type="button" className="text-xs font-bold text-axia-primary hover:underline">Esqueceu a senha?</button>
-                    )}
-                  </div>
-                  <div className="relative">
-                    <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                    <input 
-                      type="password" 
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all font-medium dark:text-white"
-                      placeholder="Sua senha"
-                      required={mode !== 'fiscal_campo'}
-                    />
-                  </div>
+              <div className="space-y-2">
+                <div className="flex justify-between items-center px-1">
+                  <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Senha</label>
+                  {(mode === 'login' || mode === 'fiscal_campo') && (
+                    <button 
+                      type="button" 
+                      onClick={handleForgotPassword}
+                      className="text-xs font-bold text-axia-primary hover:underline"
+                    >
+                      Esqueceu a senha?
+                    </button>
+                  )}
                 </div>
-              )}
+                <div className="relative">
+                  <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                  <input 
+                    type="password" 
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-axia-primary/20 transition-all font-medium dark:text-white"
+                    placeholder="Sua senha"
+                    required
+                  />
+                </div>
+              </div>
 
               {mode === 'login' && (
                 <div className="flex items-center gap-2 px-1">

@@ -1,13 +1,49 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    match /photoReports/{projectId}/{photoId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null 
-                   && request.resource.size < 5 * 1024 * 1024 
-                   && request.resource.contentType.matches('image/.*');
+    
+    // Core check if the user is authenticated and verified
+    function isSignedIn() {
+      return request.auth != null;
     }
-    // Default deny
+
+    // Helper to filter out executable files/dangerous script uploads
+    function isValidExtension(fileName) {
+      return fileName.lower().endsWith('.pdf') 
+          || fileName.lower().endsWith('.jpg') 
+          || fileName.lower().endsWith('.jpeg') 
+          || fileName.lower().endsWith('.png') 
+          || fileName.lower().endsWith('.docx') 
+          || fileName.lower().endsWith('.xlsx');
+    }
+
+    // Helper to evaluate allowed mime content types
+    function isValidContentType(contentType) {
+      return contentType == 'application/pdf'
+          || contentType.matches('image/jpeg')
+          || contentType.matches('image/png')
+          || contentType == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          || contentType == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    }
+
+    // Storage access validation gating on specific project sub-nodes (obras)
+    match /photoReports/{projectId}/{photoId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() 
+                   && request.resource.size < 10 * 1024 * 1024 // 10MB limit
+                   && isValidExtension(photoId)
+                   && isValidContentType(request.resource.contentType);
+    }
+
+    match /attachments/{projectId}/{attachmentId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn()
+                   && request.resource.size < 15 * 1024 * 1024 // 15MB limit
+                   && isValidExtension(attachmentId)
+                   && isValidContentType(request.resource.contentType);
+    }
+    
+    // Default deny for unmapped directories
     match /{allPaths=**} {
       allow read, write: if false;
     }
