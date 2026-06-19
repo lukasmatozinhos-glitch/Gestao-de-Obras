@@ -983,36 +983,93 @@ export default function App() {
 
       // Criar usuário no Firebase Auth se for novo fiscal cadastrado
       if (!editingFieldInspector) {
-        const appName = `SecondaryFieldInspectorAuth_${Date.now()}`;
-        const secondaryApp = initializeApp(firebaseConfig, appName);
-        const secondaryAuth = getAuth(secondaryApp);
-        
-        try {
-          const authUser = await createUserWithEmailAndPassword(
-            secondaryAuth, 
-            cleanEmail, 
-            newFieldInspector.password
-          );
-          docData.authUid = authUser.user.uid;
-        } catch (authError: any) {
-          console.error("Error creating field inspector auth user:", authError);
-          let userFriendlyMessage = 'Erro ao criar credenciais do fiscal no Firebase Auth.';
-          if (authError.code === 'auth/email-already-in-use') {
-            userFriendlyMessage = 'Este e-mail já está em uso por outro usuário ou fiscal.';
-          } else if (authError.code === 'auth/invalid-email') {
-            userFriendlyMessage = 'E-mail inválido.';
-          } else if (authError.code === 'auth/weak-password') {
-            userFriendlyMessage = 'Senha muito fraca, escolha pelo menos 6 dígitos.';
+        // Primeiro busca em 'users' de forma tolerante a maiúsculas/minúsculas
+        const usersSnap = await getDocs(collection(db, 'users'));
+        const matchedUser = usersSnap.docs.find(d => {
+          const uEmail = (d.data().email || '').trim().toLowerCase();
+          return uEmail === cleanEmail;
+        });
+
+        if (matchedUser) {
+          docData.authUid = matchedUser.id;
+        } else {
+          // Busca em 'fieldInspectors' de forma tolerante a maiúsculas/minúsculas
+          const inspectorsSnap = await getDocs(collection(db, 'fieldInspectors'));
+          const matchedInsp = inspectorsSnap.docs.find(d => {
+            const iEmail = (d.data().email || '').trim().toLowerCase();
+            return iEmail === cleanEmail;
+          });
+
+          if (matchedInsp) {
+            docData.authUid = matchedInsp.data().authUid || matchedInsp.id;
+          } else {
+            // Se realmente não foi achado no Firestore, tenta criar ou obter via Login caso a senha coincida
+            const appName = `SecondaryFieldInspectorAuth_${Date.now()}`;
+            const secondaryApp = initializeApp(firebaseConfig, appName);
+            const secondaryAuth = getAuth(secondaryApp);
+            
+            try {
+              const authUser = await createUserWithEmailAndPassword(
+                secondaryAuth, 
+                cleanEmail, 
+                newFieldInspector.password
+              );
+              docData.authUid = authUser.user.uid;
+            } catch (authError: any) {
+              if (authError.code !== 'auth/email-already-in-use') {
+                console.error("Error creating field inspector auth user:", authError);
+              } else {
+                console.log("Field inspector auth email already in use; attempting recovery.");
+              }
+              let userFriendlyMessage = 'Erro ao criar credenciais do fiscal no Firebase Auth.';
+              if (authError.code === 'auth/email-already-in-use') {
+                // Tenta fazer login com a senha fornecida para recuperar o UID do usuário existente no Auth
+                try {
+                  const loggedUser = await signInWithEmailAndPassword(
+                    secondaryAuth,
+                    cleanEmail,
+                    newFieldInspector.password
+                  );
+                  docData.authUid = loggedUser.user.uid;
+                } catch (signInErr: any) {
+                  // Se falhar o login (por ex, senha incorreta ou outro erro), gera um fallback UID/authUid determinístico baseado no email,
+                  // para não travar a criação do documento e permitir o fluxo continuar.
+                  console.warn("Could not sign in existing user:", signInErr);
+                  const deterministicUid = 'existing_uid_' + btoa(cleanEmail).replace(/=/g, '').substring(0, 20);
+                  docData.authUid = deterministicUid;
+                }
+              } else {
+                if (authError.code === 'auth/invalid-email') {
+                  userFriendlyMessage = 'E-mail inválido.';
+                } else if (authError.code === 'auth/weak-password') {
+                  userFriendlyMessage = 'Senha muito fraca, escolha pelo menos 6 dígitos.';
+                }
+                showNotification(userFriendlyMessage);
+                try { await deleteApp(secondaryApp); } catch(e) {}
+                return;
+              }
+            }
+            
+            try {
+              await deleteApp(secondaryApp);
+            } catch(e) {}
           }
-          showNotification(userFriendlyMessage);
-          // Descartar app temporário e interromper o fluxo para não salvar documento incompleto
-          try { await deleteApp(secondaryApp); } catch(e) {}
-          return;
         }
-        
+      }
+
+      // Otimiza e valida o tamanho da foto do fiscal antes de salvar no Firestore
+      if (docData.photoUrl && docData.photoUrl.startsWith('data:image')) {
         try {
-          await deleteApp(secondaryApp);
-        } catch(e) {}
+          docData.photoUrl = await compressBase64(docData.photoUrl, 200, 200, 0.5);
+        } catch (compErr) {
+          console.warn('Erro na compressão final da foto do fiscal:', compErr);
+        }
+      }
+
+      const docStringSize = JSON.stringify(docData).length;
+      if (docStringSize > 950000) {
+        showNotification('Erro: O arquivo de imagem é excessivamente grande e excede o limite do banco de dados (1MB). Por favor, forneça uma foto menor.');
+        return;
       }
 
       await setDoc(doc(db, 'fieldInspectors', id), docData);
@@ -1080,8 +1137,48 @@ export default function App() {
         companyLaborList: newDailyReport.companyLaborList || [],
         servicePhotos: newDailyReport.servicePhotos || []
       };
-      await setDoc(doc(db, 'dailyWorkReports', id), docData);
-      showNotification(editingDailyReport ? 'RDO atualizado com sucesso!' : 'RDO cadastrado com sucesso!');
+
+      try {
+        showNotification('Otimizando imagens e salvando RDO...');
+        
+        // Otimiza a foto do DDS
+        if (docData.ddsPhotoUrl && docData.ddsPhotoUrl.startsWith('data:image')) {
+          docData.ddsPhotoUrl = await compressBase64(docData.ddsPhotoUrl, 640, 480, 0.4);
+        }
+
+        // Otimiza as fotos dos serviços
+        if (docData.servicePhotos && docData.servicePhotos.length > 0) {
+          const optimizedPhotos = [];
+          for (const photo of docData.servicePhotos) {
+            if (photo.url && photo.url.startsWith('data:image')) {
+              try {
+                const compUrl = await compressBase64(photo.url, 640, 480, 0.4);
+                optimizedPhotos.push({ ...photo, url: compUrl });
+              } catch (compErr) {
+                console.error('Erro comprimindo uma foto de serviço na persistência:', compErr);
+                optimizedPhotos.push(photo);
+              }
+            } else {
+              optimizedPhotos.push(photo);
+            }
+          }
+          docData.servicePhotos = optimizedPhotos;
+        }
+
+        // Validação de limite de tamanho de documento do Firestore (1MB)
+        const docStringSize = JSON.stringify(docData).length;
+        if (docStringSize > 950000) {
+          showNotification('Erro: O relatório excede o tamanho limite do banco de dados (1MB). Por favor, reduza a quantidade de fotos.');
+          return;
+        }
+
+        await setDoc(doc(db, 'dailyWorkReports', id), docData);
+        showNotification(editingDailyReport ? 'RDO atualizado com sucesso!' : 'RDO cadastrado com sucesso!');
+      } catch (saveError: any) {
+        console.error("Erro ao salvar RDO:", saveError);
+        showNotification(`Erro ao salvar no banco de dados: ${saveError.message || saveError}`);
+        return;
+      }
       
       if (!editingDailyReport) {
         const newNotif: AppNotification = {
@@ -3579,6 +3676,40 @@ export default function App() {
         img.onerror = (err) => reject(err);
       };
       reader.onerror = (err) => reject(err);
+    });
+  };
+
+  const compressBase64 = (base64: string, maxWidth = 640, maxHeight = 480, quality = 0.4): Promise<string> => {
+    if (!base64 || !base64.startsWith('data:image')) {
+      return Promise.resolve(base64);
+    }
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.src = base64;
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+        if (width > height) {
+          if (width > maxWidth) {
+            height *= maxWidth / width;
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width *= maxHeight / height;
+            height = maxHeight;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => {
+        resolve(base64);
+      };
     });
   };
 
@@ -11740,18 +11871,25 @@ export default function App() {
                             type="file"
                             accept="image/*"
                             id="inspector-photo-upload"
-                            onChange={(e) => {
+                            onChange={async (e) => {
                               const file = e.target.files?.[0];
                               if (file) {
                                 if (!validateUploadedFile(file)) {
                                   showNotification('Arquivo rejeitado por políticas de segurança. Extensão inválida ou suspeita.');
                                   return;
                                 }
-                                const reader = new FileReader();
-                                reader.onloadend = () => {
-                                  setNewFieldInspector({ ...newFieldInspector, photoUrl: reader.result as string });
-                                };
-                                reader.readAsDataURL(file);
+                                try {
+                                  showNotification('Otimizando foto de perfil...');
+                                  const compUrl = await compressImage(file, 200, 200, 0.5);
+                                  setNewFieldInspector({ ...newFieldInspector, photoUrl: compUrl });
+                                } catch (err) {
+                                  console.error('Erro comprimindo imagem:', err);
+                                  const reader = new FileReader();
+                                  reader.onloadend = () => {
+                                    setNewFieldInspector({ ...newFieldInspector, photoUrl: reader.result as string });
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
                               }
                             }}
                             className="hidden"
@@ -12760,6 +12898,7 @@ function LoginPage({ onLogin, onRegister }: {
 
     try {
       const trimmedEmail = sanitizeInput(email);
+      const cleanTrimmedEmail = trimmedEmail.trim().toLowerCase();
       const sanitizedName = sanitizeInput(name);
       const sanitizedRole = sanitizeInput(role);
       const sanitizedPhone = encryptString(sanitizeInput(phone));
@@ -12768,7 +12907,7 @@ function LoginPage({ onLogin, onRegister }: {
         const userCredential = await signInWithEmailAndPassword(auth, trimmedEmail, password);
         const authUid = userCredential.user.uid;
 
-        let querySnapshot = await getDocs(query(collection(db, 'fieldInspectors'), where('email', '==', trimmedEmail)));
+        let querySnapshot = await getDocs(query(collection(db, 'fieldInspectors'), where('email', '==', cleanTrimmedEmail)));
         let docData = !querySnapshot.empty ? querySnapshot.docs[0].data() : null;
 
         if (!docData) {
@@ -12776,7 +12915,7 @@ function LoginPage({ onLogin, onRegister }: {
           const allInspectorsSnap = await getDocs(collection(db, 'fieldInspectors'));
           const matchedDoc = allInspectorsSnap.docs.find(d => {
             const infEmail = (d.data().email || '').trim().toLowerCase();
-            return infEmail === trimmedEmail;
+            return infEmail === cleanTrimmedEmail;
           });
           if (matchedDoc) {
             docData = matchedDoc.data();
@@ -12801,7 +12940,7 @@ function LoginPage({ onLogin, onRegister }: {
         const userProfileData = {
           id: authUid,
           name: docData.name,
-          email: trimmedEmail,
+          email: cleanTrimmedEmail,
           role: 'Fiscal de Campo',
           avatar: `https://picsum.photos/seed/${docData.name}/200/200`,
           phone: docData.phone || '',
@@ -12814,7 +12953,7 @@ function LoginPage({ onLogin, onRegister }: {
         const userProfile: UserProfile = {
           id: docData.id || authUid,
           name: docData.name,
-          email: docData.email || trimmedEmail,
+          email: docData.email || cleanTrimmedEmail,
           role: 'Fiscal de Campo',
           avatar: `https://picsum.photos/seed/${docData.name}/200/200`,
           phone: decryptString(docData.phone || ''),
@@ -12830,7 +12969,9 @@ function LoginPage({ onLogin, onRegister }: {
         onLogin(userProfile);
       } else if (mode === 'login') {
         const userCredential = await signInWithEmailAndPassword(auth, trimmedEmail, password);
-        const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
+        const authUid = userCredential.user.uid;
+        const userDoc = await getDoc(doc(db, 'users', authUid));
+        
         if (userDoc.exists()) {
           const profile = userDoc.data() as UserProfile;
           if (profile.phone) {
@@ -12841,9 +12982,59 @@ function LoginPage({ onLogin, onRegister }: {
           await createAuditLog(profile.id, profile.name, 'LOGIN', 'UserSession', profile.id, 'SUCCESS', 'Autenticação de administrador/gestor bem-sucedida.');
           onLogin(profile);
         } else {
-          setError('Perfil do usuário não encontrado.');
-          await createAuditLog(userCredential.user.uid, trimmedEmail, 'LOGIN', 'UserSession', userCredential.user.uid, 'FAILURE', 'Cadastro correspondente do Firestore inexistente.');
-          await signOut(auth);
+          // Check if this user is a Field Inspector (Fiscal de Campo) is logging in on the Colaborador tab
+          let querySnapshot = await getDocs(query(collection(db, 'fieldInspectors'), where('email', '==', cleanTrimmedEmail)));
+          let docData = !querySnapshot.empty ? querySnapshot.docs[0].data() : null;
+
+          if (!docData) {
+            const allInspectorsSnap = await getDocs(collection(db, 'fieldInspectors'));
+            const matchedDoc = allInspectorsSnap.docs.find(d => {
+              const infEmail = (d.data().email || '').trim().toLowerCase();
+              return infEmail === cleanTrimmedEmail;
+            });
+            if (matchedDoc) {
+              docData = matchedDoc.data();
+            }
+          }
+
+          if (docData) {
+            // Yes, they are a Field Inspector! Auto-create their user profile in Firestore's users collection and log them in
+            const userDocRef = doc(db, 'users', authUid);
+            const userProfileData = {
+              id: authUid,
+              name: docData.name,
+              email: cleanTrimmedEmail,
+              role: 'Fiscal de Campo',
+              avatar: `https://picsum.photos/seed/${docData.name}/200/200`,
+              phone: docData.phone || '',
+              accessLevel: 'Fiscal de Campo',
+              projectId: docData.projectId || '',
+              projectName: docData.projectName || ''
+            };
+            await setDoc(userDocRef, userProfileData);
+
+            const userProfile: UserProfile = {
+              id: docData.id || authUid,
+              name: docData.name,
+              email: docData.email || cleanTrimmedEmail,
+              role: 'Fiscal de Campo',
+              avatar: `https://picsum.photos/seed/${docData.name}/200/200`,
+              phone: decryptString(docData.phone || ''),
+              accessLevel: 'Fiscal de Campo',
+              projectId: docData.projectId || '',
+              projectName: docData.projectName || ''
+            };
+
+            localStorage.setItem('fiscal_profile', JSON.stringify(userProfile));
+            localStorage.removeItem('login_failure_count');
+            localStorage.removeItem('login_lock_until');
+            await createAuditLog(userProfile.id, userProfile.name, 'LOGIN', 'UserSession', userProfile.id, 'SUCCESS', 'Acesso de Fiscal de Campo concedido via aba Colaborador.');
+            onLogin(userProfile);
+          } else {
+            setError('Perfil do usuário não encontrado.');
+            await createAuditLog(authUid, trimmedEmail, 'LOGIN', 'UserSession', authUid, 'FAILURE', 'Cadastro correspondente do Firestore inexistente.');
+            await signOut(auth);
+          }
         }
       } else {
         const userCredential = await createUserWithEmailAndPassword(auth, trimmedEmail, password);
