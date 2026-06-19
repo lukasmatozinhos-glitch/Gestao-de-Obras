@@ -57,6 +57,9 @@ import { motion, AnimatePresence, Reorder } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { db, auth, getStorageInstance } from './firebase';
+import { initializeApp, deleteApp } from 'firebase/app';
+import { getAuth } from 'firebase/auth';
+import firebaseConfig from '../firebase-applet-config.json';
 import { encryptString, decryptString } from './utils/crypto';
 import { microsoftIntegration } from './utils/microsoftIntegration';
 import { 
@@ -412,7 +415,8 @@ export default function App() {
     email: '',
     company: '',
     projectId: '',
-    photoUrl: ''
+    photoUrl: '',
+    password: ''
   });
   
   const [isAddingDailyReport, setIsAddingDailyReport] = useState(false);
@@ -942,6 +946,24 @@ export default function App() {
       showNotification('Por favor, informe o nome do fiscal.');
       return;
     }
+    const cleanEmail = (newFieldInspector.email || '').trim().toLowerCase();
+    
+    // Se for um cadastro novo, exige e-mail e senha
+    if (!editingFieldInspector) {
+      if (!cleanEmail) {
+        showNotification('Por favor, informe o e-mail do fiscal para criar o acesso.');
+        return;
+      }
+      if (!newFieldInspector.password) {
+        showNotification('Por favor, informe a senha de acesso para o fiscal.');
+        return;
+      }
+      if (newFieldInspector.password.length < 6) {
+        showNotification('A senha do fiscal deve ter pelo menos 6 caracteres.');
+        return;
+      }
+    }
+
     try {
       const id = editingFieldInspector ? editingFieldInspector.id : `insp_${Date.now()}`;
       const projectObj = projects.find(p => p.id === newFieldInspector.projectId);
@@ -949,7 +971,7 @@ export default function App() {
         id,
         name: newFieldInspector.name,
         phone: newFieldInspector.phone || '',
-        email: (newFieldInspector.email || '').trim().toLowerCase(),
+        email: cleanEmail,
         company: newFieldInspector.company || '',
         projectId: newFieldInspector.projectId || '',
         projectName: projectObj ? projectObj.name : '',
@@ -958,11 +980,46 @@ export default function App() {
         createdBy: editingFieldInspector ? (editingFieldInspector.createdBy || currentUser?.id || '') : (currentUser?.id || ''),
         creatorName: editingFieldInspector ? (editingFieldInspector.creatorName || currentUser?.name || '') : (currentUser?.name || '')
       };
+
+      // Criar usuário no Firebase Auth se for novo fiscal cadastrado
+      if (!editingFieldInspector) {
+        const appName = `SecondaryFieldInspectorAuth_${Date.now()}`;
+        const secondaryApp = initializeApp(firebaseConfig, appName);
+        const secondaryAuth = getAuth(secondaryApp);
+        
+        try {
+          const authUser = await createUserWithEmailAndPassword(
+            secondaryAuth, 
+            cleanEmail, 
+            newFieldInspector.password
+          );
+          docData.authUid = authUser.user.uid;
+        } catch (authError: any) {
+          console.error("Error creating field inspector auth user:", authError);
+          let userFriendlyMessage = 'Erro ao criar credenciais do fiscal no Firebase Auth.';
+          if (authError.code === 'auth/email-already-in-use') {
+            userFriendlyMessage = 'Este e-mail já está em uso por outro usuário ou fiscal.';
+          } else if (authError.code === 'auth/invalid-email') {
+            userFriendlyMessage = 'E-mail inválido.';
+          } else if (authError.code === 'auth/weak-password') {
+            userFriendlyMessage = 'Senha muito fraca, escolha pelo menos 6 dígitos.';
+          }
+          showNotification(userFriendlyMessage);
+          // Descartar app temporário e interromper o fluxo para não salvar documento incompleto
+          try { await deleteApp(secondaryApp); } catch(e) {}
+          return;
+        }
+        
+        try {
+          await deleteApp(secondaryApp);
+        } catch(e) {}
+      }
+
       await setDoc(doc(db, 'fieldInspectors', id), docData);
       showNotification(editingFieldInspector ? 'Fiscal atualizado com sucesso!' : 'Fiscal cadastrado com sucesso!');
       setIsAddingFieldInspector(false);
       setEditingFieldInspector(null);
-      setNewFieldInspector({ name: '', phone: '', email: '', company: '', projectId: '', photoUrl: '' });
+      setNewFieldInspector({ name: '', phone: '', email: '', company: '', projectId: '', photoUrl: '', password: '' });
     } catch (e: any) {
       console.error(e);
       handleFirestoreError(e, OperationType.WRITE, 'fieldInspectors');
@@ -997,10 +1054,10 @@ export default function App() {
         projectId: newDailyReport.projectId,
         projectName: project ? project.name : '',
         date: newDailyReport.date,
-        weatherMorning: newDailyReport.weatherMorning,
-        weatherAfternoon: newDailyReport.weatherAfternoon,
+        weatherMorning: newDailyReport.weatherMorning || 'Sol',
+        weatherAfternoon: newDailyReport.weatherAfternoon || 'Sol',
         climaDetails: newDailyReport.climaDetails || '',
-        workConditions: newDailyReport.workConditions,
+        workConditions: newDailyReport.workConditions || 'normal',
         servicesDone: newDailyReport.servicesDone,
         laborCount: newDailyReport.laborCount || '',
         equipmentsActive: newDailyReport.equipmentsActive || '',
@@ -9212,7 +9269,7 @@ export default function App() {
                           setIsAddingDailyReport(true);
                         } else {
                           setEditingFieldInspector(null);
-                          setNewFieldInspector({ name: '', phone: '', email: '', company: '', projectId: '', photoUrl: '' });
+                          setNewFieldInspector({ name: '', phone: '', email: '', company: '', projectId: '', photoUrl: '', password: '' });
                           setIsAddingFieldInspector(true);
                         }
                       }}
@@ -9517,7 +9574,7 @@ export default function App() {
                         <button
                           onClick={() => {
                             setEditingFieldInspector(null);
-                            setNewFieldInspector({ name: '', phone: '', email: '', company: '', projectId: '', photoUrl: '' });
+                            setNewFieldInspector({ name: '', phone: '', email: '', company: '', projectId: '', photoUrl: '', password: '' });
                             setIsAddingFieldInspector(true);
                           }}
                           className="bg-axia-primary text-white px-5 py-2 rounded-xl text-xs font-bold"
@@ -11768,6 +11825,29 @@ export default function App() {
                     </div>
                   </div>
 
+                  {!editingFieldInspector ? (
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Senha de Acesso para o Login *</label>
+                      <div className="relative">
+                        <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                        <input 
+                          type="password" 
+                          required
+                          value={newFieldInspector.password || ''}
+                          onChange={(e) => setNewFieldInspector({ ...newFieldInspector, password: e.target.value })}
+                          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-axia-primary/10 transition-all font-bold text-slate-700 dark:text-slate-200"
+                          placeholder="Digite a senha inicial de acesso (Mín. 6 caracteres)"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-850">
+                      <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                        Nota: A senha de login não pode ser editada diretamente por aqui. Caso o fiscal necessite redefini-la, use a opção <strong>"Esqueceu a senha?"</strong> na área de login do fiscal.
+                      </p>
+                    </div>
+                  )}
+
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Obra Alocada (Designação) *</label>
                     <div className="relative">
@@ -12080,18 +12160,22 @@ export default function App() {
                               <input 
                                 type="file" 
                                 accept="image/*"
-                                onChange={(e) => {
+                                onChange={async (e) => {
                                   const file = e.target.files?.[0];
                                   if (file) {
                                     if (!validateUploadedFile(file)) {
                                       showNotification('Arquivo rejeitado por políticas de segurança. Extensão inválida ou suspeita.');
                                       return;
                                     }
-                                    const reader = new FileReader();
-                                    reader.onloadend = () => {
-                                      setNewDailyReport({ ...newDailyReport, ddsPhotoUrl: reader.result as string });
-                                    };
-                                    reader.readAsDataURL(file);
+                                    try {
+                                      showNotification('Comprimindo foto do DDS...');
+                                      const compressed = await compressImage(file, 800, 600, 0.5);
+                                      setNewDailyReport({ ...newDailyReport, ddsPhotoUrl: compressed });
+                                      showNotification('Foto do DDS inserida com sucesso!');
+                                    } catch (err) {
+                                      console.error('Erro ao comprimir foto do DDS:', err);
+                                      showNotification('Erro ao processar imagem.');
+                                    }
                                   }
                                 }}
                                 className="hidden" 
@@ -12125,95 +12209,7 @@ export default function App() {
 
 
 
-                  {/* Listagem de Empresa com Qtd de Funcionários e Funções por Funcionário */}
-                  <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-3xl border border-slate-100 dark:border-slate-800/50 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-extrabold uppercase text-axia-primary dark:text-axia-primary/80 tracking-widest">Empresas & Funções Alocadas</span>
-                      <button 
-                        type="button"
-                        onClick={() => {
-                          const currentList = newDailyReport.companyLaborList || [];
-                          setNewDailyReport({
-                            ...newDailyReport,
-                            companyLaborList: [...currentList, { id: `co_${Date.now()}_${Math.random()}`, company: '', count: 1, functions: '' }]
-                          });
-                        }}
-                        className="text-[10px] bg-axia-primary/10 hover:bg-axia-primary/20 text-axia-primary px-3 py-1.5 rounded-xl font-bold flex items-center gap-1 transition-all"
-                      >
-                        <Plus size={12} /> Adicionar Empresa
-                      </button>
-                    </div>
 
-                    {(!newDailyReport.companyLaborList || newDailyReport.companyLaborList.length === 0) ? (
-                      <p className="text-xs text-slate-400 dark:text-slate-500 italic text-center py-2">Nenhuma empresa mapeada neste relatório ainda.</p>
-                    ) : (
-                      <div className="space-y-3 max-h-56 overflow-y-auto pr-1">
-                        {newDailyReport.companyLaborList.map((item, idx) => (
-                          <div key={item.id} className="p-3 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-850 rounded-2xl relative space-y-2">
-                            <button 
-                              type="button" 
-                              onClick={() => {
-                                const list = (newDailyReport.companyLaborList || []).filter(c => c.id !== item.id);
-                                setNewDailyReport({ ...newDailyReport, companyLaborList: list });
-                              }}
-                              className="absolute top-2.5 right-2.5 text-slate-400 hover:text-red-500 p-1 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-                              title="Remover Empresa"
-                            >
-                              <X size={14} />
-                            </button>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                              <div className="sm:col-span-2 space-y-0.5">
-                                <label className="text-[8px] uppercase tracking-wider text-slate-400 font-bold ml-1">Nome da Empresa</label>
-                                <input 
-                                  type="text" 
-                                  required
-                                  value={item.company} 
-                                  onChange={(e) => {
-                                    const list = [...(newDailyReport.companyLaborList || [])];
-                                    list[idx].company = e.target.value;
-                                    setNewDailyReport({ ...newDailyReport, companyLaborList: list });
-                                  }}
-                                  placeholder="Ex: Axia Montagens Inc"
-                                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-xl px-2.5 py-1.5 text-xs font-semibold"
-                                />
-                              </div>
-                              <div className="space-y-0.5">
-                                <label className="text-[8px] uppercase tracking-wider text-slate-400 font-bold ml-1">Qtd Efetivo</label>
-                                <input 
-                                  type="number" 
-                                  min="1"
-                                  value={item.count} 
-                                  onChange={(e) => {
-                                    const list = [...(newDailyReport.companyLaborList || [])];
-                                    list[idx].count = Math.max(1, parseInt(e.target.value) || 1);
-                                    setNewDailyReport({ ...newDailyReport, companyLaborList: list });
-                                  }}
-                                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-xl px-2.5 py-1.5 text-xs font-bold text-center"
-                                />
-                              </div>
-                            </div>
-
-                            <div className="space-y-0.5">
-                              <label className="text-[8px] uppercase tracking-wider text-slate-400 font-bold ml-1">Funções Realizadas por Colaborador</label>
-                              <input 
-                                type="text" 
-                                required
-                                value={item.functions} 
-                                onChange={(e) => {
-                                  const list = [...(newDailyReport.companyLaborList || [])];
-                                  list[idx].functions = e.target.value;
-                                  setNewDailyReport({ ...newDailyReport, companyLaborList: list });
-                                }}
-                                placeholder="Ex: 2 Soldadores montando pórticos, 1 Encarregado"
-                                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-850 rounded-xl px-2.5 py-1.5 text-xs font-medium"
-                              />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
 
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Ocorrências / Observações Gerais</label>
@@ -12237,7 +12233,7 @@ export default function App() {
                           type="file" 
                           multiple 
                           accept="image/*"
-                          onChange={(e) => {
+                          onChange={async (e) => {
                             const files = e.target.files;
                             if (files) {
                               const validFiles = (Array.from(files) as File[]).filter((file: File) => {
@@ -12247,26 +12243,34 @@ export default function App() {
                                 }
                                 return true;
                               });
-                              const promises = validFiles.map((file: File) => {
-                                return new Promise<{ id: string; url: string; caption: string }>((resolve) => {
-                                  const reader = new FileReader();
-                                  reader.onloadend = () => {
-                                    resolve({
+                              showNotification('Comprimindo foto(s) selecionada(s)...');
+                              try {
+                                const promises = validFiles.map((file: File) => {
+                                  return compressImage(file, 800, 600, 0.5)
+                                    .then((compressedUrl) => ({
                                       id: `photo_${Date.now()}_${Math.random()}`,
-                                      url: reader.result as string,
+                                      url: compressedUrl,
                                       caption: ''
+                                    }))
+                                    .catch((err) => {
+                                      console.error('Erro ao comprimir imagem:', err);
+                                      return null;
                                     });
-                                  };
-                                  reader.readAsDataURL(file);
                                 });
-                              });
-                              Promise.all(promises).then((results) => {
-                                const currentList = newDailyReport.servicePhotos || [];
-                                setNewDailyReport({
-                                  ...newDailyReport,
-                                  servicePhotos: [...currentList, ...results]
-                                });
-                              });
+                                const results = await Promise.all(promises);
+                                const activeResults = results.filter((r): r is { id: string; url: string; caption: string } => r !== null);
+                                if (activeResults.length > 0) {
+                                  const currentList = newDailyReport.servicePhotos || [];
+                                  setNewDailyReport({
+                                    ...newDailyReport,
+                                    servicePhotos: [...currentList, ...activeResults]
+                                  });
+                                  showNotification(`${activeResults.length} foto(s) da atividade comprimida(s) e adicionada(s) com sucesso.`);
+                                }
+                              } catch (err) {
+                                console.error('Erro na compressão múltipla:', err);
+                                showNotification('Erro ao processar lote de imagens.');
+                              }
                             }
                           }}
                           className="hidden" 
