@@ -261,6 +261,13 @@ export default function App() {
     }
     return false;
   });
+  const [systemZoom, setSystemZoom] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('systemZoom');
+      return saved ? parseInt(saved, 10) : 75; // Default is 75 (25% reduction as requested)
+    }
+    return 75;
+  });
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [quotaExceeded, setQuotaExceeded] = useState(() => {
@@ -472,7 +479,7 @@ export default function App() {
         setNewDailyReport(prev => ({
           ...prev,
           projectId: targetProjId,
-          inspectorId: currentUser.id || ''
+          inspectorId: currentUser.inspectorId || currentUser.id || ''
         }));
       }
     }
@@ -1102,7 +1109,7 @@ export default function App() {
       const id = editingDailyReport ? editingDailyReport.id : `rdo_${Date.now()}`;
       const project = projects.find(p => p.id === newDailyReport.projectId);
       
-      const inspectorId = currentUser?.accessLevel === 'Fiscal de Campo' ? currentUser.id : newDailyReport.inspectorId;
+      const inspectorId = currentUser?.accessLevel === 'Fiscal de Campo' ? (currentUser.inspectorId || currentUser.id) : newDailyReport.inspectorId;
       const inspectorName = currentUser?.accessLevel === 'Fiscal de Campo' ? currentUser.name : (rawFieldInspectors.find(fi => fi.id === newDailyReport.inspectorId)?.name || '');
 
       const docData: any = {
@@ -3175,6 +3182,17 @@ export default function App() {
   }, [isDarkMode]);
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const zoomRatio = systemZoom / 100;
+      const minHeightVal = `${100 / zoomRatio}vh`;
+      (document.documentElement.style as any).zoom = `${systemZoom}%`;
+      (document.documentElement.style as any).minHeight = minHeightVal;
+      (document.body.style as any).minHeight = minHeightVal;
+      localStorage.setItem('systemZoom', systemZoom.toString());
+    }
+  }, [systemZoom]);
+
+  useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         if (quotaExceeded) {
@@ -3269,6 +3287,7 @@ export default function App() {
         : currentUser?.accessLevel === 'Fiscal de Campo'
           ? allProjects.filter(p => 
               p.fieldInspectorId === currentUser.id || 
+              p.fieldInspectorId === currentUser.inspectorId ||
               p.id === currentUser.projectId ||
               (p.fieldInspectorName && currentUser.name && p.fieldInspectorName.trim().toLowerCase() === currentUser.name.trim().toLowerCase())
             )
@@ -3523,18 +3542,20 @@ export default function App() {
         if (myDoc) {
           const updatedProfile = {
             ...currentUser,
-            id: myDoc.id,
+            inspectorId: myDoc.id,
             name: myDoc.name,
             phone: myDoc.phone || '',
             projectId: myDoc.projectId || '',
-            projectName: myDoc.projectName || ''
+            projectName: myDoc.projectName || '',
+            avatar: myDoc.photoUrl || currentUser.avatar || `https://picsum.photos/seed/${myDoc.name}/200/200`
           };
           if (
             currentUser.projectId !== updatedProfile.projectId ||
             currentUser.projectName !== updatedProfile.projectName ||
             currentUser.name !== updatedProfile.name ||
             currentUser.phone !== updatedProfile.phone ||
-            currentUser.id !== updatedProfile.id
+            currentUser.inspectorId !== updatedProfile.inspectorId ||
+            currentUser.avatar !== updatedProfile.avatar
           ) {
             setCurrentUser(updatedProfile);
             localStorage.setItem('fiscal_profile', JSON.stringify(updatedProfile));
@@ -5518,11 +5539,22 @@ export default function App() {
 
     try {
       showNotification('Processando foto de perfil...');
-      const compressedBase64 = await compressImage(file, 400, 400, 0.7);
+      const compressedBase64 = await compressImage(file, 300, 300, 0.6);
       
       const updatedUser = { ...currentUser, avatar: compressedBase64 };
       await setDoc(doc(db, 'users', currentUser.id), updatedUser);
+
+      if (currentUser?.accessLevel === 'Fiscal de Campo' && currentUser?.inspectorId) {
+        try {
+          const inspectorRef = doc(db, 'fieldInspectors', currentUser.inspectorId);
+          await updateDoc(inspectorRef, { photoUrl: compressedBase64 });
+        } catch (fiErr) {
+          console.error('Error updating photoUrl on fieldInspectors doc:', fiErr);
+        }
+      }
+
       setCurrentUser(updatedUser);
+      localStorage.setItem('fiscal_profile', JSON.stringify(updatedUser));
       showNotification('Foto de perfil atualizada!');
     } catch (error) {
       console.error('Error updating avatar:', error);
@@ -5741,7 +5773,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen bg-slate-50 dark:bg-slate-950 overflow-hidden transition-colors duration-300">
+    <div className="flex bg-slate-50 dark:bg-slate-950 overflow-hidden transition-colors duration-300" style={{ height: `${100 / (systemZoom / 100)}vh` }}>
       {quotaExceeded && (
         <div className="fixed top-0 left-0 right-0 z-[200] bg-amber-500 text-slate-900 px-4 py-3 flex items-center justify-between shadow-2xl border-b border-amber-600/20 backdrop-blur-md">
           <div className="flex items-center gap-3">
@@ -6322,28 +6354,34 @@ export default function App() {
                   </div>
 
                   {/* Budget Spent per Client Chart */}
-                  <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                    <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
+                  <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                    <h3 className="text-lg font-bold mb-6 flex items-center gap-2 dark:text-white">
                       <DollarSign size={20} className="text-axia-accent" />
                       Orçamento Total por Cliente (R$)
                     </h3>
                     <div className="h-[300px] w-full">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={budgetByClientData} layout="vertical" margin={{ left: 40, right: 40 }}>
-                          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={isDarkMode ? "#1e293b" : "#f1f5f9"} />
                           <XAxis type="number" hide />
                           <YAxis 
                             dataKey="name" 
                             type="category" 
                             axisLine={false} 
                             tickLine={false} 
-                            tick={{ fontSize: 12, fontWeight: 600, fill: '#64748b' }}
+                            tick={{ fontSize: 12, fontWeight: 600, fill: isDarkMode ? '#94a3b8' : '#64748b' }}
                             width={100}
                           />
                           <Tooltip 
-                            cursor={{ fill: '#f8fafc' }}
+                            cursor={{ fill: isDarkMode ? '#1e293b' : '#f8fafc' }}
                             formatter={(value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)}
-                            contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                            contentStyle={{ 
+                              borderRadius: '16px', 
+                              border: 'none', 
+                              backgroundColor: isDarkMode ? '#0f172a' : '#ffffff',
+                              color: isDarkMode ? '#ffffff' : '#0f172a',
+                              boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' 
+                            }}
                           />
                           <Bar dataKey="value" radius={[0, 10, 10, 0]} barSize={30}>
                             {budgetByClientData.map((entry, index) => (
@@ -9385,7 +9423,7 @@ export default function App() {
                             laborCount: '',
                             equipmentsActive: '',
                             occurrences: '',
-                            inspectorId: currentUser?.accessLevel === 'Fiscal de Campo' ? currentUser.id : '',
+                            inspectorId: currentUser?.accessLevel === 'Fiscal de Campo' ? (currentUser.inspectorId || currentUser.id) : '',
                             plannedProgress: 0,
                             executedProgress: 0,
                             activityPeriod: 'Integral',
@@ -9464,7 +9502,7 @@ export default function App() {
                                 laborCount: '',
                                 equipmentsActive: '',
                                 occurrences: '',
-                                inspectorId: currentUser?.accessLevel === 'Fiscal de Campo' ? currentUser.id : '',
+                                inspectorId: currentUser?.accessLevel === 'Fiscal de Campo' ? (currentUser.inspectorId || currentUser.id) : '',
                                 plannedProgress: 0,
                                 executedProgress: 0,
                                 activityPeriod: 'Integral',
@@ -10270,6 +10308,28 @@ export default function App() {
                                         <div className="w-3 h-1 rounded-full" style={{ backgroundColor: palette.accent }} />
                                       </div>
                                     </div>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="space-y-4 pt-6 border-t border-slate-100 dark:border-slate-800">
+                              <div>
+                                <p className="font-bold text-slate-700 dark:text-slate-200">Zoom do Sistema</p>
+                                <p className="text-xs text-slate-500 dark:text-slate-400">Ajuste o zoom geral para melhor legibilidade. Por padrão, reduzimos em 25% (para 75%) para permitir uma visualização mais ampla e organizada das informações.</p>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {[75, 80, 85, 90, 100, 110, 120].map((zoomOption) => (
+                                  <button
+                                    key={zoomOption}
+                                    onClick={() => setSystemZoom(zoomOption)}
+                                    className={`px-4 py-2.5 rounded-2xl text-xs font-bold border-2 transition-all ${
+                                      systemZoom === zoomOption
+                                        ? 'border-axia-primary bg-axia-primary/10 text-axia-primary shadow-sm scale-102'
+                                        : 'border-slate-100 dark:border-slate-800 hover:border-slate-200 dark:hover:border-slate-700 bg-slate-50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-400'
+                                    }`}
+                                  >
+                                    {zoomOption === 75 ? '75% (Ideal / Reduzido)' : `${zoomOption}%`}
                                   </button>
                                 ))}
                               </div>
@@ -12854,6 +12914,13 @@ function LoginPage({ onLogin, onRegister }: {
   const [accessLevel, setAccessLevel] = useState('Usuário Padrão');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [systemZoom] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('systemZoom');
+      return saved ? parseInt(saved, 10) : 75;
+    }
+    return 75;
+  });
 
   const handleForgotPassword = async () => {
     if (!email) {
@@ -12942,24 +13009,26 @@ function LoginPage({ onLogin, onRegister }: {
           name: docData.name,
           email: cleanTrimmedEmail,
           role: 'Fiscal de Campo',
-          avatar: `https://picsum.photos/seed/${docData.name}/200/200`,
+          avatar: docData.photoUrl || `https://picsum.photos/seed/${docData.name}/200/200`,
           phone: docData.phone || '',
           accessLevel: 'Fiscal de Campo',
           projectId: docData.projectId || '',
-          projectName: docData.projectName || ''
+          projectName: docData.projectName || '',
+          inspectorId: docData.id || ''
         };
         await setDoc(userDocRef, userProfileData);
         
         const userProfile: UserProfile = {
-          id: docData.id || authUid,
+          id: authUid,
           name: docData.name,
           email: docData.email || cleanTrimmedEmail,
           role: 'Fiscal de Campo',
-          avatar: `https://picsum.photos/seed/${docData.name}/200/200`,
+          avatar: docData.photoUrl || `https://picsum.photos/seed/${docData.name}/200/200`,
           phone: decryptString(docData.phone || ''),
           accessLevel: 'Fiscal de Campo',
           projectId: docData.projectId || '',
-          projectName: docData.projectName || ''
+          projectName: docData.projectName || '',
+          inspectorId: docData.id || ''
         };
         
         localStorage.setItem('fiscal_profile', JSON.stringify(userProfile));
@@ -13005,24 +13074,26 @@ function LoginPage({ onLogin, onRegister }: {
               name: docData.name,
               email: cleanTrimmedEmail,
               role: 'Fiscal de Campo',
-              avatar: `https://picsum.photos/seed/${docData.name}/200/200`,
+              avatar: docData.photoUrl || `https://picsum.photos/seed/${docData.name}/200/200`,
               phone: docData.phone || '',
               accessLevel: 'Fiscal de Campo',
               projectId: docData.projectId || '',
-              projectName: docData.projectName || ''
+              projectName: docData.projectName || '',
+              inspectorId: docData.id || ''
             };
             await setDoc(userDocRef, userProfileData);
 
             const userProfile: UserProfile = {
-              id: docData.id || authUid,
+              id: authUid,
               name: docData.name,
               email: docData.email || cleanTrimmedEmail,
               role: 'Fiscal de Campo',
-              avatar: `https://picsum.photos/seed/${docData.name}/200/200`,
+              avatar: docData.photoUrl || `https://picsum.photos/seed/${docData.name}/200/200`,
               phone: decryptString(docData.phone || ''),
               accessLevel: 'Fiscal de Campo',
               projectId: docData.projectId || '',
-              projectName: docData.projectName || ''
+              projectName: docData.projectName || '',
+              inspectorId: docData.id || ''
             };
 
             localStorage.setItem('fiscal_profile', JSON.stringify(userProfile));
@@ -13106,7 +13177,7 @@ function LoginPage({ onLogin, onRegister }: {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-4 font-sans transition-colors duration-300">
+    <div className="bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-4 font-sans transition-colors duration-300" style={{ minHeight: `${100 / (systemZoom / 100)}vh` }}>
       {/* Quota Banner duplicated here for visibility before login */}
       {localStorage.getItem('firestore_quota_extrapolated') === 'true' && (
         <div className="fixed top-0 left-0 right-0 z-[200] bg-red-600 text-white px-4 py-2 text-center text-xs font-bold animate-pulse">

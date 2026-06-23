@@ -106,6 +106,7 @@ export interface UserProfile {
   isDarkMode?: boolean;
   projectId?: string;
   projectName?: string;
+  inspectorId?: string;
 }
 
 export interface Attachment {
@@ -175,6 +176,7 @@ export interface FieldInspector {
   creatorName?: string;
   projectId?: string;
   projectName?: string;
+  photoUrl?: string;
 }
 
 export interface DailyWorkReport {
