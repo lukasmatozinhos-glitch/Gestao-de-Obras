@@ -59,7 +59,7 @@ import autoTable from 'jspdf-autotable';
 import { db, auth, getStorageInstance } from './firebase';
 import { initializeApp, deleteApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import firebaseConfig from '../firebase-applet-config.json';
+import { firebaseConfig, isQuotaBypassed, isQuotaError } from './utils/firebaseConfig';
 import { encryptString, decryptString } from './utils/crypto';
 import { microsoftIntegration } from './utils/microsoftIntegration';
 import { 
@@ -245,7 +245,11 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   
   // If it's a quota error, we don't want to crash the whole app with an uncaught exception
   // as we already handle the UI feedback via global state/localStorage
-  if (errInfo.error.includes('Quota exceeded')) {
+  if (isQuotaError(error)) {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('firestore_quota_extrapolated', 'true');
+      window.dispatchEvent(new Event('firestore-quota-exceeded'));
+    }
     return;
   }
   
@@ -271,6 +275,12 @@ export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [quotaExceeded, setQuotaExceeded] = useState(() => {
+    if (isQuotaBypassed()) {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('firestore_quota_extrapolated');
+      }
+      return false;
+    }
     if (typeof window !== 'undefined') {
       return localStorage.getItem('firestore_quota_extrapolated') === 'true';
     }
@@ -311,6 +321,22 @@ export default function App() {
   };
 
   const showAllMonths = () => setHiddenMonths([]);
+
+  useEffect(() => {
+    const handleQuotaExceededEvent = () => {
+      if (!isQuotaBypassed()) {
+        setQuotaExceeded(true);
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('firestore-quota-exceeded', handleQuotaExceededEvent);
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('firestore-quota-exceeded', handleQuotaExceededEvent);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const checkMobile = () => {
@@ -411,6 +437,81 @@ export default function App() {
     if (isManagerGlobal) return rawDailyWorkReports;
     return rawDailyWorkReports.filter(r => r.createdBy === currentUser?.id || projects.some(p => p.id === r.projectId));
   }, [rawDailyWorkReports, currentUser, isManagerGlobal, projects]);
+
+  // Carregar e persistir dados offline/mockados localmente se a cota do Firestore for excedida ou estivermos em Modo de Demonstração
+  useEffect(() => {
+    if (quotaExceeded) {
+      try {
+        const localProjects = localStorage.getItem('offline_projects');
+        if (localProjects) {
+          setProjects(JSON.parse(localProjects));
+        } else {
+          setProjects(MOCK_PROJECTS);
+        }
+
+        const localReports = localStorage.getItem('offline_reports');
+        if (localReports) {
+          setReports(JSON.parse(localReports));
+        } else {
+          setReports(MOCK_REPORTS);
+        }
+
+        const localMeasurements = localStorage.getItem('offline_measurements');
+        if (localMeasurements) {
+          setMeasurements(JSON.parse(localMeasurements));
+        } else {
+          setMeasurements(MOCK_MEASUREMENTS);
+        }
+
+        const localAttachments = localStorage.getItem('offline_attachments');
+        if (localAttachments) {
+          setAttachments(JSON.parse(localAttachments));
+        } else {
+          setAttachments(MOCK_ATTACHMENTS);
+        }
+
+        const localStatusUpdates = localStorage.getItem('offline_status_updates');
+        if (localStatusUpdates) {
+          setStatusUpdates(JSON.parse(localStatusUpdates));
+        } else {
+          setStatusUpdates(MOCK_STATUS_UPDATES);
+        }
+      } catch (err) {
+        console.error('Erro ao inicializar dados offline localmente:', err);
+      }
+    }
+  }, [quotaExceeded]);
+
+  // Persistir dados localmente ao alterar estados no modo offline
+  useEffect(() => {
+    if (quotaExceeded && projects.length > 0) {
+      localStorage.setItem('offline_projects', JSON.stringify(projects));
+    }
+  }, [quotaExceeded, projects]);
+
+  useEffect(() => {
+    if (quotaExceeded && rawReports.length > 0) {
+      localStorage.setItem('offline_reports', JSON.stringify(rawReports));
+    }
+  }, [quotaExceeded, rawReports]);
+
+  useEffect(() => {
+    if (quotaExceeded && rawMeasurements.length > 0) {
+      localStorage.setItem('offline_measurements', JSON.stringify(rawMeasurements));
+    }
+  }, [quotaExceeded, rawMeasurements]);
+
+  useEffect(() => {
+    if (quotaExceeded && rawAttachments.length > 0) {
+      localStorage.setItem('offline_attachments', JSON.stringify(rawAttachments));
+    }
+  }, [quotaExceeded, rawAttachments]);
+
+  useEffect(() => {
+    if (quotaExceeded && rawStatusUpdates.length > 0) {
+      localStorage.setItem('offline_status_updates', JSON.stringify(rawStatusUpdates));
+    }
+  }, [quotaExceeded, rawStatusUpdates]);
 
   const [activeFieldInspectionSubTab, setActiveFieldInspectionSubTab] = useState<'reports' | 'inspectors'>('reports');
   const [selectedRdoProjectId, setSelectedRdoProjectId] = useState<string>('');
@@ -3196,6 +3297,17 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         if (quotaExceeded) {
+          const fallbackUser: UserProfile = {
+            id: user.uid,
+            name: user.displayName || user.email?.split('@')[0] || 'Usuário Local',
+            email: user.email || '',
+            role: 'Administrador de Sistema',
+            avatar: `https://picsum.photos/seed/${user.uid}/200/200`,
+            phone: '',
+            accessLevel: 'Administrador de Sistema'
+          };
+          setCurrentUser(fallbackUser);
+          setIsLoggedIn(true);
           setIsAuthReady(true);
           return;
         }
@@ -3230,9 +3342,20 @@ export default function App() {
             setIsLoggedIn(false);
           }
         } catch (error) {
-          if (error instanceof Error && error.message.includes('Quota exceeded')) {
+          if (isQuotaError(error)) {
             localStorage.setItem('firestore_quota_extrapolated', 'true');
             setQuotaExceeded(true);
+            const fallbackUser: UserProfile = {
+              id: user.uid,
+              name: user.displayName || user.email?.split('@')[0] || 'Usuário Local',
+              email: user.email || '',
+              role: 'Administrador de Sistema',
+              avatar: `https://picsum.photos/seed/${user.uid}/200/200`,
+              phone: '',
+              accessLevel: 'Administrador de Sistema'
+            };
+            setCurrentUser(fallbackUser);
+            setIsLoggedIn(true);
           }
           handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
         } finally {
@@ -3849,6 +3972,65 @@ export default function App() {
   const handleAddProject = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    if (quotaExceeded) {
+      if (editingProject) {
+        const updated = {
+          ...editingProject,
+          ...newProject,
+          budget: Number(newProject.budget),
+          progress: Number(newProject.progress),
+          fieldInspectorId: newProject.fieldInspectorId || null,
+          fieldInspectorName: newProject.fieldInspectorName || null
+        };
+        setProjects(prev => prev.map(p => p.id === editingProject.id ? updated : p));
+        showNotification('Projeto atualizado localmente com sucesso!');
+        setEditingProject(null);
+      } else {
+        const projectId = `proj-${Date.now()}`;
+        const project: Project = {
+          id: projectId,
+          name: newProject.name,
+          client: newProject.client,
+          contractNumber: newProject.contractNumber,
+          description: newProject.description,
+          status: newProject.status as any,
+          progress: Number(newProject.progress) || 0,
+          startDate: newProject.startDate,
+          endDate: newProject.endDate,
+          budget: Number(newProject.budget),
+          spent: 0,
+          location: newProject.location,
+          executingCompany: newProject.executingCompany,
+          responsible: newProject.responsible,
+          responsibleId: newProject.responsibleId,
+          image: `https://picsum.photos/seed/${newProject.name}/800/600`,
+          createdBy: currentUser?.id || '',
+          creatorName: currentUser?.name || 'Sistema'
+        };
+        setProjects(prev => [...prev, project]);
+        showNotification('Novo projeto cadastrado localmente com sucesso!');
+      }
+      setShowAddProject(false);
+      setNewProject({
+        name: '',
+        client: '',
+        contractNumber: '',
+        description: '',
+        budget: '',
+        location: '',
+        startDate: '',
+        endDate: '',
+        executingCompany: '',
+        responsible: '',
+        responsibleId: '',
+        status: 'not-started',
+        progress: 0,
+        fieldInspectorId: '',
+        fieldInspectorName: ''
+      });
+      return;
+    }
+
     try {
       if (editingProject) {
         const projectRef = doc(db, 'projects', editingProject.id);
@@ -3926,6 +4108,16 @@ export default function App() {
   };
 
   const handleDeleteProject = async (id: string) => {
+    if (quotaExceeded) {
+      setProjects(prev => prev.filter(p => p.id !== id));
+      if (viewingProject?.id === id) {
+        setViewingProject(null);
+      }
+      setProjectToDelete(null);
+      showNotification('Obra removida localmente com sucesso.');
+      return;
+    }
+
     try {
       await deleteDoc(doc(db, 'projects', id));
       
@@ -5769,11 +5961,27 @@ export default function App() {
       onRegister={() => {
         showNotification('Conta criada com sucesso! Agora você pode fazer login.');
       }}
+      onBypassDemo={() => {
+        localStorage.setItem('firestore_quota_extrapolated', 'true');
+        setQuotaExceeded(true);
+        const demoUser: UserProfile = {
+          id: 'axia_demo_user',
+          name: 'Demonstração Axia',
+          email: 'demo@axiaenergia.com.br',
+          role: 'Administrador de Sistema',
+          avatar: 'https://picsum.photos/seed/axia_demo/200/200',
+          phone: '(11) 99999-9999',
+          accessLevel: 'Administrador de Sistema'
+        };
+        setCurrentUser(demoUser);
+        setIsLoggedIn(true);
+        showNotification('Modo de Demonstração Local/Offline ativado com sucesso.');
+      }}
     />;
   }
 
   return (
-    <div className="flex bg-slate-50 dark:bg-slate-950 overflow-hidden transition-colors duration-300" style={{ height: `${100 / (systemZoom / 100)}vh` }}>
+    <div className={`flex bg-slate-50 dark:bg-slate-950 overflow-hidden transition-colors duration-300 ${quotaExceeded ? 'pt-[68px]' : ''}`} style={{ height: `${100 / (systemZoom / 100)}vh` }}>
       {quotaExceeded && (
         <div className="fixed top-0 left-0 right-0 z-[200] bg-amber-500 text-slate-900 px-4 py-3 flex items-center justify-between shadow-2xl border-b border-amber-600/20 backdrop-blur-md">
           <div className="flex items-center gap-3">
@@ -12901,9 +13109,10 @@ function NavItem({ icon, label, active, onClick, collapsed }: {
   );
 }
 
-function LoginPage({ onLogin, onRegister }: { 
+function LoginPage({ onLogin, onRegister, onBypassDemo }: { 
   onLogin: (user: UserProfile) => void;
   onRegister: (user: UserProfile) => void;
+  onBypassDemo: () => void;
 }) {
   const [mode, setMode] = useState<'login' | 'register' | 'fiscal_campo'>('login');
   const [email, setEmail] = useState('');
@@ -12974,18 +13183,39 @@ function LoginPage({ onLogin, onRegister }: {
         const userCredential = await signInWithEmailAndPassword(auth, trimmedEmail, password);
         const authUid = userCredential.user.uid;
 
-        let querySnapshot = await getDocs(query(collection(db, 'fieldInspectors'), where('email', '==', cleanTrimmedEmail)));
-        let docData = !querySnapshot.empty ? querySnapshot.docs[0].data() : null;
+        let docData: any = null;
+        try {
+          let querySnapshot = await getDocs(query(collection(db, 'fieldInspectors'), where('email', '==', cleanTrimmedEmail)));
+          docData = !querySnapshot.empty ? querySnapshot.docs[0].data() : null;
 
-        if (!docData) {
-          // Fallback tolerante a maiúsculas/minúsculas e espaços em branco
-          const allInspectorsSnap = await getDocs(collection(db, 'fieldInspectors'));
-          const matchedDoc = allInspectorsSnap.docs.find(d => {
-            const infEmail = (d.data().email || '').trim().toLowerCase();
-            return infEmail === cleanTrimmedEmail;
-          });
-          if (matchedDoc) {
-            docData = matchedDoc.data();
+          if (!docData) {
+            // Fallback tolerante a maiúsculas/minúsculas e espaços em branco
+            const allInspectorsSnap = await getDocs(collection(db, 'fieldInspectors'));
+            const matchedDoc = allInspectorsSnap.docs.find(d => {
+              const infEmail = (d.data().email || '').trim().toLowerCase();
+              return infEmail === cleanTrimmedEmail;
+            });
+            if (matchedDoc) {
+              docData = matchedDoc.data();
+            }
+          }
+        } catch (fsErr) {
+          if (isQuotaError(fsErr)) {
+            // Setup robust offline/quota-exceeded fallback info
+            docData = {
+              id: 'fallback_' + authUid,
+              name: trimmedEmail.split('@')[0],
+              email: cleanTrimmedEmail,
+              projectId: '',
+              projectName: '',
+              phone: ''
+            };
+            localStorage.setItem('firestore_quota_extrapolated', 'true');
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new Event('firestore-quota-exceeded'));
+            }
+          } else {
+            throw fsErr;
           }
         }
         
@@ -12996,28 +13226,14 @@ function LoginPage({ onLogin, onRegister }: {
           } catch (signOutErr) {
             console.warn('Error signing out:', signOutErr);
           }
-          await createAuditLog(undefined, trimmedEmail, 'LOGIN', 'UserSession', 'none', 'FAILURE', 'E-mail de fiscal de campo não cadastrado.');
+          try {
+            await createAuditLog(undefined, trimmedEmail, 'LOGIN', 'UserSession', 'none', 'FAILURE', 'E-mail de fiscal de campo não cadastrado.');
+          } catch (e) {}
           setError('Este e-mail de Fiscal de Campo não foi localizado no cadastro como fiscal ativo. Por favor, solicite ao seu Gestor para cadastrá-lo.');
           setIsLoading(false);
           return;
         }
 
-        // Ensure the Firebase Auth user has a corresponding document in Firestore's users collection with the correct projectId to satisfy security rules
-        const userDocRef = doc(db, 'users', authUid);
-        const userProfileData = {
-          id: authUid,
-          name: docData.name,
-          email: cleanTrimmedEmail,
-          role: 'Fiscal de Campo',
-          avatar: docData.photoUrl || `https://picsum.photos/seed/${docData.name}/200/200`,
-          phone: docData.phone || '',
-          accessLevel: 'Fiscal de Campo',
-          projectId: docData.projectId || '',
-          projectName: docData.projectName || '',
-          inspectorId: docData.id || ''
-        };
-        await setDoc(userDocRef, userProfileData);
-        
         const userProfile: UserProfile = {
           id: authUid,
           name: docData.name,
@@ -13030,59 +13246,123 @@ function LoginPage({ onLogin, onRegister }: {
           projectName: docData.projectName || '',
           inspectorId: docData.id || ''
         };
+
+        try {
+          // Ensure the Firebase Auth user has a corresponding document in Firestore's users collection with the correct projectId to satisfy security rules
+          const userDocRef = doc(db, 'users', authUid);
+          const userProfileData = {
+            id: authUid,
+            name: docData.name,
+            email: cleanTrimmedEmail,
+            role: 'Fiscal de Campo',
+            avatar: docData.photoUrl || `https://picsum.photos/seed/${docData.name}/200/200`,
+            phone: docData.phone || '',
+            accessLevel: 'Fiscal de Campo',
+            projectId: docData.projectId || '',
+            projectName: docData.projectName || '',
+            inspectorId: docData.id || ''
+          };
+          await setDoc(userDocRef, userProfileData);
+        } catch (fsErr) {
+          if (isQuotaError(fsErr)) {
+            localStorage.setItem('firestore_quota_extrapolated', 'true');
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new Event('firestore-quota-exceeded'));
+            }
+          } else {
+            throw fsErr;
+          }
+        }
         
         localStorage.setItem('fiscal_profile', JSON.stringify(userProfile));
         localStorage.removeItem('login_failure_count');
         localStorage.removeItem('login_lock_until');
-        await createAuditLog(userProfile.id, userProfile.name, 'LOGIN', 'UserSession', userProfile.id, 'SUCCESS', 'Acesso de Fiscal de Campo concedido com credenciais próprias.');
+        try {
+          await createAuditLog(userProfile.id, userProfile.name, 'LOGIN', 'UserSession', userProfile.id, 'SUCCESS', 'Acesso de Fiscal de Campo concedido com credenciais próprias.');
+        } catch (e) {}
         onLogin(userProfile);
       } else if (mode === 'login') {
         const userCredential = await signInWithEmailAndPassword(auth, trimmedEmail, password);
         const authUid = userCredential.user.uid;
-        const userDoc = await getDoc(doc(db, 'users', authUid));
-        
-        if (userDoc.exists()) {
-          const profile = userDoc.data() as UserProfile;
-          if (profile.phone) {
-            profile.phone = decryptString(profile.phone);
+        let profile: UserProfile | null = null;
+        let quotaErrorDuringLogin = false;
+
+        try {
+          const userDoc = await getDoc(doc(db, 'users', authUid));
+          if (userDoc.exists()) {
+            profile = userDoc.data() as UserProfile;
+            if (profile.phone) {
+              profile.phone = decryptString(profile.phone);
+            }
           }
+        } catch (fsErr) {
+          if (isQuotaError(fsErr)) {
+            quotaErrorDuringLogin = true;
+            profile = {
+              id: authUid,
+              name: trimmedEmail.split('@')[0],
+              email: trimmedEmail,
+              role: 'Administrador de Sistema',
+              avatar: `https://picsum.photos/seed/${trimmedEmail}/200/200`,
+              phone: '',
+              accessLevel: 'Administrador de Sistema'
+            };
+          } else {
+            throw fsErr;
+          }
+        }
+        
+        if (profile) {
           localStorage.removeItem('login_failure_count');
           localStorage.removeItem('login_lock_until');
-          await createAuditLog(profile.id, profile.name, 'LOGIN', 'UserSession', profile.id, 'SUCCESS', 'Autenticação de administrador/gestor bem-sucedida.');
+          try {
+            await createAuditLog(profile.id, profile.name, 'LOGIN', 'UserSession', profile.id, 'SUCCESS', 'Autenticação de administrador/gestor bem-sucedida.');
+          } catch (e) {}
+          if (quotaErrorDuringLogin) {
+            localStorage.setItem('firestore_quota_extrapolated', 'true');
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new Event('firestore-quota-exceeded'));
+            }
+          }
           onLogin(profile);
         } else {
-          // Check if this user is a Field Inspector (Fiscal de Campo) is logging in on the Colaborador tab
-          let querySnapshot = await getDocs(query(collection(db, 'fieldInspectors'), where('email', '==', cleanTrimmedEmail)));
-          let docData = !querySnapshot.empty ? querySnapshot.docs[0].data() : null;
+          // Check if this user is a Field Inspector (Fiscal de Campo) logging in on the Admin tab
+          let docData: any = null;
+          try {
+            let querySnapshot = await getDocs(query(collection(db, 'fieldInspectors'), where('email', '==', cleanTrimmedEmail)));
+            docData = !querySnapshot.empty ? querySnapshot.docs[0].data() : null;
 
-          if (!docData) {
-            const allInspectorsSnap = await getDocs(collection(db, 'fieldInspectors'));
-            const matchedDoc = allInspectorsSnap.docs.find(d => {
-              const infEmail = (d.data().email || '').trim().toLowerCase();
-              return infEmail === cleanTrimmedEmail;
-            });
-            if (matchedDoc) {
-              docData = matchedDoc.data();
+            if (!docData) {
+              const allInspectorsSnap = await getDocs(collection(db, 'fieldInspectors'));
+              const matchedDoc = allInspectorsSnap.docs.find(d => {
+                const infEmail = (d.data().email || '').trim().toLowerCase();
+                return infEmail === cleanTrimmedEmail;
+              });
+              if (matchedDoc) {
+                docData = matchedDoc.data();
+              }
+            }
+          } catch (fsErr) {
+            if (isQuotaError(fsErr)) {
+              docData = {
+                id: 'fallback_' + authUid,
+                name: trimmedEmail.split('@')[0],
+                email: cleanTrimmedEmail,
+                projectId: '',
+                projectName: '',
+                phone: ''
+              };
+              localStorage.setItem('firestore_quota_extrapolated', 'true');
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new Event('firestore-quota-exceeded'));
+              }
+            } else {
+              throw fsErr;
             }
           }
 
           if (docData) {
             // Yes, they are a Field Inspector! Auto-create their user profile in Firestore's users collection and log them in
-            const userDocRef = doc(db, 'users', authUid);
-            const userProfileData = {
-              id: authUid,
-              name: docData.name,
-              email: cleanTrimmedEmail,
-              role: 'Fiscal de Campo',
-              avatar: docData.photoUrl || `https://picsum.photos/seed/${docData.name}/200/200`,
-              phone: docData.phone || '',
-              accessLevel: 'Fiscal de Campo',
-              projectId: docData.projectId || '',
-              projectName: docData.projectName || '',
-              inspectorId: docData.id || ''
-            };
-            await setDoc(userDocRef, userProfileData);
-
             const userProfile: UserProfile = {
               id: authUid,
               name: docData.name,
@@ -13096,15 +13376,45 @@ function LoginPage({ onLogin, onRegister }: {
               inspectorId: docData.id || ''
             };
 
+            try {
+              const userDocRef = doc(db, 'users', authUid);
+              const userProfileData = {
+                id: authUid,
+                name: docData.name,
+                email: cleanTrimmedEmail,
+                role: 'Fiscal de Campo',
+                avatar: docData.photoUrl || `https://picsum.photos/seed/${docData.name}/200/200`,
+                phone: docData.phone || '',
+                accessLevel: 'Fiscal de Campo',
+                projectId: docData.projectId || '',
+                projectName: docData.projectName || '',
+                inspectorId: docData.id || ''
+              };
+              await setDoc(userDocRef, userProfileData);
+            } catch (fsErr) {
+              if (isQuotaError(fsErr)) {
+                localStorage.setItem('firestore_quota_extrapolated', 'true');
+                if (typeof window !== 'undefined') {
+                  window.dispatchEvent(new Event('firestore-quota-exceeded'));
+                }
+              } else {
+                throw fsErr;
+              }
+            }
+
             localStorage.setItem('fiscal_profile', JSON.stringify(userProfile));
             localStorage.removeItem('login_failure_count');
             localStorage.removeItem('login_lock_until');
-            await createAuditLog(userProfile.id, userProfile.name, 'LOGIN', 'UserSession', userProfile.id, 'SUCCESS', 'Acesso de Fiscal de Campo concedido via aba Colaborador.');
+            try {
+              await createAuditLog(userProfile.id, userProfile.name, 'LOGIN', 'UserSession', userProfile.id, 'SUCCESS', 'Acesso de Fiscal de Campo concedido via aba Colaborador.');
+            } catch (e) {}
             onLogin(userProfile);
           } else {
             setError('Perfil do usuário não encontrado.');
-            await createAuditLog(authUid, trimmedEmail, 'LOGIN', 'UserSession', authUid, 'FAILURE', 'Cadastro correspondente do Firestore inexistente.');
-            await signOut(auth);
+            try {
+              await createAuditLog(authUid, trimmedEmail, 'LOGIN', 'UserSession', authUid, 'FAILURE', 'Cadastro correspondente do Firestore inexistente.');
+              await signOut(auth);
+            } catch (e) {}
           }
         }
       } else {
@@ -13179,7 +13489,7 @@ function LoginPage({ onLogin, onRegister }: {
   return (
     <div className="bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-4 font-sans transition-colors duration-300" style={{ minHeight: `${100 / (systemZoom / 100)}vh` }}>
       {/* Quota Banner duplicated here for visibility before login */}
-      {localStorage.getItem('firestore_quota_extrapolated') === 'true' && (
+      {localStorage.getItem('firestore_quota_extrapolated') === 'true' && !isQuotaBypassed() && (
         <div className="fixed top-0 left-0 right-0 z-[200] bg-red-600 text-white px-4 py-2 text-center text-xs font-bold animate-pulse">
           Limite de dados gratuito do Google atingido hoje. O sistema voltará ao normal em breve ou após o reset diário.
         </div>
@@ -13234,9 +13544,21 @@ function LoginPage({ onLogin, onRegister }: {
             </div>
 
             {error && (
-              <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 rounded-2xl flex items-center gap-3 text-red-600 dark:text-red-400 text-sm font-medium">
-                <AlertCircle size={18} />
-                {error}
+              <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 rounded-2xl flex flex-col gap-3 text-red-600 dark:text-red-400 text-sm font-medium">
+                <div className="flex items-center gap-3">
+                  <AlertCircle size={18} className="shrink-0" />
+                  <span>{error}</span>
+                </div>
+                {(error.toLowerCase().includes('limite') || error.toLowerCase().includes('quota') || error.toLowerCase().includes('exceeded') || localStorage.getItem('firestore_quota_extrapolated') === 'true') && (
+                  <button
+                    type="button"
+                    onClick={onBypassDemo}
+                    className="mt-2 w-full bg-red-600 hover:bg-red-700 text-white py-2.5 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 shadow-md cursor-pointer"
+                  >
+                    <ShieldCheck size={14} />
+                    Acessar em Modo de Demonstração (Local/Offline)
+                  </button>
+                )}
               </div>
             )}
 
@@ -13372,7 +13694,7 @@ function LoginPage({ onLogin, onRegister }: {
             </form>
           </div>
 
-          <div className="bg-slate-50 dark:bg-slate-800/50 p-6 border-t border-slate-100 dark:border-slate-800 text-center">
+          <div className="bg-slate-50 dark:bg-slate-800/50 p-6 border-t border-slate-100 dark:border-slate-800 text-center flex flex-col gap-3 items-center justify-center">
             <p className="text-sm text-slate-500 dark:text-slate-400">
               {mode === 'login' ? (
                 <>Não tem acesso? <button type="button" onClick={() => setMode('register')} className="text-axia-primary font-bold hover:underline">Solicite aqui</button></>
@@ -13382,6 +13704,16 @@ function LoginPage({ onLogin, onRegister }: {
                 <>Já possui conta? <button type="button" onClick={() => setMode('login')} className="text-axia-primary font-bold hover:underline">Faça login</button></>
               )}
             </p>
+            <div className="text-xs text-slate-400 dark:text-slate-500 flex items-center justify-center gap-1.5 flex-wrap border-t border-slate-100 dark:border-slate-800 pt-3 w-full">
+              <span>Problemas de conexão ou limite de cota?</span>
+              <button 
+                type="button" 
+                onClick={onBypassDemo} 
+                className="text-axia-primary hover:underline font-bold cursor-pointer"
+              >
+                Ativar Modo Offline / Demo
+              </button>
+            </div>
           </div>
         </motion.div>
         

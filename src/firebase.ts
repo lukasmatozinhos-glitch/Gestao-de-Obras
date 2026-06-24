@@ -2,11 +2,18 @@ import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage, FirebaseStorage } from 'firebase/storage';
-import firebaseConfig from '../firebase-applet-config.json';
+import { firebaseConfig } from './utils/firebaseConfig';
+
+console.log("Firebase Init config:", {
+  projectId: firebaseConfig.projectId,
+  authDomain: firebaseConfig.authDomain,
+  hasApiKey: !!firebaseConfig.apiKey,
+  databaseId: firebaseConfig.firestoreDatabaseId || '(default)'
+});
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || undefined);
 
 let storageInstance: FirebaseStorage | null = null;
 
